@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import { useLoja } from '@/contexts/LojaContext';
+import { formatCurrency } from '@/lib/utils';
 
 export interface Notificacao {
     id: string;
@@ -83,23 +84,31 @@ export function NotificacoesProvider({ children }: { children: React.ReactNode }
 
             const notifs: Notificacao[] = [];
             contas?.forEach((conta) => {
+                // Validação de campos obrigatórios
+                if (!conta.data_vencimento || conta.valor == null) {
+                    return; // Skip conta inválida
+                }
+
                 const vencimento = new Date(conta.data_vencimento);
                 const diffDias = Math.ceil((vencimento.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24));
                 let notif: Notificacao | null = null;
                 let id = '';
 
+                // Usar formatCurrency seguro
+                const valorFormatado = formatCurrency(conta.valor);
+
                 if (diffDias < 0) {
                     id = `atrasada-${conta.id}`;
                     notif = {
                         id, tipo: 'erro', titulo: 'Pagamento Atrasado', tempo: `${Math.abs(diffDias)} dias atrás`,
-                        mensagem: `${conta.descricao} - R$ ${conta.valor.toLocaleString('pt-BR')}`,
+                        mensagem: `${conta.descricao || 'Sem descrição'} - R$ ${valorFormatado}`,
                         lida: false, link: '/financeiro'
                     };
                 } else if (diffDias === 0) {
                     id = `hoje-${conta.id}`;
                     notif = {
                         id, tipo: 'alerta', titulo: 'Vence Hoje', tempo: 'Hoje',
-                        mensagem: `${conta.descricao} - R$ ${conta.valor.toLocaleString('pt-BR')}`,
+                        mensagem: `${conta.descricao || 'Sem descrição'} - R$ ${valorFormatado}`,
                         lida: false, link: '/financeiro'
                     };
                 }
