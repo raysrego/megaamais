@@ -198,7 +198,8 @@ export function useCaixa() {
 
     useEffect(() => {
         fetchSessaoAtiva();
-    }, [fetchSessaoAtiva]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     return {
         sessaoAtiva,

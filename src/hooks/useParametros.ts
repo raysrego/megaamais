@@ -58,7 +58,8 @@ export function useParametros() {
 
     useEffect(() => {
         fetchParametros();
-    }, [fetchParametros]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     return {
         parametros,

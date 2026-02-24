@@ -101,7 +101,8 @@ export function useTerminais() {
 
     useEffect(() => {
         fetchTerminais();
-    }, [fetchTerminais]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     return {
         terminais: optimisticTerminais,

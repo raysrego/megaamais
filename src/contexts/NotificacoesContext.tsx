@@ -60,7 +60,6 @@ export function NotificacoesProvider({ children }: { children: React.ReactNode }
 
         const controller = new AbortController();
         abortControllerRef.current = controller;
-        const timeoutId = setTimeout(() => controller.abort(), 15000);
 
         try {
             const hoje = new Date();
@@ -115,7 +114,6 @@ export function NotificacoesProvider({ children }: { children: React.ReactNode }
             if (error.name === 'AbortError') return;
             console.error('[NOTIF] Erro detalhado:', error.message);
         } finally {
-            clearTimeout(timeoutId);
             setLoading(false);
         }
     }, [supabase, lojaAtual?.id, lidasIds, ocultasIds]);
@@ -126,7 +124,8 @@ export function NotificacoesProvider({ children }: { children: React.ReactNode }
         return () => {
             if (abortControllerRef.current) abortControllerRef.current.abort();
         };
-    }, [fetchNotificacoes]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [lojaAtual?.id]);
 
     const marcarTodasComoLidas = useCallback(() => {
         const newLidas = [...new Set([...lidasIds, ...notificacoes.map(n => n.id)])];

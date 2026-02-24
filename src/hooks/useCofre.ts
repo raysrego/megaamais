@@ -145,7 +145,8 @@ export function useCofre() {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [fetchDados, supabase]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     return {
         saldo,

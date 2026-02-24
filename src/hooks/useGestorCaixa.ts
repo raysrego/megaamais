@@ -101,7 +101,8 @@ export function useGestorCaixa() {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [fetchData, supabase]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [lojaAtual]);
 
     return {
         sessoesAtivas,

@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useState, useEffect, useMemo } from 'react';
 import {
@@ -121,7 +121,8 @@ export function VisaoGestor() {
                 setAnosDisponiveis(anos);
             }
         });
-    }, [ano, lojaAtual?.id, fetchTransacoes, fetchAnosDisponiveis]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [ano, lojaAtual?.id]);
 
     // Filtragem Local baseada no Período (Mês ou Ano)
     const transacoesDoPeriodo = useMemo(() => {
