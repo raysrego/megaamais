@@ -36,14 +36,10 @@ export async function middleware(request: NextRequest) {
         }
     )
 
-    console.log(`[MIDDLEWARE] Checking auth for: ${request.nextUrl.pathname}`);
-    const start = Date.now();
     const {
         data: { user },
         error
     } = await supabase.auth.getUser()
-    const end = Date.now();
-    console.log(`[MIDDLEWARE] getUser took ${end - start}ms. User: ${user?.email || 'none'}`);
 
     if (error) {
         console.error('[MIDDLEWARE] Auth error:', error.message);
