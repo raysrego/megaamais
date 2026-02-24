@@ -44,7 +44,7 @@ export function FinancialGrowthChart({ data, type, year, onBarClick, series, sel
 
     return (
         <div className="w-full h-[220px] mt-4 mb-8 select-none" style={{ minHeight: '220px' }}>
-            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+            <ResponsiveContainer width="100%" height="100%">
                 <BarChart
                     data={data}
                     margin={{ top: 5, right: 5, left: -20, bottom: 0 }}
