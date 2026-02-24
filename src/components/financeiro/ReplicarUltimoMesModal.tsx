@@ -113,24 +113,26 @@ export function ReplicarUltimoMesModal({
             // Ajustar datas para o mês atual (mesmo dia, mas mês/ano novos)
             const newTransactions = toCopy.map(orig => {
                 const dia = parseInt(orig.data_vencimento.split('-')[2]);
-                // Criar data no mês atual
-                // Cuidado com dias que não existem (ex: 31 em Fev), o JS ajusta sozinho (vira mar 03 etc),
-                // Mas vamos manter simples: setDate lida com overflow
-                const targetDate = new Date(anoAtual, mesAtual - 1, dia);
+
+                // Validar dia para o mês destino (evitar overflow: 31/02 -> 03/03)
+                const ultimoDiaDoMes = new Date(anoAtual, mesAtual, 0).getDate();
+                const diaValido = Math.min(dia, ultimoDiaDoMes);
+                const targetDate = new Date(anoAtual, mesAtual - 1, diaValido);
 
                 return {
                     tipo: orig.tipo,
                     descricao: orig.descricao,
                     valor: orig.valor,
-                    item: orig.item, // Texto Livre ou Categoria
+                    valor_realizado: orig.valor,
+                    item: orig.item,
                     data_vencimento: targetDate.toISOString().split('T')[0],
-                    status: 'pendente', // Sempre nasce pendente
+                    status: 'pendente',
                     recorrente: orig.recorrente,
                     frequencia: orig.frequencia,
                     loja_id: orig.loja_id,
-                    item_financeiro_id: orig.item_financeiro_id, // Mantém vínculo se tiver
-                    usuario_id: user?.id,
-                    observacoes: `Copiado de ${mesOrigem}`
+                    item_financeiro_id: orig.item_financeiro_id,
+                    created_by: user?.id,
+                    nota: `Replicado de ${mesOrigem}`
                 };
             });
 

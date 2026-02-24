@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import { getFinanceiroAction } from './actions';
+import { somaSegura, agruparPorCategoria } from '@/lib/financial-utils';
 
 export interface TransacaoFinanceira {
     id: number;
@@ -36,26 +37,31 @@ export function useFinanceiro() {
     const [loading, setLoading] = useState(true);
 
     const handleFinanceiroData = useCallback((items: TransacaoFinanceira[], mes: number, ano: number) => {
-        // Calcular Resumo Localmente
+        // Calcular Resumo Localmente com soma segura
         const recs = items.filter(t => t.tipo === 'receita');
         const desps = items.filter(t => t.tipo === 'despesa');
 
-        // Agrupar por item
-        const byCategory = (list: TransacaoFinanceira[]) => {
-            const map = new Map<string, number>();
-            list.forEach(i => {
-                const val = map.get(i.item) || 0;
-                map.set(i.item, val + i.valor);
-            });
-            return Array.from(map.entries()).map(([k, v]) => ({ item: k, total: v }));
-        };
+        // Usar soma segura para evitar erros de ponto flutuante
+        const totalReceitas = somaSegura(recs.map(t => t.valor));
+        const totalDespesas = somaSegura(desps.map(t => t.valor));
+
+        // Agrupar usando função utilitária
+        const detalheReceitas = agruparPorCategoria(recs).map(item => ({
+            item: item.item,
+            total: item.total
+        }));
+
+        const detalheDespesas = agruparPorCategoria(desps).map(item => ({
+            item: item.item,
+            total: item.total
+        }));
 
         setResumo({
             mes: mes === 0 ? `Ano ${ano}` : `${mes}/${ano}`,
-            receitas: recs.reduce((acc, t) => acc + t.valor, 0),
-            despesas: desps.reduce((acc, t) => acc + t.valor, 0),
-            detalheReceitas: byCategory(recs),
-            detalheDespesas: byCategory(desps)
+            receitas: totalReceitas,
+            despesas: totalDespesas,
+            detalheReceitas,
+            detalheDespesas
         });
     }, []);
 
@@ -73,6 +79,7 @@ export function useFinanceiro() {
                 let query = supabase
                     .from('financeiro_contas')
                     .select('*')
+                    .is('deleted_at', null) // ✅ Filtrar soft deletes
                     .order('data_vencimento', { ascending: true });
 
                 // Filtro de Mês/Ano
@@ -87,20 +94,33 @@ export function useFinanceiro() {
                 }
 
                 if (lojaId) query = query.eq('loja_id', lojaId);
-                const { data, error: fbError } = await query;
-                if (fbError) throw fbError;
 
-                const items = data as TransacaoFinanceira[];
+                const { data, error: fbError } = await query;
+
+                if (fbError) {
+                    console.error('[FINANCEIRO] Erro no fallback:', fbError);
+                    throw fbError;
+                }
+
+                const items = (data as TransacaoFinanceira[]) || [];
                 setTransacoes(items);
                 handleFinanceiroData(items, mes, ano);
             } else if (result.data) {
-                const items = result.data as TransacaoFinanceira[];
+                const items = (result.data as TransacaoFinanceira[]) || [];
                 setTransacoes(items);
                 handleFinanceiroData(items, mes, ano);
+            } else {
+                // Sem erro mas sem dados - inicializar vazio
+                setTransacoes([]);
+                handleFinanceiroData([], mes, ano);
             }
         } catch (error) {
-            console.error('Erro ao buscar financeiro:', error);
+            console.error('[FINANCEIRO] Erro ao buscar financeiro:', error);
+            // Em caso de erro, limpar estado para evitar dados inconsistentes
+            setTransacoes([]);
+            setResumo(null);
         } finally {
+            // Sempre garantir que loading seja false
             setLoading(false);
         }
     }, [supabase, handleFinanceiroData]);
