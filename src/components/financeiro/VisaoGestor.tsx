@@ -41,7 +41,7 @@ type Aba = 'receitas' | 'despesas' | 'fechamento';
 // Interface para controle de estado de exclusão
 interface ExclusaoState {
     emProgresso: boolean;
-    id: string | null;
+    id: number | null;
     erro: string | null;
 }
 
@@ -528,7 +528,7 @@ export function VisaoGestor() {
     };
 
     // Verificar se uma transação específica está sendo excluída
-    const isBeingDeleted = (id: string) => {
+    const isBeingDeleted = (id: number) => {
         return exclusaoState.emProgresso && exclusaoState.id === id;
     };
 
