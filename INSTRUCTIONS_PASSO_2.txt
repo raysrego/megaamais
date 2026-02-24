@@ -1,0 +1,12 @@
+PASSO 2 CONCLUÍDO (Catálogo por Filial)
+----------------------------------------
+
+1. Backend: Código atualizado para filtrar produtos pela tabela loja_produtos.
+2. Migration: Criada em supabase/migrations/20260212093000_create_loja_produtos.sql
+
+AÇÃO NECESSÁRIA:
+1. Copie o conteúdo da migration 20260212093000_create_loja_produtos.sql
+2. Execute no SQL Editor do Supabase.
+   * Isso cria a tabela E já libera todos os produtos para todas as lojas existentes.
+
+Após isso, o sistema já estará pronto para o Passo 3 (Interface de gerenciamento de produtos por loja).

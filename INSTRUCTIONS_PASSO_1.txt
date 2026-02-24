@@ -1,0 +1,12 @@
+PASSO 1 CONCLUÍDO:
+
+A migration foi criada em:
+supabase/migrations/20260212090000_fix_boloes_fk.sql
+
+AÇÃO NECESSÁRIA:
+1. Copie o conteúdo deste arquivo.
+2. Cole no SQL Editor do Supabase.
+3. Execute para corrigir o erro de Foreign Key (Code: 23503).
+4. Tente criar um bolão novamente.
+
+Após isso, me avise para prosseguirmos para o Passo 2 (Produtos por Filial).

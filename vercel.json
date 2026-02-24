@@ -1,0 +1,8 @@
+{
+    "crons": [
+        {
+            "path": "/api/cron/processar-encalhe",
+            "schedule": "0 0 * * *"
+        }
+    ]
+}
