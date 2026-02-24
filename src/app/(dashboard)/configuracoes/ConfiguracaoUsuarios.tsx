@@ -32,13 +32,17 @@ function ModalUserForm({
     onSuccess: () => void,
     lojas: any[]
 }) {
+    const { toast } = useToast();
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [role, setRole] = useState(user?.role || 'operador');
 
-    async function handleSubmit(formData: FormData) {
+    async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+        e.preventDefault();
         setLoading(true);
         setError(null);
+
+        const formData = new FormData(e.currentTarget);
 
         try {
             if (user) {
@@ -55,16 +59,24 @@ function ModalUserForm({
                     password: password || undefined
                 });
 
-                if (res.error) setError(res.error);
-                else onSuccess();
+                if (res.error) {
+                    setError(res.error);
+                } else {
+                    toast({ message: 'Usuário atualizado com sucesso!', type: 'success' });
+                    onSuccess();
+                }
             } else {
                 // Modo Criação
                 const res = await createNewUser(null, formData);
-                if (res.error) setError(res.error);
-                else onSuccess();
+                if (res.error) {
+                    setError(res.error);
+                } else {
+                    toast({ message: res.message || 'Usuário criado com sucesso!', type: 'success' });
+                    onSuccess();
+                }
             }
-        } catch (err) {
-            setError('Erro inesperado.');
+        } catch (err: any) {
+            setError(err.message || 'Erro inesperado.');
         } finally {
             setLoading(false);
         }
@@ -148,7 +160,7 @@ function ModalUserForm({
                     </div>
                 )}
 
-                <form action={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', position: 'relative', zIndex: 10 }}>
+                <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', position: 'relative', zIndex: 10 }}>
                     <div className="form-group" style={{ margin: 0 }}>
                         <label style={{ fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.6rem', display: 'block', letterSpacing: '0.1em', marginLeft: '0.25rem' }}>Nome Completo</label>
                         <input name="nome" defaultValue={user?.nome} required className="input" style={{ padding: '1rem', borderRadius: '16px', fontWeight: 700 }} placeholder="Ex: João da Silva" />
