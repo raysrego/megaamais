@@ -58,6 +58,7 @@ export function VisaoGestor() {
 
     // Referência para evitar múltiplas requisições simultâneas
     const fetchEmProgresso = useRef(false);
+    // Como não podemos passar AbortController para a função, vamos usar para cancelar localmente se necessário
     const abortControllerRef = useRef<AbortController | null>(null);
 
     // Estado para controle de exclusão
@@ -97,16 +98,9 @@ export function VisaoGestor() {
         modalidade: 'VARIAVEL' as 'FIXO_MENSAL' | 'FIXO_VARIAVEL' | 'VARIAVEL'
     });
 
-    // Função segura para buscar transações com abort controller
+    // Função segura para buscar transações - sem AbortController
     const buscarTransacoesSeguro = useCallback(async (anoParam: number, mesParam: number, lojaId: string | null) => {
-        // Cancelar requisição anterior se existir
-        if (abortControllerRef.current) {
-            abortControllerRef.current.abort();
-        }
-
-        // Criar novo abort controller
-        abortControllerRef.current = new AbortController();
-
+        // Se já tem uma busca em progresso, não iniciar outra
         if (fetchEmProgresso.current) {
             console.log('[FINANCEIRO] Busca já em progresso, ignorando...');
             return;
@@ -114,36 +108,23 @@ export function VisaoGestor() {
 
         try {
             fetchEmProgresso.current = true;
-            await fetchTransacoes(anoParam, mesParam, lojaId, abortControllerRef.current.signal);
+            // A função fetchTransacoes original espera 3 argumentos: ano, mes, lojaId
+            await fetchTransacoes(anoParam, mesParam, lojaId);
             setDataUltimaAtualizacao(new Date());
         } catch (error: any) {
-            if (error.name === 'AbortError') {
-                console.log('[FINANCEIRO] Requisição cancelada');
-                return;
-            }
             console.error('[FINANCEIRO] Erro ao buscar transações:', error);
             toast({
-                message: 'Erro ao carregar dados: ' + (error.message || 'Falha na comunicação'),
+                message: 'Erro ao carregar dados: ' + (error?.message || 'Falha na comunicação'),
                 type: 'error'
             });
         } finally {
             fetchEmProgresso.current = false;
-            abortControllerRef.current = null;
         }
     }, [fetchTransacoes, toast]);
 
-    // Cleanup do abort controller ao desmontar
-    useEffect(() => {
-        return () => {
-            if (abortControllerRef.current) {
-                abortControllerRef.current.abort();
-            }
-        };
-    }, []);
-
     // Efeito para buscar dados iniciais
     useEffect(() => {
-        buscarTransacoesSeguro(ano, 0, lojaAtual?.id || null);
+        buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null);
         fetchItens(lojaAtual?.id || null);
 
         fetchAnosDisponiveis(lojaAtual?.id || null).then(anos => {
@@ -155,7 +136,7 @@ export function VisaoGestor() {
         });
 
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [ano, lojaAtual?.id]);
+    }, [ano, lojaAtual?.id, mesSelecionado, visualizacaoAnual]);
 
     // Função para refresh seguro
     const handleRefresh = useCallback(async () => {
