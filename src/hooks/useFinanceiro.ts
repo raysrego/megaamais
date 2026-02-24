@@ -312,13 +312,20 @@ export function useFinanceiro() {
             handleFinanceiroData(novasTransacoes, new Date().getMonth() + 1, new Date().getFullYear());
 
             try {
+                const { data: { user } } = await supabase.auth.getUser();
+
+                // Soft Delete: Marcar como excluído ao invés de deletar
                 const { error } = await supabase
                     .from('financeiro_contas')
-                    .delete()
-                    .eq('id', id);
+                    .update({
+                        deleted_at: new Date().toISOString(),
+                        deleted_by: user?.id || null
+                    })
+                    .eq('id', id)
+                    .is('deleted_at', null); // Apenas se não foi excluído antes
 
                 if (error) {
-                    console.error('[FINANCEIRO] Erro DELETE:', error);
+                    console.error('[FINANCEIRO] Erro ao excluir (soft delete):', error);
                     // Revert se falhar
                     setTransacoes(previousTransacoes);
                     handleFinanceiroData(previousTransacoes, new Date().getMonth() + 1, new Date().getFullYear());
@@ -326,7 +333,7 @@ export function useFinanceiro() {
                 }
 
                 // Sucesso - estado já está atualizado pelo optimistic update
-                console.log('[FINANCEIRO] ✅ Registro excluído com sucesso');
+                console.log('[FINANCEIRO] ✅ Registro excluído com sucesso (soft delete)');
                 return true;
             } catch (error) {
                 console.error('[FINANCEIRO] Erro ao excluir:', error);
