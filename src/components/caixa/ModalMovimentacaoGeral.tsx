@@ -51,7 +51,7 @@ export function ModalMovimentacaoGeral({ onClose, onSave }: ModalMovimentacaoGer
         if (!lojaAtual) return;
         setLoading(true);
         try {
-            const { data, error } = await supabase
+            let { data, error } = await supabase
                 .from('categorias_operacionais')
                 .select('id, nome, tipo, descricao, cor')
                 .eq('empresa_id', lojaAtual.id)
@@ -60,11 +60,37 @@ export function ModalMovimentacaoGeral({ onClose, onSave }: ModalMovimentacaoGer
                 .order('ordem', { ascending: true });
 
             if (error) throw error;
+
+            // Se não houver categorias, criar as padrão
+            if (!data || data.length === 0) {
+                console.log('Criando categorias operacionais padrão...');
+                const { error: rpcError } = await supabase
+                    .rpc('criar_categorias_operacionais_padrao', {
+                        p_empresa_id: lojaAtual.id
+                    });
+
+                if (rpcError) {
+                    console.error('Erro ao criar categorias padrão:', rpcError);
+                } else {
+                    // Tentar buscar novamente
+                    const { data: novaData, error: novoError } = await supabase
+                        .from('categorias_operacionais')
+                        .select('id, nome, tipo, descricao, cor')
+                        .eq('empresa_id', lojaAtual.id)
+                        .eq('tipo', tipo)
+                        .eq('ativo', true)
+                        .order('ordem', { ascending: true });
+
+                    if (novoError) throw novoError;
+                    data = novaData;
+                }
+            }
+
             setCategorias(data || []);
             setCategoriaSelecionada(null);
         } catch (error: any) {
             console.error('Erro ao carregar categorias:', error);
-            setError('Erro ao carregar categorias');
+            setError('Erro ao carregar categorias. Verifique se existem categorias cadastradas.');
         } finally {
             setLoading(false);
         }
