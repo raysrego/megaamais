@@ -57,7 +57,6 @@ export async function createNewUser(prevState: any, formData: FormData) {
         }
 
         // 1. Criar Usuário no Supabase Auth
-        // Passamos role e loja_id nos metadados para que o trigger do banco processe.
         const { data: userData, error: userError } = await supabaseAdmin.auth.admin.createUser({
             email,
             password,
@@ -71,17 +70,35 @@ export async function createNewUser(prevState: any, formData: FormData) {
 
         if (userError) {
             console.error('[ADMIN] Erro Auth:', userError);
-            return { error: `Erro ao criar usuário no Auth: ${userError.message}` };
+            return { error: `Erro ao criar usuario no Auth: ${userError.message}` };
         }
 
         if (!userData.user) {
-            return { error: 'Usuário não retornado após criação.' };
+            return { error: 'Usuario nao retornado apos criacao.' };
+        }
+
+        // 2. Inserir na tabela perfis (trigger vai popular usuarios automaticamente)
+        const { error: perfilError } = await supabaseAdmin
+            .from('perfis')
+            .insert({
+                id: userData.user.id,
+                nome: nome,
+                role: role,
+                loja_id: (role === 'admin') ? null : (loja_id || null),
+                ativo: true
+            });
+
+        if (perfilError) {
+            console.error('[ADMIN] Erro ao criar perfil:', perfilError);
+            // Tentar deletar usuario do auth se perfil falhar
+            await supabaseAdmin.auth.admin.deleteUser(userData.user.id);
+            return { error: `Erro ao criar perfil: ${perfilError.message}` };
         }
 
         revalidatePath('/configuracoes');
         revalidatePath('/(dashboard)');
 
-        return { success: true, message: `Usuário ${email} criado com sucesso!` };
+        return { success: true, message: `Usuario ${email} criado com sucesso!` };
 
     } catch (err: any) {
         console.error('Erro Admin Action:', err);
@@ -101,11 +118,12 @@ export async function updateUserAdmin(userId: string, data: { nome?: string, rol
             if (authError) throw authError;
         }
 
-        // 2. Atualizar Perfil
+        // 2. Atualizar Perfil (trigger vai sincronizar com usuarios)
         const updateData: any = {};
         if (data.nome) updateData.nome = data.nome;
         if (data.role) updateData.role = data.role;
         if (data.loja_id !== undefined) updateData.loja_id = data.loja_id;
+        updateData.updated_at = new Date().toISOString();
 
         const { error: profileError } = await supabaseAdmin
             .from('perfis')
@@ -117,7 +135,7 @@ export async function updateUserAdmin(userId: string, data: { nome?: string, rol
         revalidatePath('/configuracoes');
         return { success: true };
     } catch (err: any) {
-        console.error('[ADMIN] Erro ao atualizar usuário:', err);
+        console.error('[ADMIN] Erro ao atualizar usuario:', err);
         return { error: err.message };
     }
 }
