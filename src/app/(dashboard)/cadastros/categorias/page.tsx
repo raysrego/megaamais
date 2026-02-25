@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useState } from 'react';
 import {
@@ -14,6 +14,7 @@ import {
 import { PageHeader } from '@/components/ui/PageHeader';
 import { CategoriaFinanceira } from './CategoriaFinanceira';
 import { ParametrosFinanceiros } from './ParametrosFinanceiros';
+import { CategoriasOperacionais } from './CategoriasOperacionais';
 import { Settings } from 'lucide-react';
 import { LoadingState } from '@/components/ui/LoadingState';
 
@@ -126,13 +127,7 @@ export default function CategoriasPage() {
 
                     {moduloAtivo === 'parametros' && <ParametrosFinanceiros />}
 
-                    {moduloAtivo === 'operacional' && (
-                        <div className="flex flex-col items-center justify-center h-[500px] text-center opacity-40 grayscale">
-                            <Zap size={48} className="mb-4 text-warning" />
-                            <h3 className="text-xl font-bold">Módulo Operacional</h3>
-                            <p className="text-sm max-w-[300px] mx-auto">Em breve: Categorias de Caixa, Tipos de Sangria e Classificações de Terminal.</p>
-                        </div>
-                    )}
+                    {moduloAtivo === 'operacional' && <CategoriasOperacionais />}
 
                     {moduloAtivo === 'produtos' && (
                         <div className="flex flex-col items-center justify-center h-[500px] text-center opacity-40 grayscale">

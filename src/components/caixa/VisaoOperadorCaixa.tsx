@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { ModalLancamentoRapido, type TipoLancamento } from '@/components/financeiro/ModalLancamentoRapido';
 import { ModalFechamentoCaixa } from '@/components/financeiro/ModalFechamentoCaixa';
-// import { VisaoGestorBoloes } from './VisaoGestorBoloes';
+import { ModalMovimentacaoGeral } from './ModalMovimentacaoGeral';
 import { GerenciamentoCaixaBolao } from './GerenciamentoCaixaBolao';
 import { CaixaVirtualOperador } from './CaixaVirtualOperador';
 import { usePerfil } from '@/hooks/usePerfil';
@@ -41,8 +41,10 @@ export function VisaoOperadorCaixa() {
         podeGerenciarCaixaBolao
     } = usePerfil();
 
-    // Todos podem ver a aba BolÃ£o (Operadores vÃªem Caixa Virtual, Op.Admin/Gerente gerenciam)
+    // Todos podem ver a aba Bolao (Operadores veem Caixa Virtual, Op.Admin/Gerente gerenciam)
     const canSeeBolao = true;
+
+    const [categoriasOperacionais, setCategoriasOperacionais] = useState<any[]>([]);
 
     const {
         sessaoAtiva,
@@ -57,6 +59,7 @@ export function VisaoOperadorCaixa() {
 
     const [tipoSelecionado, setTipoSelecionado] = useState<TipoLancamento | null>(null);
     const [showFechamento, setShowFechamento] = useState(false);
+    const [showMovimentacaoGeral, setShowMovimentacaoGeral] = useState(false);
     const [valorInicial, setValorInicial] = useState<number>(100.00); // Fundo de troco padrÃ£o
     const [terminalSelecionado, setTerminalSelecionado] = useState<string>(''); // CÃ³digo do terminal
     const [terminalId, setTerminalId] = useState<number | undefined>(); // ID do terminal
@@ -138,10 +141,10 @@ export function VisaoOperadorCaixa() {
             case 'pix': return 'Pix';
             case 'sangria': return 'Sangria';
             case 'trocados': return 'Trocados';
-            case 'deposito': return 'DepÃ³sito';
+            case 'deposito': return 'Deposito';
             case 'boleto': return 'Boleto';
-            case 'venda': return 'Venda BalcÃ£o';
-            default: return 'LanÃ§amento';
+            case 'venda': return 'Venda Balcao';
+            default: return 'Lancamento';
         }
     };
 
@@ -163,11 +166,11 @@ export function VisaoOperadorCaixa() {
                             <Unlock size={40} className="text-primary-blue-light" />
                         </div>
                         <h2 className="text-2xl font-black mb-2 uppercase">Abertura de Turno</h2>
-                        <p className="text-muted mb-8">Nenhum caixa aberto para este terminal. Informe o saldo inicial para comeÃ§ar as operaÃ§Ãµes.</p>
+                        <p className="text-muted mb-8">Nenhum caixa aberto para este terminal. Informe o saldo inicial para comecar as operacoes.</p>
 
                         <div className="w-full space-y-4 text-left">
                             <div className="form-group">
-                                <label className="text-[10px] font-black uppercase text-muted mb-1 block">Terminal de OperaÃ§Ã£o</label>
+                                <label className="text-[10px] font-black uppercase text-muted mb-1 block">Terminal de Operacao</label>
                                 <select
                                     className="input w-full font-extrabold"
                                     value={terminalId?.toString() || ''}
@@ -241,7 +244,7 @@ export function VisaoOperadorCaixa() {
                             disabled={isOpening || !terminalSelecionado}
                         >
                             {isOpening ? <Loader2 className="animate-spin mr-2" /> : <Unlock className="mr-3" />}
-                            INICIAR OPERAÃ‡Ã•ES
+                            INICIAR OPERACOES
                         </button>
                     </div>
                 </div>
@@ -257,7 +260,7 @@ export function VisaoOperadorCaixa() {
                 </div>
                 <div className="flex-1">
                     <div className="flex items-center gap-2">
-                        <h3 className="font-bold text-text-primary">Caixa em OperaÃ§Ã£o: {sessaoAtiva.terminal_id}</h3>
+                        <h3 className="font-bold text-text-primary">Caixa em Operacao: {sessaoAtiva.terminal_id}</h3>
                         <span className="badge success text-[0.6rem]">ABERTO</span>
                     </div>
                     <p className="text-xs text-text-muted">Aberto em {new Date(sessaoAtiva.data_abertura).toLocaleString('pt-BR')}</p>
@@ -309,55 +312,42 @@ export function VisaoOperadorCaixa() {
                         <div className="card">
                             <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
                                 <Calculator size={22} className="text-primary-blue-light" />
-                                Painel de LanÃ§amentos
+                                Painel de Lancamentos
                             </h3>
 
-                            <div className="grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-4">
+                            <div className="grid gap-4">
+                                {/* Botao Principal - Movimentacoes Gerais */}
                                 <button
-                                    onClick={() => setTipoSelecionado('pix')}
-                                    className="btn btn-ghost h-28 flex flex-col gap-3 border-border bg-surface-subtle hover:scale-105 transition-transform"
+                                    onClick={() => setShowMovimentacaoGeral(true)}
+                                    className="btn btn-primary h-24 flex items-center justify-between px-6 hover:scale-[1.02] transition-transform"
+                                    style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)' }}
                                 >
-                                    <div className="bg-success/10 p-3 rounded-2xl">
-                                        <Smartphone className="text-success" />
+                                    <div className="flex items-center gap-4">
+                                        <div className="bg-white/20 p-3 rounded-2xl">
+                                            <DollarSign size={28} className="text-white" />
+                                        </div>
+                                        <div className="text-left">
+                                            <div className="text-lg font-black text-white">Movimentacoes Gerais</div>
+                                            <div className="text-xs text-white/80 mt-1">Entradas e saidas personalizadas</div>
+                                        </div>
                                     </div>
-                                    <span className="text-[0.85rem] font-bold">Pix (Entrada)</span>
-                                </button>
-                                <button
-                                    onClick={() => setTipoSelecionado('sangria')}
-                                    className="btn btn-ghost h-28 flex flex-col gap-3 border-border bg-surface-subtle hover:scale-105 transition-transform"
-                                >
-                                    <div className="bg-danger/10 p-3 rounded-2xl">
-                                        <Building className="text-danger" />
+                                    <div className="text-white/60">
+                                        <TrendingUp size={24} />
                                     </div>
-                                    <span className="text-[0.85rem] font-bold">Sangria / Cofre</span>
                                 </button>
-                                <button
-                                    onClick={() => setTipoSelecionado('trocados')}
-                                    className="btn btn-ghost h-28 flex flex-col gap-3 border-border hover:scale-105 transition-transform"
-                                >
-                                    <div className="bg-primary-blue-light/10 p-3 rounded-2xl">
-                                        <ArrowRightLeft className="text-primary-blue-light" />
-                                    </div>
-                                    <span className="text-[0.85rem] font-bold">Trocados</span>
-                                </button>
-                                <button
-                                    onClick={() => setTipoSelecionado('deposito')}
-                                    className="btn btn-ghost h-28 flex flex-col gap-3 border-border hover:scale-105 transition-transform"
-                                >
-                                    <div className="bg-text-muted/10 p-3 rounded-2xl">
-                                        <Building className="text-text-muted" />
-                                    </div>
-                                    <span className="text-[0.85rem] font-bold">DepÃ³sito Filial</span>
-                                </button>
-                                <button
-                                    onClick={() => setTipoSelecionado('boleto')}
-                                    className="btn btn-ghost h-28 flex flex-col gap-3 border-border hover:scale-105 transition-transform"
-                                >
-                                    <div className="bg-accent-orange/10 p-3 rounded-2xl">
-                                        <FileText className="text-accent-orange" />
-                                    </div>
-                                    <span className="text-[0.85rem] font-bold">Boleto LotÃ©rico</span>
-                                </button>
+
+                                {/* Botoes Rapidos */}
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button
+                                        onClick={() => setTipoSelecionado('trocados')}
+                                        className="btn btn-ghost h-20 flex items-center gap-3 border-border bg-surface-subtle hover:scale-105 transition-transform"
+                                    >
+                                        <div className="bg-primary-blue-light/10 p-2 rounded-xl">
+                                            <ArrowRightLeft size={20} className="text-primary-blue-light" />
+                                        </div>
+                                        <span className="text-sm font-bold">Trocados</span>
+                                    </button>
+                                </div>
                             </div>
 
                             <div className="mt-10 p-8 bg-surface-subtle rounded-3xl border border-dashed border-border text-center">
@@ -365,7 +355,7 @@ export function VisaoOperadorCaixa() {
                                     <Calculator size={48} className="mx-auto" />
                                 </div>
                                 <h4 className="font-bold text-lg text-text-primary">Registro em tempo real</h4>
-                                <p className="text-text-muted text-sm max-w-xs mx-auto mt-2">Cada lanÃ§amento Ã© computado instantaneamente para a conciliaÃ§Ã£o final.</p>
+                                <p className="text-text-muted text-sm max-w-xs mx-auto mt-2">Cada lancamento e computado instantaneamente para a conciliacao final.</p>
                             </div>
                         </div>
                     </div>
@@ -384,7 +374,7 @@ export function VisaoOperadorCaixa() {
                                 {movimentacoes.length === 0 ? (
                                     <div className="text-center py-16 px-4">
                                         <Clock size={40} className="mx-auto mb-6 text-text-muted opacity-10" />
-                                        <p className="text-xs text-text-muted">Aguardando seu primeiro lanÃ§amento...</p>
+                                        <p className="text-xs text-text-muted">Aguardando seu primeiro lancamento...</p>
                                     </div>
                                 ) : (
                                     <div className="flex flex-col gap-3">
@@ -397,7 +387,7 @@ export function VisaoOperadorCaixa() {
                                                             <span className="text-[0.8rem] font-bold text-text-primary">{getLabel(mov.tipo)}</span>
                                                             <span className="text-[0.65rem] text-text-muted flex items-center gap-1">
                                                                 {mov.metodo_pagamento === 'pix' ? <Smartphone size={10} /> : <Wallet size={10} />}
-                                                                {mov.metodo_pagamento === 'pix' ? 'Pix / Digital' : 'Dinheiro FÃ­sico'}
+                                                                {mov.metodo_pagamento === 'pix' ? 'Pix / Digital' : 'Dinheiro Fisico'}
                                                             </span>
                                                         </div>
                                                     </div>
@@ -437,7 +427,15 @@ export function VisaoOperadorCaixa() {
                 </div>
             )}
 
-            {/* Modal de LanÃ§amento */}
+            {/* Modal de Movimentacao Geral */}
+            {showMovimentacaoGeral && (
+                <ModalMovimentacaoGeral
+                    onClose={() => setShowMovimentacaoGeral(false)}
+                    onSave={handleSaveEntry}
+                />
+            )}
+
+            {/* Modal de Lancamento */}
             {tipoSelecionado && (
                 <ModalLancamentoRapido
                     tipo={tipoSelecionado}
