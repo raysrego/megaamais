@@ -75,14 +75,15 @@ export function VisaoOperadorCaixa() {
             await registrarMovimentacao({
                 tipo: data.tipo,
                 valor: data.valor,
-                descricao: data.observacao || null,
-                metodo_pagamento: data.metodo,
+                descricao: data.descricao || data.observacao || null,
+                metodo_pagamento: data.metodo || data.metodo_pagamento || 'dinheiro',
                 referencia_id: null,
-                classificacao_pix: null
+                classificacao_pix: null,
+                categoria_operacional_id: data.categoria_operacional_id || null
             });
             setTipoSelecionado(null);
         } catch (error) {
-            console.error('Erro ao registrar movimentaÃ§Ã£o:', error);
+            console.error('Erro ao registrar movimentação:', error);
             toast({ message: 'Erro ao registrar movimentação no banco de dados.', type: 'error' });
         }
     };

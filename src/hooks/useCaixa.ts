@@ -48,7 +48,13 @@ export interface CaixaMovimentacao {
     referencia_id: string | null;
     classificacao_pix: string | null;
     item_financeiro_id?: number | null;
+    categoria_operacional_id?: number | null;
     created_at: string;
+    categorias_operacionais?: {
+        id: number;
+        nome: string;
+        cor: string;
+    } | null;
 }
 
 export function useCaixa() {
@@ -97,8 +103,12 @@ export function useCaixa() {
         try {
             const { data, error } = await supabase
                 .from('caixa_movimentacoes')
-                .select('*')
+                .select(`
+                    *,
+                    categorias_operacionais!categoria_operacional_id(id, nome, cor)
+                `)
                 .eq('sessao_id', sessaoId)
+                .is('deleted_at', null)
                 .order('created_at', { ascending: false });
 
             if (error) {

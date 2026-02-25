@@ -50,17 +50,29 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
     const { toast } = useToast();
     const confirm = useConfirm();
 
-    // Calcular PIX total automaticamente (soma de todas movimentações PIX)
-    const calcularTotalPix = () => {
-        if (!sessao) return 0;
+    // Estado para PIX calculado
+    const [totalPixCalculado, setTotalPixCalculado] = useState(0);
 
-        // TODO: Buscar do backend via Server Action
-        // Por enquanto, simular valor zero
-        // Na próxima etapa, criar getTotalPix(sessao.id)
-        return 0;
-    };
+    // Calcular PIX total automaticamente ao carregar sessão
+    useEffect(() => {
+        if (!sessao) {
+            setTotalPixCalculado(0);
+            return;
+        }
 
-    const totalPixCalculado = calcularTotalPix();
+        const fetchTotalPix = async () => {
+            try {
+                const { getTotalPixManual } = await import('@/actions/caixa-calculos');
+                const total = await getTotalPixManual(sessao.id);
+                setTotalPixCalculado(total);
+            } catch (error) {
+                console.error('Erro ao calcular PIX manual:', error);
+                setTotalPixCalculado(0);
+            }
+        };
+
+        fetchTotalPix();
+    }, [sessao]);
 
     // Verificar se fundo de caixa está presente
     const temFundoCaixa = sessao?.tem_fundo_caixa ?? true;
