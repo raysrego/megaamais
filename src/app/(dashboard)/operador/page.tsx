@@ -363,12 +363,12 @@ function TabMovimentacoes({ dataFiltro, onFiltroChange }: TabMovimentacoesProps)
     }
 
     const totalEntradas = movimentacoes
-        .filter(m => m.tipo === 'entrada')
+        .filter(m => Number(m.valor) > 0)
         .reduce((sum, m) => sum + Number(m.valor), 0);
 
     const totalSaidas = movimentacoes
-        .filter(m => m.tipo === 'saida')
-        .reduce((sum, m) => sum + Number(m.valor), 0);
+        .filter(m => Number(m.valor) < 0)
+        .reduce((sum, m) => sum + Math.abs(Number(m.valor)), 0);
 
     const saldo = totalEntradas - totalSaidas;
 
@@ -455,18 +455,28 @@ function TabMovimentacoes({ dataFiltro, onFiltroChange }: TabMovimentacoesProps)
                                         {new Date(mov.created_at).toLocaleDateString('pt-BR')} <span className="opacity-50 text-[10px]">{new Date(mov.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
                                     </td>
                                     <td className="p-3">
-                                        {mov.tipo === 'entrada' ? (
+                                        {Number(mov.valor) > 0 ? (
                                             <span className="badge success text-[10px]">ENTRADA</span>
                                         ) : (
                                             <span className="badge danger text-[10px]">SAÍDA</span>
                                         )}
                                     </td>
-                                    <td className="p-3 font-medium text-text-secondary text-xs">{mov.categoria}</td>
+                                    <td className="p-3">
+                                        <span
+                                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold"
+                                            style={{
+                                                backgroundColor: `${mov.categoria_cor}20`,
+                                                color: mov.categoria_cor
+                                            }}
+                                        >
+                                            {mov.categoria}
+                                        </span>
+                                    </td>
                                     <td className="p-3 text-muted text-xs">{mov.descricao || '-'}</td>
                                     <td className="p-3 text-muted text-xs">{mov.loja_nome}</td>
-                                    <td className="p-3 text-muted text-xs">#{mov.sessao_numero}</td>
-                                    <td className={`p-3 text-right font-mono font-bold ${mov.tipo === 'entrada' ? 'text-success' : 'text-red-400'}`}>
-                                        {mov.tipo === 'entrada' ? '+' : '-'} R$ {Number(mov.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    <td className="p-3 text-muted text-xs">#{mov.sessao_id}</td>
+                                    <td className={`p-3 text-right font-mono font-bold ${Number(mov.valor) > 0 ? 'text-success' : 'text-red-400'}`}>
+                                        {Number(mov.valor) > 0 ? '+' : ''} R$ {Math.abs(Number(mov.valor)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                     </td>
                                 </tr>
                             ))}
