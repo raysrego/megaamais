@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useState } from 'react';
 import {
@@ -79,7 +79,7 @@ export function VisaoOperadorCaixa() {
             });
             setTipoSelecionado(null);
         } catch (error) {
-            console.error('Erro ao registrar movimentação:', error);
+            console.error('Erro ao registrar movimentaÃ§Ã£o:', error);
             toast({ message: 'Erro ao registrar movimentação no banco de dados.', type: 'error' });
         }
     };
@@ -138,10 +138,10 @@ export function VisaoOperadorCaixa() {
             case 'pix': return 'Pix';
             case 'sangria': return 'Sangria';
             case 'trocados': return 'Trocados';
-            case 'deposito': return 'Depósito';
+            case 'deposito': return 'DepÃ³sito';
             case 'boleto': return 'Boleto';
-            case 'venda': return 'Venda Balcão';
-            default: return 'Lançamento';
+            case 'venda': return 'Venda BalcÃ£o';
+            default: return 'LanÃ§amento';
         }
     };
 
@@ -163,11 +163,11 @@ export function VisaoOperadorCaixa() {
                             <Unlock size={40} className="text-primary-blue-light" />
                         </div>
                         <h2 className="text-2xl font-black mb-2 uppercase">Abertura de Turno</h2>
-                        <p className="text-muted mb-8">Nenhum caixa aberto para este terminal. Informe o saldo inicial para começaar as operações.</p>
+                        <p className="text-muted mb-8">Nenhum caixa aberto para este terminal. Informe o saldo inicial para comeÃ§ar as operaÃ§Ãµes.</p>
 
                         <div className="w-full space-y-4 text-left">
                             <div className="form-group">
-                                <label className="text-[10px] font-black uppercase text-muted mb-1 block">Terminal de Operação</label>
+                                <label className="text-[10px] font-black uppercase text-muted mb-1 block">Terminal de OperaÃ§Ã£o</label>
                                 <select
                                     className="input w-full font-extrabold"
                                     value={terminalId?.toString() || ''}
@@ -188,7 +188,7 @@ export function VisaoOperadorCaixa() {
                                     ))}
                                 </select>
                                 {terminais.length === 0 && (
-                                    <p className="text-[10px] text-danger mt-1 font-bold"> Nenhum terminal cadastrado. Vá em Cadastros; Terminais TFL.</p>
+                                    <p className="text-[10px] text-danger mt-1 font-bold">âš ï¸ Nenhum terminal cadastrado. VÃ¡ em Cadastros &gt; Terminais TFL.</p>
                                 )}
                             </div>
 
@@ -257,7 +257,7 @@ export function VisaoOperadorCaixa() {
                 </div>
                 <div className="flex-1">
                     <div className="flex items-center gap-2">
-                        <h3 className="font-bold text-text-primary">Caixa em Operação: {sessaoAtiva.terminal_id}</h3>
+                        <h3 className="font-bold text-text-primary">Caixa em OperaÃ§Ã£o: {sessaoAtiva.terminal_id}</h3>
                         <span className="badge success text-[0.6rem]">ABERTO</span>
                     </div>
                     <p className="text-xs text-text-muted">Aberto em {new Date(sessaoAtiva.data_abertura).toLocaleString('pt-BR')}</p>
@@ -347,7 +347,7 @@ export function VisaoOperadorCaixa() {
                                     <div className="bg-text-muted/10 p-3 rounded-2xl">
                                         <Building className="text-text-muted" />
                                     </div>
-                                    <span className="text-[0.85rem] font-bold">Depósito Filial</span>
+                                    <span className="text-[0.85rem] font-bold">DepÃ³sito Filial</span>
                                 </button>
                                 <button
                                     onClick={() => setTipoSelecionado('boleto')}
@@ -356,7 +356,7 @@ export function VisaoOperadorCaixa() {
                                     <div className="bg-accent-orange/10 p-3 rounded-2xl">
                                         <FileText className="text-accent-orange" />
                                     </div>
-                                    <span className="text-[0.85rem] font-bold">Boleto Lotérico</span>
+                                    <span className="text-[0.85rem] font-bold">Boleto LotÃ©rico</span>
                                 </button>
                             </div>
 
@@ -365,7 +365,7 @@ export function VisaoOperadorCaixa() {
                                     <Calculator size={48} className="mx-auto" />
                                 </div>
                                 <h4 className="font-bold text-lg text-text-primary">Registro em tempo real</h4>
-                                <p className="text-text-muted text-sm max-w-xs mx-auto mt-2">Cada lançaamento será computado instantaneamente para a conciliação final.</p>
+                                <p className="text-text-muted text-sm max-w-xs mx-auto mt-2">Cada lanÃ§amento Ã© computado instantaneamente para a conciliaÃ§Ã£o final.</p>
                             </div>
                         </div>
                     </div>
@@ -375,7 +375,7 @@ export function VisaoOperadorCaixa() {
                             <div className="flex items-center justify-between mb-6">
                                 <h3 className="text-sm font-bold flex items-center gap-2 uppercase tracking-wide opacity-80 text-text-primary">
                                     <History size={16} className="text-text-muted" />
-                                    Movimentaçõess
+                                    MovimentaÃ§Ãµes
                                 </h3>
                                 <span className="badge text-[0.6rem]">TURNO ATIVO</span>
                             </div>
@@ -384,7 +384,7 @@ export function VisaoOperadorCaixa() {
                                 {movimentacoes.length === 0 ? (
                                     <div className="text-center py-16 px-4">
                                         <Clock size={40} className="mx-auto mb-6 text-text-muted opacity-10" />
-                                        <p className="text-xs text-text-muted">Aguardando seu primeiro lançamento...</p>
+                                        <p className="text-xs text-text-muted">Aguardando seu primeiro lanÃ§amento...</p>
                                     </div>
                                 ) : (
                                     <div className="flex flex-col gap-3">
@@ -457,4 +457,5 @@ export function VisaoOperadorCaixa() {
         </div>
     );
 }
+
 
