@@ -8,7 +8,9 @@ import {
     Loader2,
     TrendingUp,
     TrendingDown,
-    Calendar
+    Calendar,
+    Vault,
+    ArrowUpCircle
 } from 'lucide-react';
 import { MoneyInput } from '../ui/MoneyInput';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
@@ -84,8 +86,18 @@ export function ModalMovimentacaoGeral({ onClose, onSave }: ModalMovimentacaoGer
 
         try {
             const categoria = categorias.find(c => c.id === categoriaSelecionada);
+            const categoriaNome = categoria?.nome.toLowerCase() || '';
+
+            // Determinar tipo de movimentação baseado na categoria
+            let tipoMovimentacao = tipo === 'entrada' ? 'venda' : 'sangria';
+
+            // Se for saída e categoria contém "cofre", é depósito no cofre
+            if (tipo === 'saida' && (categoriaNome.includes('cofre') || categoriaNome.includes('deposito'))) {
+                tipoMovimentacao = 'deposito';
+            }
+
             const dados = {
-                tipo: tipo === 'entrada' ? 'venda' : 'sangria',
+                tipo: tipoMovimentacao,
                 valor: tipo === 'saida' ? -Math.abs(valor) : Math.abs(valor),
                 metodo_pagamento: 'dinheiro',
                 descricao: descricao || categoria?.nome || '',
@@ -201,6 +213,71 @@ export function ModalMovimentacaoGeral({ onClose, onSave }: ModalMovimentacaoGer
                             </button>
                         </div>
                     </div>
+
+                    {/* Atalhos Rápidos para Sangria e Cofre */}
+                    {tipo === 'saida' && (
+                        <div style={{
+                            padding: '1rem',
+                            background: 'rgba(59, 130, 246, 0.05)',
+                            border: '1px solid rgba(59, 130, 246, 0.2)',
+                            borderRadius: '12px',
+                            marginBottom: '1.5rem'
+                        }}>
+                            <p style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
+                                Atalhos Rápidos
+                            </p>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                                <button
+                                    onClick={() => {
+                                        const sangria = categorias.find(c => c.nome.toLowerCase().includes('sangria'));
+                                        if (sangria) setCategoriaSelecionada(sangria.id);
+                                    }}
+                                    disabled={isSaving || loading}
+                                    style={{
+                                        padding: '0.75rem',
+                                        borderRadius: '8px',
+                                        border: '1px solid var(--border)',
+                                        background: 'var(--bg-dark)',
+                                        color: 'var(--text-secondary)',
+                                        fontSize: '0.75rem',
+                                        fontWeight: 700,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: '0.5rem',
+                                        cursor: isSaving || loading ? 'not-allowed' : 'pointer',
+                                        transition: 'all 0.2s'
+                                    }}
+                                >
+                                    <ArrowUpCircle size={14} /> Sangria
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        const cofre = categorias.find(c => c.nome.toLowerCase().includes('cofre') || c.nome.toLowerCase().includes('deposito'));
+                                        if (cofre) setCategoriaSelecionada(cofre.id);
+                                    }}
+                                    disabled={isSaving || loading}
+                                    style={{
+                                        padding: '0.75rem',
+                                        borderRadius: '8px',
+                                        border: '1px solid var(--border)',
+                                        background: 'var(--bg-dark)',
+                                        color: 'var(--text-secondary)',
+                                        fontSize: '0.75rem',
+                                        fontWeight: 700,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: '0.5rem',
+                                        cursor: isSaving || loading ? 'not-allowed' : 'pointer',
+                                        transition: 'all 0.2s'
+                                    }}
+                                >
+                                    <Vault size={14} /> Cofre
+                                </button>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Categoria */}
                     <div className="form-group" style={{ marginBottom: '1.5rem' }}>
