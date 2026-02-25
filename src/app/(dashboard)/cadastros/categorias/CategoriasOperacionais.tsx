@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 import { Plus, Edit2, Trash2, Save, X, Loader2, TrendingUp, TrendingDown } from 'lucide-react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
-import { useToast } from '@/contexts/ToastContext';
 import { useLoja } from '@/contexts/LojaContext';
 
 interface CategoriaOperacional {
@@ -19,7 +18,6 @@ interface CategoriaOperacional {
 
 export function CategoriasOperacionais() {
     const supabase = createBrowserSupabaseClient();
-    const { toast } = useToast();
     const { lojaAtual } = useLoja();
 
     const [categorias, setCategorias] = useState<CategoriaOperacional[]>([]);
@@ -56,7 +54,7 @@ export function CategoriasOperacionais() {
             if (error) throw error;
             setCategorias(data || []);
         } catch (error: any) {
-            toast({ message: `Erro ao carregar categorias: ${error.message}`, type: 'error' });
+            alert(`Erro ao carregar categorias: ${error.message}`);
         } finally {
             setLoading(false);
         }
@@ -64,7 +62,7 @@ export function CategoriasOperacionais() {
 
     const handleSalvar = async () => {
         if (!lojaAtual || !formData.nome || !formData.tipo) {
-            toast({ message: 'Preencha todos os campos obrigatorios', type: 'warning' });
+            alert('Preencha todos os campos obrigatorios');
             return;
         }
 
@@ -79,7 +77,6 @@ export function CategoriasOperacionais() {
                     .eq('id', editando);
 
                 if (error) throw error;
-                toast({ message: 'Categoria atualizada com sucesso!', type: 'success' });
             } else {
                 const { error } = await supabase
                     .from('categorias_operacionais')
@@ -89,7 +86,6 @@ export function CategoriasOperacionais() {
                     });
 
                 if (error) throw error;
-                toast({ message: 'Categoria criada com sucesso!', type: 'success' });
             }
 
             setEditando(null);
@@ -105,7 +101,7 @@ export function CategoriasOperacionais() {
             });
             carregarCategorias();
         } catch (error: any) {
-            toast({ message: `Erro ao salvar categoria: ${error.message}`, type: 'error' });
+            alert(`Erro ao salvar categoria: ${error.message}`);
         }
     };
 
@@ -125,10 +121,9 @@ export function CategoriasOperacionais() {
                 .eq('id', id);
 
             if (error) throw error;
-            toast({ message: 'Categoria deletada com sucesso!', type: 'success' });
             carregarCategorias();
         } catch (error: any) {
-            toast({ message: `Erro ao deletar categoria: ${error.message}`, type: 'error' });
+            alert(`Erro ao deletar categoria: ${error.message}`);
         }
     };
 
