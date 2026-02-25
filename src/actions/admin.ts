@@ -29,34 +29,26 @@ export async function createNewUser(prevState: any, formData: FormData) {
     const role = formData.get('role') as string;
     const loja_id = formData.get('loja_id') as string;
 
+    console.log('[CREATE_USER] Iniciando criacao:', { email, nome, role, loja_id });
+
     if (!email || !password || !nome || !role) {
-        return { error: 'Preencha todos os campos obrigatórios.' };
+        return { error: 'Preencha todos os campos obrigatorios.' };
+    }
+
+    if (password.length < 6) {
+        return { error: 'A senha deve ter no minimo 6 caracteres.' };
     }
 
     // Validação de Loja
     if (role !== 'admin' && !loja_id) {
-        return { error: 'Para usuários não-admin, é obrigatório selecionar uma loja.' };
+        return { error: 'Para usuarios nao-admin, e obrigatorio selecionar uma loja.' };
     }
 
     try {
         const supabaseAdmin = getAdminClient();
 
-        // RATE LIMITING: Verificar se não está excedendo o limite
-        const { data: { user: currentUser } } = await supabaseAdmin.auth.getUser();
-        if (currentUser) {
-            const { data: canProceed, error: rateLimitError } = await supabaseAdmin.rpc('check_rate_limit', {
-                p_user_id: currentUser.id,
-                p_action_type: 'create_user',
-                p_max_attempts: 10, // Máximo 10 usuários por hora
-                p_window_minutes: 60
-            });
-
-            if (rateLimitError || !canProceed) {
-                return { error: 'Limite de criação de usuários excedido. Aguarde alguns minutos e tente novamente.' };
-            }
-        }
-
         // 1. Criar Usuário no Supabase Auth
+        console.log('[CREATE_USER] Criando no Auth...');
         const { data: userData, error: userError } = await supabaseAdmin.auth.admin.createUser({
             email,
             password,
@@ -69,15 +61,19 @@ export async function createNewUser(prevState: any, formData: FormData) {
         });
 
         if (userError) {
-            console.error('[ADMIN] Erro Auth:', userError);
-            return { error: `Erro ao criar usuario no Auth: ${userError.message}` };
+            console.error('[CREATE_USER] Erro Auth:', userError);
+            return { error: `Erro ao criar usuario: ${userError.message}` };
         }
 
         if (!userData.user) {
+            console.error('[CREATE_USER] Usuario nao retornado');
             return { error: 'Usuario nao retornado apos criacao.' };
         }
 
+        console.log('[CREATE_USER] Usuario criado no Auth:', userData.user.id);
+
         // 2. Inserir na tabela perfis (trigger vai popular usuarios automaticamente)
+        console.log('[CREATE_USER] Inserindo em perfis...');
         const { error: perfilError } = await supabaseAdmin
             .from('perfis')
             .insert({
@@ -89,16 +85,18 @@ export async function createNewUser(prevState: any, formData: FormData) {
             });
 
         if (perfilError) {
-            console.error('[ADMIN] Erro ao criar perfil:', perfilError);
+            console.error('[CREATE_USER] Erro ao criar perfil:', perfilError);
             // Tentar deletar usuario do auth se perfil falhar
             await supabaseAdmin.auth.admin.deleteUser(userData.user.id);
             return { error: `Erro ao criar perfil: ${perfilError.message}` };
         }
 
+        console.log('[CREATE_USER] Perfil criado com sucesso');
+
         revalidatePath('/configuracoes');
         revalidatePath('/(dashboard)');
 
-        return { success: true, message: `Usuario ${email} criado com sucesso!` };
+        return { success: true, message: `Usuario ${nome} criado com sucesso!` };
 
     } catch (err: any) {
         console.error('Erro Admin Action:', err);

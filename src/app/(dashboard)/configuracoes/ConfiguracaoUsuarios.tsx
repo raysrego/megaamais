@@ -52,6 +52,8 @@ function ModalUserForm({
                 const loja_id = formData.get('loja_id') as string;
                 const password = formData.get('password') as string;
 
+                console.log('[CONFIG_USER] Atualizando usuario:', user.id);
+
                 const res = await updateUserAdmin(user.id, {
                     nome,
                     role: newRole,
@@ -60,23 +62,30 @@ function ModalUserForm({
                 });
 
                 if (res.error) {
+                    console.error('[CONFIG_USER] Erro ao atualizar:', res.error);
                     setError(res.error);
                 } else {
-                    toast({ message: 'Usuário atualizado com sucesso!', type: 'success' });
+                    toast({ message: 'Usuario atualizado com sucesso!', type: 'success' });
                     onSuccess();
                 }
             } else {
                 // Modo Criação
+                console.log('[CONFIG_USER] Criando novo usuario...');
                 const res = await createNewUser(null, formData);
+
+                console.log('[CONFIG_USER] Resposta:', res);
+
                 if (res.error) {
+                    console.error('[CONFIG_USER] Erro ao criar:', res.error);
                     setError(res.error);
                 } else {
-                    toast({ message: res.message || 'Usuário criado com sucesso!', type: 'success' });
+                    toast({ message: res.message || 'Usuario criado com sucesso!', type: 'success' });
                     onSuccess();
                 }
             }
         } catch (err: any) {
-            setError(err.message || 'Erro inesperado.');
+            console.error('[CONFIG_USER] Erro critico:', err);
+            setError(err.message || 'Erro inesperado ao processar solicitacao.');
         } finally {
             setLoading(false);
         }
