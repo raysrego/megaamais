@@ -11,7 +11,6 @@ export function useVendasBolao() {
      * Gera um nome único para arquivo com fallback seguro.
      */
     const generateUniqueFileName = (originalName?: string) => {
-        // Se não houver nome original, gera um nome padrão com extensão .jpg
         const uniqueId = typeof crypto !== 'undefined' && crypto.randomUUID
             ? crypto.randomUUID()
             : Date.now().toString(36) + Math.random().toString(36).substring(2);
@@ -30,12 +29,12 @@ export function useVendasBolao() {
      */
     const uploadComprovante = async (file: File | null | undefined): Promise<string | null> => {
         if (!file || !(file instanceof File) || !file.name) {
-            return null; // Arquivo inválido, simplesmente ignora
+            return null; // Arquivo inválido, ignora
         }
 
         const fileName = generateUniqueFileName(file.name);
         const { error: uploadError } = await supabase.storage
-            .from('comprovantes') // Nome do bucket – ajuste conforme seu projeto
+            .from('comprovantes')
             .upload(fileName, file);
 
         if (uploadError) {
@@ -51,7 +50,7 @@ export function useVendasBolao() {
     };
 
     /**
-     * Obtém a loja do usuário logado.
+     * Obtém a loja do usuário logado (campo loja_id na tabela usuarios).
      */
     const getUserLojaId = async (userId: string): Promise<string | null> => {
         const { data, error } = await supabase
@@ -67,16 +66,21 @@ export function useVendasBolao() {
         return data.loja_id;
     };
 
+    interface VenderCotaParams {
+        bolaoId: number;
+        quantidade: number;
+        valorTotal: number;
+        metodo: 'dinheiro' | 'pix';
+        comprovante?: File | null;
+        cotaId?: number | null; // ID da cota específica (para venda individual)
+    }
+
     /**
      * Realiza a venda de uma ou mais cotas.
      */
-    const venderCota = async (
-        bolaoId: number,
-        quantidade: number,
-        valorTotal: number,
-        metodo: 'dinheiro' | 'pix',
-        comprovante?: File | null
-    ) => {
+    const venderCota = async (params: VenderCotaParams) => {
+        const { bolaoId, quantidade, valorTotal, metodo, comprovante, cotaId } = params;
+
         setLoading(true);
         try {
             const { data: { user } } = await supabase.auth.getUser();
@@ -98,18 +102,18 @@ export function useVendasBolao() {
                 comprovanteUrl = await uploadComprovante(comprovante);
             }
 
-        const { data: rpcResult, error: rpcError } = await supabase
-        .rpc('vender_cotas_bolao', {
-            p_bolao_id: bolaoId,
-            p_quantidade: quantidade,
-            p_valor_total: valorTotal,
-            p_metodo_pagamento: metodo,
-            p_usuario_id: user.id,
-            p_loja_id: lojaId,
-            p_sessao_caixa_id: sessao?.id || null,
-            p_comprovante_url: comprovanteUrl,
-            p_cota_id: cotaId || null
-        });
+            const { data: rpcResult, error: rpcError } = await supabase
+                .rpc('vender_cotas_bolao', {
+                    p_bolao_id: bolaoId,
+                    p_quantidade: quantidade,
+                    p_valor_total: valorTotal,
+                    p_metodo_pagamento: metodo,
+                    p_usuario_id: user.id,
+                    p_loja_id: lojaId,
+                    p_sessao_caixa_id: sessao?.id || null,
+                    p_comprovante_url: comprovanteUrl,
+                    p_cota_id: cotaId || null
+                });
 
             if (rpcError) throw new Error(`Erro na RPC: ${rpcError.message}`);
             if (!rpcResult.success) throw new Error(rpcResult.error || 'Falha na venda.');
