@@ -98,17 +98,18 @@ export function useVendasBolao() {
                 comprovanteUrl = await uploadComprovante(comprovante);
             }
 
-            const { data: rpcResult, error: rpcError } = await supabase
-                .rpc('vender_cotas_bolao', {
-                    p_bolao_id: bolaoId,
-                    p_quantidade: quantidade,
-                    p_valor_total: valorTotal,
-                    p_metodo_pagamento: metodo,
-                    p_usuario_id: user.id,
-                    p_loja_id: lojaId,
-                    p_sessao_caixa_id: sessao?.id || null,
-                    p_comprovante_url: comprovanteUrl
-                });
+        const { data: rpcResult, error: rpcError } = await supabase
+        .rpc('vender_cotas_bolao', {
+            p_bolao_id: bolaoId,
+            p_quantidade: quantidade,
+            p_valor_total: valorTotal,
+            p_metodo_pagamento: metodo,
+            p_usuario_id: user.id,
+            p_loja_id: lojaId,
+            p_sessao_caixa_id: sessao?.id || null,
+            p_comprovante_url: comprovanteUrl,
+            p_cota_id: cotaId || null
+        });
 
             if (rpcError) throw new Error(`Erro na RPC: ${rpcError.message}`);
             if (!rpcResult.success) throw new Error(rpcResult.error || 'Falha na venda.');
