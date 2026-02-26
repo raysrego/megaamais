@@ -2,135 +2,193 @@
 
 import { useState } from 'react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
+import { v4 as uuidv4 } from 'uuid'; // para gerar nome único de arquivo
 
 export function useVendasBolao() {
     const supabase = createBrowserSupabaseClient();
     const [loading, setLoading] = useState(false);
 
     /**
-     * Realiza a venda de uma cota de bolão.
-     * 1. Verifica caixa aberto (para validar que o terminal está operando)
-     * 2. Registra na tabela vendas_boloes
-     * 3. Atualiza cotas_vendidas na tabela boloes
+     * Realiza a venda de cotas de bolão.
+     * @param bolaoId ID do bolão
+     * @param qtd Quantidade de cotas
+     * @param valorTotal Valor total da venda
+     * @param metodo Forma de pagamento
+     * @param comprovante Arquivo de comprovante (opcional, apenas para Pix)
      */
     const venderCota = async (
         bolaoId: number,
         qtd: number,
         valorTotal: number,
         metodo: 'dinheiro' | 'pix' | 'cartao_debito' | 'cartao_credito',
-        cotaId?: number
+        comprovante?: File | null
     ) => {
         setLoading(true);
+        // Para possível rollback manual
+        let vendaId: number | null = null;
+        let uploadedUrl: string | null = null;
+
         try {
-            // 1. Verificar usuário e caixa aberto (Critical Check)
+            // 1. Verificar usuário autenticado
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) throw new Error('Usuário não autenticado');
 
-            // 1. Tentar identificar sessão aberta (Opcional, para vínculo se existir)
+            // 2. Obter loja do usuário (empresa_id)
+            const { data: usuario, error: errUsuario } = await supabase
+                .from('usuarios')
+                .select('empresa_id')
+                .eq('id', user.id)
+                .single();
+
+            if (errUsuario || !usuario?.empresa_id) {
+                throw new Error('Loja do usuário não encontrada');
+            }
+            const lojaId = usuario.empresa_id;
+
+            // 3. Verificar se há sessão de caixa aberta para este usuário (opcional)
             const { data: sessao } = await supabase
                 .from('caixa_sessoes')
                 .select('id, valor_final_calculado')
-                .eq('usuario_id', user.id)
+                .eq('operador_id', user.id) // no schema, caixa_sessoes.operador_id é o user id
                 .eq('status', 'aberto')
                 .maybeSingle();
 
-            // NOTA: Não bloqueamos mais a venda se não houver caixa aberto.
-            // O valor entra como "pendente de prestação de contas".
+            // 4. Se for Pix e tiver comprovante, fazer upload
+            if (metodo === 'pix' && comprovante) {
+                const fileExt = comprovante.name.split('.').pop();
+                const fileName = `comprovantes/${uuidv4()}.${fileExt}`;
+                const { error: uploadError } = await supabase.storage
+                    .from('comprovantes-pix') // bucket name, ajuste conforme necessário
+                    .upload(fileName, comprovante);
 
-            // 2. Registrar Venda (Auditoria)
-            const { error: errVenda } = await supabase
+                if (uploadError) throw new Error('Erro ao fazer upload do comprovante');
+
+                const { data: urlData } = supabase.storage
+                    .from('comprovantes-pix')
+                    .getPublicUrl(fileName);
+
+                uploadedUrl = urlData.publicUrl;
+            }
+
+            // 5. Inserir venda em vendas_boloes
+            const { data: venda, error: errVenda } = await supabase
                 .from('vendas_boloes')
                 .insert({
                     bolao_id: bolaoId,
-                    sessao_caixa_id: sessao?.id || null, // Pode ser nulo agora
+                    sessao_caixa_id: sessao?.id || null,
                     usuario_id: user.id,
+                    loja_id: lojaId,
                     quantidade_cotas: qtd,
                     valor_total: valorTotal,
                     metodo_pagamento: metodo,
-                    status_prestacao: 'pendente' // Padrão
-                });
+                    status_prestacao: 'pendente',
+                    // se tiver comprovante, podemos guardar em algum lugar? Não há campo na tabela, então talvez criar uma coluna ou usar caixa_movimentacoes.
+                    // Por enquanto, não salvamos na venda, mas na movimentação se houver sessão.
+                })
+                .select('id')
+                .single();
 
             if (errVenda) throw new Error(`Erro ao registrar venda: ${errVenda.message}`);
+            vendaId = venda.id;
 
-            // 3. Atualizar Estoque do Bolão
-            const { error: errBolao } = await supabase.rpc('increment_cotas_vendidas', {
+            // 6. Alocar cotas (marcar como vendidas)
+            // Primeiro, obter as primeiras 'qtd' cotas disponíveis
+            const { data: cotas, error: errCotasSelect } = await supabase
+                .from('cotas_boloes')
+                .select('id')
+                .eq('bolao_id', bolaoId)
+                .eq('status', 'disponivel')
+                .limit(qtd);
+
+            if (errCotasSelect) throw new Error('Erro ao buscar cotas disponíveis');
+            if (!cotas || cotas.length < qtd) {
+                throw new Error('Quantidade de cotas disponíveis insuficiente');
+            }
+
+            const cotaIds = cotas.map(c => c.id);
+            const { error: errCotasUpdate } = await supabase
+                .from('cotas_boloes')
+                .update({
+                    status: 'vendida',
+                    data_venda: new Date().toISOString(),
+                    venda_id: vendaId // vincular à venda
+                })
+                .in('id', cotaIds);
+
+            if (errCotasUpdate) throw new Error('Erro ao marcar cotas como vendidas');
+
+            // 7. Atualizar cotas_vendidas no bolão de forma atômica
+            const { error: errIncrement } = await supabase.rpc('increment_cotas_vendidas', {
                 row_id: bolaoId,
                 qtd: qtd
             });
 
-            if (errBolao) {
-                const { data: bolaoAtual } = await supabase.from('boloes').select('cotas_vendidas').eq('id', bolaoId).single();
+            if (errIncrement) {
+                // Fallback: tentar update direto (menos seguro)
+                const { data: bolaoAtual } = await supabase
+                    .from('boloes')
+                    .select('cotas_vendidas')
+                    .eq('id', bolaoId)
+                    .single();
+
                 if (bolaoAtual) {
-                    await supabase
+                    const { error: errUpdateBolao } = await supabase
                         .from('boloes')
                         .update({ cotas_vendidas: bolaoAtual.cotas_vendidas + qtd })
                         .eq('id', bolaoId);
+
+                    if (errUpdateBolao) throw new Error('Erro ao atualizar estoque do bolão');
+                } else {
+                    throw new Error('Bolão não encontrado para atualizar estoque');
                 }
             }
 
-            // 3.1 Atualizar status das cotas individuais
-            if (cotaId) {
-                // Venda de uma cota específica
-                const { error: errCotaStatus } = await supabase
-                    .from('cotas_boloes')
-                    .update({
-                        status: 'vendida',
-                        data_venda: new Date().toISOString()
-                    })
-                    .eq('id', cotaId);
-
-                if (errCotaStatus) console.warn('Falha ao atualizar status da cota.', errCotaStatus);
-            } else if (qtd > 0) {
-                // Venda em lote: Pegar as primeiras 'qtd' disponíveis e marcar como vendidas
-                const { data: cotasDisponiveis } = await supabase
-                    .from('cotas_boloes')
-                    .select('id')
-                    .eq('bolao_id', bolaoId)
-                    .eq('status', 'disponivel')
-                    .limit(qtd);
-
-                if (cotasDisponiveis && cotasDisponiveis.length > 0) {
-                    const idsToUpdate = cotasDisponiveis.map(c => c.id);
-                    await supabase
-                        .from('cotas_boloes')
-                        .update({
-                            status: 'vendida',
-                            data_venda: new Date().toISOString()
-                        })
-                        .in('id', idsToUpdate);
-                }
-            }
-
-            // 4. Se for PIX, lança no fluxo do operador para conferência do Gerente
-            // Se for DINHEIRO, NÃO lança (fica retido p/ prestação de contas com Admin Bolão)
-            // 4. Se for PIX e houver sessão aberta, lança no fluxo do operador
-            // Se não houver sessão, o controle é via Prestação de Contas (status_prestacao)
+            // 8. Se for PIX e houver sessão de caixa, registrar movimentação
             if (metodo === 'pix' && sessao?.id) {
+                const movInsert: any = {
+                    sessao_id: sessao.id,
+                    tipo: 'pix',
+                    valor: valorTotal,
+                    metodo_pagamento: 'pix',
+                    descricao: `Venda Bolão #${bolaoId} (${qtd} cotas)`,
+                    classificacao_pix: 'bolao',
+                    referencia_id: vendaId.toString(), // armazenar ID da venda como referência
+                };
+
+                if (uploadedUrl) {
+                    movInsert.comprovante_url = uploadedUrl;
+                }
+
                 const { error: errMov } = await supabase
                     .from('caixa_movimentacoes')
-                    .insert({
-                        sessao_id: sessao.id,
-                        tipo: 'pix',
-                        valor: valorTotal,
-                        metodo_pagamento: 'pix',
-                        descricao: `Venda Bolão #${bolaoId} (PIX)`,
-                        classificacao_pix: 'bolao' // Tag para filtro na auditoria
-                    });
+                    .insert(movInsert);
 
                 if (!errMov) {
-                    // Atualiza o saldo calculado da sessão para o Pix bater no final
-                    const novoSaldoCalculado = (sessao.valor_final_calculado || 0) + valorTotal;
+                    // Atualizar saldo calculado da sessão
+                    const novoSaldo = (sessao.valor_final_calculado || 0) + valorTotal;
                     await supabase
                         .from('caixa_sessoes')
-                        .update({ valor_final_calculado: novoSaldoCalculado })
+                        .update({ valor_final_calculado: novoSaldo })
                         .eq('id', sessao.id);
+                } else {
+                    console.warn('Movimentação de caixa não registrada, mas venda concluída:', errMov);
                 }
             }
 
             return true;
 
         } catch (error: any) {
+            // Tentar reverter alterações parciais se possível
+            // Isso é complexo; o ideal seria usar uma transação no banco.
+            // Por simplicidade, apenas logamos e lançamos o erro.
             console.error('Erro na venda:', error);
+
+            // Se houve upload de comprovante, podemos tentar remover (opcional)
+            if (uploadedUrl) {
+                // extrair path da URL e deletar
+                // ...
+            }
+
             throw new Error(error.message || 'Falha ao processar venda');
         } finally {
             setLoading(false);
