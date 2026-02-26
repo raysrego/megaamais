@@ -12,16 +12,18 @@ import {
     Ticket
 } from 'lucide-react';
 import { useToast } from '@/contexts/ToastContext';
+import { useVendasBolao } from '@/hooks/useVendasBolao'; // Importe o hook
 
 interface ModalVendaBolaoProps {
-    cota: any;
-    bolao: any;
+    cota: any;      // Deve conter pelo menos o id e uid
+    bolao: any;      // Deve conter precoVendaCota, id, etc.
     onClose: () => void;
     onSuccess: () => void;
 }
 
 export function ModalVendaBolao({ cota, bolao, onClose, onSuccess }: ModalVendaBolaoProps) {
     const { toast } = useToast();
+    const { venderCota, loading } = useVendasBolao(); // Hook
 
     const [formaPagamento, setFormaPagamento] = useState<'pix' | 'dinheiro'>('pix');
     const [comprovante, setComprovante] = useState<File | null>(null);
@@ -30,24 +32,26 @@ export function ModalVendaBolao({ cota, bolao, onClose, onSuccess }: ModalVendaB
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
-        if (formaPagamento === 'pix' && !comprovante) {
-            toast({ message: "Por favor, anexe o comprovante do Pix para prosseguir.", type: 'warning' });
-            return;
-        }
+        // Validação mínima: se for Pix e houver comprovante, ele será anexado; se não houver, prossegue mesmo assim.
+        // A obrigatoriedade foi removida conforme solicitado.
 
         setIsSubmitting(true);
-
         try {
-            // Pequeno delay para simular processamento
-            await new Promise(resolve => setTimeout(resolve, 800));
+            // Chama o hook com quantidade = 1 e o ID da cota específica
+            await venderCota(
+                bolao.id,
+                1,
+                bolao.precoVendaCota,
+                formaPagamento,
+                comprovante, // Pode ser null
+                cota.id       // Passa o ID da cota selecionada
+            );
 
-            // TODO: Implementar registrarVendaBolao com RPC real
-            // await registrarVendaBolao({ ... });
-
+            toast({ message: 'Venda realizada com sucesso!', type: 'success' });
             onSuccess();
-        } catch (error) {
+        } catch (error: any) {
             console.error(error);
-            toast({ message: "Erro ao processar venda.", type: 'error' });
+            toast({ message: error.message || 'Erro ao processar venda.', type: 'error' });
         } finally {
             setIsSubmitting(false);
         }
@@ -97,7 +101,9 @@ export function ModalVendaBolao({ cota, bolao, onClose, onSuccess }: ModalVendaB
                         </div>
                         <div>
                             <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Processar Pagamento</h3>
-                            <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600 }}>Cota {cota.uid} • R$ {bolao.precoVendaCota.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                            <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+                                Cota {cota.uid} • R$ {bolao.precoVendaCota.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </p>
                         </div>
                     </div>
                     <button onClick={onClose} className="hover:bg-white/5 p-2 rounded-full transition-colors">
@@ -106,16 +112,19 @@ export function ModalVendaBolao({ cota, bolao, onClose, onSuccess }: ModalVendaB
                 </div>
 
                 <form onSubmit={handleSubmit} style={{ padding: '1.5rem' }}>
-                    <p style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '1rem', display: 'block' }}>Forma de Recebimento</p>
+                    <p style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '1rem', display: 'block' }}>
+                        Forma de Recebimento
+                    </p>
 
                     <div className="grid grid-cols-2 gap-3 mb-6">
                         <button
                             type="button"
                             onClick={() => setFormaPagamento('pix')}
-                            className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all ${formaPagamento === 'pix'
-                                ? 'border-[#1DB954] bg-[#1DB954]/5 text-[#1DB954]'
-                                : 'border-white/5 hover:border-white/10 text-muted'
-                                }`}
+                            className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all ${
+                                formaPagamento === 'pix'
+                                    ? 'border-[#1DB954] bg-[#1DB954]/5 text-[#1DB954]'
+                                    : 'border-white/5 hover:border-white/10 text-muted'
+                            }`}
                         >
                             <Smartphone size={24} />
                             <span className="font-black text-xs uppercase tracking-wider">Pix / Digital</span>
@@ -124,10 +133,11 @@ export function ModalVendaBolao({ cota, bolao, onClose, onSuccess }: ModalVendaB
                         <button
                             type="button"
                             onClick={() => setFormaPagamento('dinheiro')}
-                            className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all ${formaPagamento === 'dinheiro'
-                                ? 'border-orange-500 bg-orange-500/5 text-orange-500'
-                                : 'border-white/5 hover:border-white/10 text-muted'
-                                }`}
+                            className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all ${
+                                formaPagamento === 'dinheiro'
+                                    ? 'border-orange-500 bg-orange-500/5 text-orange-500'
+                                    : 'border-white/5 hover:border-white/10 text-muted'
+                            }`}
                         >
                             <Wallet size={24} />
                             <span className="font-black text-xs uppercase tracking-wider">Dinheiro</span>
@@ -136,7 +146,9 @@ export function ModalVendaBolao({ cota, bolao, onClose, onSuccess }: ModalVendaB
 
                     {formaPagamento === 'pix' && (
                         <div className="animate-in fade-in slide-in-from-top-2 mb-6">
-                            <label className="text-[10px] font-black uppercase text-muted mb-2 block">Anexar Comprovante (Obrigatório)</label>
+                            <label className="text-[10px] font-black uppercase text-muted mb-2 block">
+                                Comprovante (opcional)
+                            </label>
                             <div className="border-2 border-dashed border-white/5 rounded-2xl p-6 text-center hover:bg-white/5 transition-colors cursor-pointer relative group">
                                 <input
                                     type="file"
@@ -150,14 +162,18 @@ export function ModalVendaBolao({ cota, bolao, onClose, onSuccess }: ModalVendaB
                                             <div className="w-12 h-12 rounded-full bg-[#1DB954]/20 flex items-center justify-center text-[#1DB954] mb-1">
                                                 <CheckCircle2 size={24} />
                                             </div>
-                                            <span className="text-[10px] font-black text-white uppercase tracking-wider">{comprovante.name}</span>
+                                            <span className="text-[10px] font-black text-white uppercase tracking-wider">
+                                                {comprovante.name}
+                                            </span>
                                         </>
                                     ) : (
                                         <>
                                             <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center mb-1 group-hover:scale-110 transition-transform">
                                                 <UploadCloud size={24} />
                                             </div>
-                                            <span className="text-[10px] font-black uppercase tracking-wider">Selecionar Imagem</span>
+                                            <span className="text-[10px] font-black uppercase tracking-wider">
+                                                Selecionar Imagem (opcional)
+                                            </span>
                                         </>
                                     )}
                                 </div>
@@ -170,8 +186,12 @@ export function ModalVendaBolao({ cota, bolao, onClose, onSuccess }: ModalVendaB
                             <div className="flex gap-3">
                                 <Wallet size={18} className="text-orange-500 shrink-0" />
                                 <div>
-                                    <p className="text-xs font-bold text-orange-200/80 leading-tight">Receba o valor em mãos e registre a entrada no seu caixa físico.</p>
-                                    <p className="text-[10px] text-orange-500/60 mt-1 uppercase font-black">Este valor ficará "a repassar" ao Master</p>
+                                    <p className="text-xs font-bold text-orange-200/80 leading-tight">
+                                        Receba o valor em mãos e registre a entrada no seu caixa físico.
+                                    </p>
+                                    <p className="text-[10px] text-orange-500/60 mt-1 uppercase font-black">
+                                        Este valor ficará "a repassar" ao Master
+                                    </p>
                                 </div>
                             </div>
                         </div>
@@ -188,12 +208,13 @@ export function ModalVendaBolao({ cota, bolao, onClose, onSuccess }: ModalVendaB
 
                     <button
                         type="submit"
-                        disabled={isSubmitting}
-                        className={`btn w-full py-4 font-black text-sm uppercase tracking-[0.2em]  transition-all active:scale-95 ${formaPagamento === 'pix' ? 'btn-success' : 'btn-warning'
-                            }`}
+                        disabled={isSubmitting || loading}
+                        className={`btn w-full py-4 font-black text-sm uppercase tracking-[0.2em] transition-all active:scale-95 ${
+                            formaPagamento === 'pix' ? 'btn-success' : 'btn-warning'
+                        }`}
                         style={{ height: 'auto', borderRadius: '16px' }}
                     >
-                        {isSubmitting ? (
+                        {isSubmitting || loading ? (
                             <Loader2 className="animate-spin" size={20} />
                         ) : (
                             <>
@@ -215,5 +236,4 @@ export function ModalVendaBolao({ cota, bolao, onClose, onSuccess }: ModalVendaB
         </div>
     );
 }
-
 
