@@ -8,23 +8,30 @@ export function useVendasBolao() {
     const [loading, setLoading] = useState(false);
 
     /**
-     * Gera um nome único para arquivo usando crypto.randomUUID()
-     * Fallback para timestamp caso o método não esteja disponível.
+     * Gera um nome único para arquivo com fallback seguro.
      */
-    const generateUniqueFileName = (originalName: string) => {
-        const ext = originalName.split('.').pop();
+    const generateUniqueFileName = (originalName?: string) => {
+        // Se não houver nome original, gera um nome padrão com extensão .jpg
         const uniqueId = typeof crypto !== 'undefined' && crypto.randomUUID
             ? crypto.randomUUID()
             : Date.now().toString(36) + Math.random().toString(36).substring(2);
+
+        if (!originalName) {
+            return `comprovantes/${uniqueId}.jpg`; // extensão padrão
+        }
+
+        const ext = originalName.split('.').pop() || 'jpg';
         return `comprovantes/${uniqueId}.${ext}`;
     };
 
     /**
-     * Faz upload do comprovante (se existir) para o storage do Supabase.
+     * Faz upload do comprovante (se existir e for um File válido) para o storage do Supabase.
      * Retorna a URL pública ou null.
      */
-    const uploadComprovante = async (file: File | null): Promise<string | null> => {
-        if (!file) return null;
+    const uploadComprovante = async (file: File | null | undefined): Promise<string | null> => {
+        if (!file || !(file instanceof File) || !file.name) {
+            return null; // Arquivo inválido, simplesmente ignora
+        }
 
         const fileName = generateUniqueFileName(file.name);
         const { error: uploadError } = await supabase.storage
@@ -44,8 +51,7 @@ export function useVendasBolao() {
     };
 
     /**
-     * Obtém a loja do usuário logado (campo loja_id no perfil).
-     * Idealmente você pode armazenar esse dado em um contexto para evitar repetição.
+     * Obtém a loja do usuário logado.
      */
     const getUserLojaId = async (userId: string): Promise<string | null> => {
         const { data, error } = await supabase
@@ -63,11 +69,6 @@ export function useVendasBolao() {
 
     /**
      * Realiza a venda de uma ou mais cotas.
-     * @param bolaoId ID do bolão
-     * @param quantidade Número de cotas
-     * @param valorTotal Valor total da venda
-     * @param metodo 'dinheiro' | 'pix'
-     * @param comprovante Arquivo opcional (obrigatório apenas se for Pix e a regra de negócio exigir)
      */
     const venderCota = async (
         bolaoId: number,
@@ -78,15 +79,12 @@ export function useVendasBolao() {
     ) => {
         setLoading(true);
         try {
-            // 1. Verificar usuário autenticado
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) throw new Error('Usuário não autenticado');
 
-            // 2. Obter loja_id do usuário
             const lojaId = await getUserLojaId(user.id);
             if (!lojaId) throw new Error('Usuário não vinculado a uma loja.');
 
-            // 3. Verificar se há sessão de caixa aberta (opcional)
             const { data: sessao } = await supabase
                 .from('caixa_sessoes')
                 .select('id')
@@ -94,13 +92,12 @@ export function useVendasBolao() {
                 .eq('status', 'aberto')
                 .maybeSingle();
 
-            // 4. Fazer upload do comprovante, se fornecido
+            // Upload do comprovante apenas se for um File válido
             let comprovanteUrl: string | null = null;
-            if (comprovante) {
+            if (comprovante && comprovante instanceof File && comprovante.name) {
                 comprovanteUrl = await uploadComprovante(comprovante);
             }
 
-            // 5. Chamar a função RPC (transação atômica)
             const { data: rpcResult, error: rpcError } = await supabase
                 .rpc('vender_cotas_bolao', {
                     p_bolao_id: bolaoId,
@@ -116,7 +113,6 @@ export function useVendasBolao() {
             if (rpcError) throw new Error(`Erro na RPC: ${rpcError.message}`);
             if (!rpcResult.success) throw new Error(rpcResult.error || 'Falha na venda.');
 
-            // Sucesso!
             return { success: true, vendaId: rpcResult.venda_id };
 
         } catch (error: any) {
