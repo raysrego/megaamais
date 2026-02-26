@@ -38,14 +38,14 @@ export function ModalVendaBolao({ cota, bolao, onClose, onSuccess }: ModalVendaB
         setIsSubmitting(true);
         try {
             // Chama o hook com quantidade = 1 e o ID da cota específica
-            await venderCota(
-                bolao.id,
-                1,
-                bolao.precoVendaCota,
-                formaPagamento,
-                comprovante, // Pode ser null
-                cota.id       // Passa o ID da cota selecionada
-            );
+            await venderCota({
+                bolaoId: bolao.id,
+                quantidade: 1,
+                valorTotal: bolao.precoVendaCota,
+                metodo: formaPagamento,
+                comprovante: comprovante,
+                cotaId: cota.id
+            });
 
             toast({ message: 'Venda realizada com sucesso!', type: 'success' });
             onSuccess();

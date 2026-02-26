@@ -52,7 +52,12 @@ export function ModalVendaLoteBolao({ bolao, onClose, onSuccess }: ModalVendaLot
             // Realiza a venda via hook (Backend Supabase + RPC)
             // Nota: O hook precisa ser chamado 'quantidade' vezes ou modificado para aceitar lote.
             // Para simplificar e garantir integridade, chamamos o venderCota que já lida com estoque.
-            await venderCota(bolao.id, quantidade, valorTotal, formaPagamento);
+            await venderCota({
+                bolaoId: bolao.id,
+                quantidade: quantidade,
+                valorTotal: valorTotal,
+                metodo: formaPagamento
+            });
 
             toast({ message: 'Venda em lote realizada com sucesso!', type: 'success' });
             onSuccess();

@@ -165,7 +165,13 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
         setCotaToSell(null);
 
         try {
-            await venderCota(selectedBolao.id, 1, selectedBolao.precoVendaCota, 'dinheiro', cotaId);
+            await venderCota({
+                bolaoId: selectedBolao.id,
+                quantidade: 1,
+                valorTotal: selectedBolao.precoVendaCota,
+                metodo: 'dinheiro',
+                cotaId: cotaId
+            });
 
             // Atualiza o estado local das cotas
             setCotas(prev => prev.map(c => c.id === cotaId ? { ...c, status: 'vendida' } : c));
