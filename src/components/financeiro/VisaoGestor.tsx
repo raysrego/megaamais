@@ -38,11 +38,17 @@ import { useConfirm } from '@/contexts/ConfirmContext';
 
 type Aba = 'receitas' | 'despesas' | 'fechamento';
 
-// Interface para controle de estado de exclusão
 interface ExclusaoState {
     emProgresso: boolean;
     id: number | null;
     erro: string | null;
+}
+
+// Função auxiliar para extrair mensagem de erro
+function getErrorMessage(error: unknown): string {
+    if (error instanceof Error) return error.message;
+    if (typeof error === 'string') return error;
+    return 'Erro desconhecido';
 }
 
 export function VisaoGestor() {
@@ -56,9 +62,7 @@ export function VisaoGestor() {
     const { toast } = useToast();
     const confirm = useConfirm();
 
-    // Referência para evitar múltiplas requisições simultâneas
-    const fetchEmProgresso = useRef(false);
-    // Como não podemos passar AbortController para a função, vamos usar para cancelar localmente se necessário
+    // Controle de requisições com AbortController
     const abortControllerRef = useRef<AbortController | null>(null);
 
     // Estado para controle de exclusão
@@ -98,33 +102,42 @@ export function VisaoGestor() {
         modalidade: 'VARIAVEL' as 'FIXO_MENSAL' | 'FIXO_VARIAVEL' | 'VARIAVEL'
     });
 
-    // Função segura para buscar transações - sem AbortController
-    const buscarTransacoesSeguro = useCallback(async (anoParam: number, mesParam: number, lojaId: string | null) => {
-        // Se já tem uma busca em progresso, não iniciar outra
-        if (fetchEmProgresso.current) {
-            console.log('[FINANCEIRO] Busca já em progresso, ignorando...');
-            return;
-        }
-
+    // Função segura para buscar transações com suporte a cancelamento
+    const buscarTransacoesSeguro = useCallback(async (
+        anoParam: number,
+        mesParam: number,
+        lojaId: string | null,
+        signal?: AbortSignal
+    ) => {
         try {
-            fetchEmProgresso.current = true;
-            // A função fetchTransacoes original espera 3 argumentos: ano, mes, lojaId
-            await fetchTransacoes(anoParam, mesParam, lojaId);
+            // A função fetchTransacoes precisa aceitar signal; caso não aceite, ignoramos
+            await fetchTransacoes(anoParam, mesParam, lojaId, signal);
             setDataUltimaAtualizacao(new Date());
         } catch (error: any) {
+            // Ignorar erros de cancelamento
+            if (error?.name === 'AbortError' || error?.message?.includes('abort')) {
+                console.log('[FINANCEIRO] Requisição cancelada');
+                return;
+            }
             console.error('[FINANCEIRO] Erro ao buscar transações:', error);
             toast({
-                message: 'Erro ao carregar dados: ' + (error?.message || 'Falha na comunicação'),
+                message: 'Erro ao carregar dados: ' + getErrorMessage(error),
                 type: 'error'
             });
-        } finally {
-            fetchEmProgresso.current = false;
         }
     }, [fetchTransacoes, toast]);
 
-    // Efeito para buscar dados iniciais
+    // Efeito para buscar dados iniciais com cancelamento
     useEffect(() => {
-        buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null);
+        // Cancelar requisição anterior se existir
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+        }
+
+        const controller = new AbortController();
+        abortControllerRef.current = controller;
+
+        buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null, controller.signal);
         fetchItens(lojaAtual?.id || null);
 
         fetchAnosDisponiveis(lojaAtual?.id || null).then(anos => {
@@ -135,11 +148,15 @@ export function VisaoGestor() {
             console.error('[FINANCEIRO] Erro ao buscar anos disponíveis:', error);
         });
 
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [ano, lojaAtual?.id, mesSelecionado, visualizacaoAnual]);
+        return () => {
+            controller.abort();
+            abortControllerRef.current = null;
+        };
+    }, [ano, lojaAtual?.id, mesSelecionado, visualizacaoAnual, buscarTransacoesSeguro, fetchItens, fetchAnosDisponiveis]);
 
     // Função para refresh seguro
     const handleRefresh = useCallback(async () => {
+        // Para refresh, podemos usar um novo controller ou ignorar cancelamento
         await buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null);
         toast({ message: 'Dados atualizados!', type: 'success' });
     }, [ano, mesSelecionado, visualizacaoAnual, lojaAtual?.id, buscarTransacoesSeguro, toast]);
@@ -180,7 +197,7 @@ export function VisaoGestor() {
                 if (!t.data_vencimento) return false;
                 const parts = t.data_vencimento.split('-');
                 if (parts.length < 2) return false;
-                
+
                 const tAno = parseInt(parts[0]);
                 if (tAno !== ano) return false;
 
@@ -228,7 +245,7 @@ export function VisaoGestor() {
         };
     }, [transacoesDoPeriodo]);
 
-    // Preparar dados para o Gráfico
+    // Preparar dados para o Gráfico – agora usando estrutura aninhada por loja
     const chartData = useMemo(() => {
         return Array.from({ length: 12 }, (_, i) => {
             const monthNum = i + 1;
@@ -243,35 +260,33 @@ export function VisaoGestor() {
                 return m === monthNum && isType;
             });
 
-            if (lojaAtual) {
-                return {
-                    month: monthName,
-                    value: monthTransacoes.reduce((acc, curr) => acc + (curr.valor || 0), 0),
-                    fullLabel: new Date(ano, i, 1).toLocaleString('pt-BR', { month: 'long' })
-                };
-            }
-
-            const dataPoint: any = {
+            const basePoint: any = {
                 month: monthName,
                 fullLabel: new Date(ano, i, 1).toLocaleString('pt-BR', { month: 'long' }),
                 value: monthTransacoes.reduce((acc, curr) => acc + (curr.valor || 0), 0)
             };
 
-            lojasDisponiveis.forEach(loja => {
-                const totalLoja = monthTransacoes
-                    .filter(t => t.loja_id === loja.id)
-                    .reduce((acc, curr) => acc + (curr.valor || 0), 0);
-                dataPoint[`loja_${loja.id}`] = totalLoja;
-            });
+            // Se estiver em modo "todas as filiais", adiciona totais por loja em objeto aninhado
+            if (!lojaAtual) {
+                const lojasTotais: Record<string, number> = {};
+                lojasDisponiveis.forEach(loja => {
+                    const totalLoja = monthTransacoes
+                        .filter(t => t.loja_id === loja.id)
+                        .reduce((acc, curr) => acc + (curr.valor || 0), 0);
+                    lojasTotais[loja.id] = totalLoja;
+                });
+                basePoint.lojas = lojasTotais;
+            }
 
-            return dataPoint;
+            return basePoint;
         });
     }, [transacoes, ano, abaAtiva, lojaAtual, lojasDisponiveis]);
 
+    // Adapta as séries para o gráfico usando o novo formato
     const chartSeries = !lojaAtual ? lojasDisponiveis.map((loja, idx) => {
         const colors = ['#3B82F6', '#F59E0B', '#8B5CF6', '#EC4899', '#10B981'];
         return {
-            key: `loja_${loja.id}`,
+            key: loja.id, // Agora usamos o ID diretamente, pois acessaremos via lojas[loja.id]
             label: loja.nome_fantasia,
             color: colors[idx % colors.length]
         };
@@ -341,28 +356,28 @@ export function VisaoGestor() {
 
         try {
             await excluirTransacao(t.id);
-            
-            toast({ 
-                message: 'Lançamento excluído com sucesso!', 
-                type: 'success' 
+
+            toast({
+                message: 'Lançamento excluído com sucesso!',
+                type: 'success'
             });
 
-            // Atualizar a lista após exclusão
+            // Atualizar a lista após exclusão (sem sinal, pois é uma ação isolada)
             await buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null);
-            
+
         } catch (error: any) {
             console.error('[FINANCEIRO] Erro ao excluir:', error);
-            
-            const mensagemErro = error?.message || 'Erro desconhecido ao excluir';
-            
+
+            const mensagemErro = getErrorMessage(error);
+
             setExclusaoState(prev => ({
                 ...prev,
                 erro: mensagemErro
             }));
 
-            toast({ 
-                message: `Erro ao excluir: ${mensagemErro}`, 
-                type: 'error' 
+            toast({
+                message: `Erro ao excluir: ${mensagemErro}`,
+                type: 'error'
             });
         } finally {
             setExclusaoState({
@@ -395,6 +410,16 @@ export function VisaoGestor() {
             if (formData.valor <= 0) {
                 toast({
                     message: "⚠️ O valor deve ser maior que zero.",
+                    type: 'error'
+                });
+                return;
+            }
+
+            // Validação de data (não permitir vencimento no passado para lançamentos novos? – opcional)
+            const hoje = new Date().toISOString().split('T')[0];
+            if (!editingTransaction && formData.vencimento < hoje) {
+                toast({
+                    message: "⚠️ A data de vencimento não pode ser anterior à hoje.",
                     type: 'error'
                 });
                 return;
@@ -442,12 +467,10 @@ export function VisaoGestor() {
 
         } catch (error: any) {
             console.error('[FINANCEIRO] Erro ao salvar:', error);
-            
-            const mensagemErro = error?.message || 'Falha na comunicação com o servidor';
-            
-            toast({ 
-                message: `Erro: ${mensagemErro}`, 
-                type: 'error' 
+            const mensagemErro = getErrorMessage(error);
+            toast({
+                message: `Erro: ${mensagemErro}`,
+                type: 'error'
             });
         } finally {
             setProcessing(false);
@@ -461,7 +484,7 @@ export function VisaoGestor() {
 
     const handleConfirmBaixa = async (dados: { dataPagamento: string; metodo: string; arquivo: File | null }) => {
         if (!transacaoParaBaixa) return;
-        
+
         try {
             await darBaixa(transacaoParaBaixa.id, dados);
             toast({ message: 'Baixa realizada com sucesso!', type: 'success' });
@@ -470,9 +493,9 @@ export function VisaoGestor() {
             await buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null);
         } catch (error: any) {
             console.error('[FINANCEIRO] Erro ao dar baixa:', error);
-            toast({ 
-                message: 'Erro ao dar baixa: ' + (error?.message || 'Erro desconhecido'), 
-                type: 'error' 
+            toast({
+                message: 'Erro ao dar baixa: ' + getErrorMessage(error),
+                type: 'error'
             });
         }
     };
@@ -604,20 +627,20 @@ export function VisaoGestor() {
 
             {/* Abas */}
             <div className="flex gap-2 mb-4">
-                <button 
-                    className={`btn ${abaAtiva === 'receitas' ? 'btn-primary' : 'btn-ghost'}`} 
+                <button
+                    className={`btn ${abaAtiva === 'receitas' ? 'btn-primary' : 'btn-ghost'}`}
                     onClick={() => setAbaAtiva('receitas')}
                 >
                     <TrendingUp size={16} /> Receitas
                 </button>
-                <button 
-                    className={`btn ${abaAtiva === 'despesas' ? 'btn-primary' : 'btn-ghost'}`} 
+                <button
+                    className={`btn ${abaAtiva === 'despesas' ? 'btn-primary' : 'btn-ghost'}`}
                     onClick={() => setAbaAtiva('despesas')}
                 >
                     <TrendingDown size={16} /> Despesas
                 </button>
-                <button 
-                    className={`btn ${abaAtiva === 'fechamento' ? 'btn-primary' : 'btn-ghost'}`} 
+                <button
+                    className={`btn ${abaAtiva === 'fechamento' ? 'btn-primary' : 'btn-ghost'}`}
                     onClick={() => setAbaAtiva('fechamento')}
                 >
                     <BarChart3 size={16} /> Fechamento (DRE)
@@ -629,8 +652,8 @@ export function VisaoGestor() {
                 <div className="flex justify-between items-center mb-4">
                     <div>
                         <h3 className="chart-title mb-0">
-                            {abaAtiva === 'receitas' ? 'Melhoria de Fluxo (Receitas)' : 
-                             abaAtiva === 'despesas' ? 'Evolução de Custos (Despesas)' : 
+                            {abaAtiva === 'receitas' ? 'Melhoria de Fluxo (Receitas)' :
+                             abaAtiva === 'despesas' ? 'Evolução de Custos (Despesas)' :
                              'Fechamento Consolidado (DRE)'}
                         </h3>
                         {abaAtiva !== 'fechamento' && !visualizacaoAnual && (
@@ -642,8 +665,8 @@ export function VisaoGestor() {
                     {abaAtiva !== 'fechamento' && (
                         <div className="flex gap-3 items-center">
                             {/* Botão Refresh */}
-                            <button 
-                                className="btn btn-sm btn-ghost text-muted hover:text-white" 
+                            <button
+                                className="btn btn-sm btn-ghost text-muted hover:text-white"
                                 onClick={handleRefresh}
                                 title="Atualizar dados"
                                 disabled={loading}
@@ -692,17 +715,17 @@ export function VisaoGestor() {
                             <div className="w-px h-6 bg-white/10" />
 
                             {/* Botões de Exportação/Impressão */}
-                            <button 
-                                className="btn btn-sm btn-ghost text-muted hover:text-white" 
-                                onClick={handleExport} 
+                            <button
+                                className="btn btn-sm btn-ghost text-muted hover:text-white"
+                                onClick={handleExport}
                                 title="Exportar CSV"
                                 disabled={filteredList.length === 0}
                             >
                                 <FileText size={16} />
                             </button>
-                            <button 
-                                className="btn btn-sm btn-ghost text-muted hover:text-white" 
-                                onClick={handlePrint} 
+                            <button
+                                className="btn btn-sm btn-ghost text-muted hover:text-white"
+                                onClick={handlePrint}
                                 title="Imprimir / Salvar PDF"
                             >
                                 <Printer size={16} />
@@ -720,8 +743,8 @@ export function VisaoGestor() {
                                 <Copy size={14} /> Replicar Mês
                             </button>
 
-                            <button 
-                                className="btn btn-sm btn-accent" 
+                            <button
+                                className="btn btn-sm btn-accent"
                                 onClick={() => handleOpenModalNew(abaAtiva === 'receitas' ? 'receita' : 'despesa')}
                                 disabled={loading}
                             >
@@ -869,8 +892,8 @@ export function VisaoGestor() {
                         <div className="table-container pt-4 border-t border-white/5">
                             <div className="flex items-center justify-between mb-4">
                                 <h4 className="text-xs font-black uppercase text-muted tracking-widest">
-                                    {visualizacaoAnual 
-                                        ? `Movimentações de ${ano} (Ano Completo)` 
+                                    {visualizacaoAnual
+                                        ? `Movimentações de ${ano} (Ano Completo)`
                                         : `Movimentações de ${new Date(ano, mesSelecionado - 1, 1).toLocaleString('pt-BR', { month: 'long' })}`}
                                 </h4>
                                 <span className="text-xs font-bold text-muted">
@@ -899,10 +922,10 @@ export function VisaoGestor() {
                                         </tr>
                                     ) : filteredList.map(t => {
                                         const deletando = isBeingDeleted(t.id);
-                                        
+
                                         return (
-                                            <tr 
-                                                key={t.id} 
+                                            <tr
+                                                key={t.id}
                                                 className={`group hover:bg-white/5 transition-colors ${
                                                     deletando ? 'opacity-50 pointer-events-none' : ''
                                                 }`}
@@ -950,28 +973,28 @@ export function VisaoGestor() {
                                                 </td>
                                                 <td className="text-right flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                                     {t.status === 'pendente' && (
-                                                        <button 
-                                                            className="btn btn-ghost btn-xs text-success hover:bg-success/20" 
-                                                            onClick={() => handleBaixaClick(t)} 
+                                                        <button
+                                                            className="btn btn-ghost btn-xs text-success hover:bg-success/20"
+                                                            onClick={() => handleBaixaClick(t)}
                                                             title="Dar Baixa"
                                                             disabled={deletando}
                                                         >
                                                             <CheckCircle2 size={14} />
                                                         </button>
                                                     )}
-                                                    <button 
-                                                        className="btn btn-ghost btn-xs text-blue-400 hover:bg-blue-400/20" 
-                                                        onClick={() => handleEditClick(t)} 
+                                                    <button
+                                                        className="btn btn-ghost btn-xs text-blue-400 hover:bg-blue-400/20"
+                                                        onClick={() => handleEditClick(t)}
                                                         title="Editar"
                                                         disabled={deletando}
                                                     >
                                                         <Pencil size={14} />
                                                     </button>
-                                                    <button 
+                                                    <button
                                                         className={`btn btn-ghost btn-xs text-danger hover:bg-danger/20 relative ${
                                                             deletando ? 'cursor-not-allowed opacity-50' : ''
                                                         }`}
-                                                        onClick={() => handleDeleteClick(t)} 
+                                                        onClick={() => handleDeleteClick(t)}
                                                         title={deletando ? 'Excluindo...' : 'Excluir'}
                                                         disabled={deletando}
                                                     >
@@ -995,7 +1018,7 @@ export function VisaoGestor() {
                                     <span className="text-xs text-danger">
                                         Erro na exclusão: {exclusaoState.erro}. Tente novamente.
                                     </span>
-                                    <button 
+                                    <button
                                         className="btn btn-xs btn-ghost text-danger ml-auto"
                                         onClick={() => setExclusaoState(prev => ({ ...prev, erro: null }))}
                                     >
@@ -1032,15 +1055,15 @@ export function VisaoGestor() {
 
             {/* Modal de Cadastro */}
             {showModal && (
-                <div 
-                    style={{ 
-                        position: 'fixed', 
-                        inset: 0, 
-                        background: 'rgba(0,0,0,0.6)', 
-                        zIndex: 9998, 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        justifyContent: 'center' 
+                <div
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        background: 'rgba(0,0,0,0.6)',
+                        zIndex: 9998,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
                     }}
                     onClick={(e) => {
                         if (e.target === e.currentTarget && !processing) {
@@ -1053,8 +1076,8 @@ export function VisaoGestor() {
                             <h3 className="text-lg font-bold">
                                 {editingTransaction ? 'Editar Lançamento' : (modalType === 'receita' ? 'Nova Receita' : 'Nova Despesa')}
                             </h3>
-                            <button 
-                                onClick={() => setShowModal(false)} 
+                            <button
+                                onClick={() => setShowModal(false)}
                                 disabled={processing}
                                 className="text-muted hover:text-white disabled:opacity-50"
                             >
@@ -1132,10 +1155,10 @@ export function VisaoGestor() {
                                 </div>
                                 <div className="form-group">
                                     <label>Vencimento</label>
-                                    <input 
-                                        type="date" 
-                                        className="input" 
-                                        value={formData.vencimento} 
+                                    <input
+                                        type="date"
+                                        className="input"
+                                        value={formData.vencimento}
                                         onChange={e => setFormData({ ...formData, vencimento: e.target.value })}
                                         disabled={processing}
                                     />
@@ -1178,16 +1201,16 @@ export function VisaoGestor() {
                         </div>
 
                         <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-white/10">
-                            <button 
-                                className="btn btn-ghost" 
-                                onClick={() => setShowModal(false)} 
+                            <button
+                                className="btn btn-ghost"
+                                onClick={() => setShowModal(false)}
                                 disabled={processing}
                             >
                                 Cancelar
                             </button>
-                            <button 
-                                className={`btn ${modalType === 'receita' ? 'btn-primary' : 'btn-danger'}`} 
-                                onClick={handleSave} 
+                            <button
+                                className={`btn ${modalType === 'receita' ? 'btn-primary' : 'btn-danger'}`}
+                                onClick={handleSave}
                                 disabled={processing || !formData.loja_id || !formData.item || formData.valor <= 0}
                             >
                                 {processing ? (
