@@ -62,9 +62,6 @@ export function VisaoGestor() {
     const { toast } = useToast();
     const confirm = useConfirm();
 
-    // Controle de requisições com AbortController
-    const abortControllerRef = useRef<AbortController | null>(null);
-
     // Estado para controle de exclusão
     const [exclusaoState, setExclusaoState] = useState<ExclusaoState>({
         emProgresso: false,
@@ -102,23 +99,16 @@ export function VisaoGestor() {
         modalidade: 'VARIAVEL' as 'FIXO_MENSAL' | 'FIXO_VARIAVEL' | 'VARIAVEL'
     });
 
-    // Função segura para buscar transações com suporte a cancelamento
+    // Função segura para buscar transações (sem AbortController, apenas com tratamento de erro)
     const buscarTransacoesSeguro = useCallback(async (
         anoParam: number,
         mesParam: number,
-        lojaId: string | null,
-        signal?: AbortSignal
+        lojaId: string | null
     ) => {
         try {
-            // A função fetchTransacoes precisa aceitar signal; caso não aceite, ignoramos
-            await fetchTransacoes(anoParam, mesParam, lojaId, signal);
+            await fetchTransacoes(anoParam, mesParam, lojaId);
             setDataUltimaAtualizacao(new Date());
         } catch (error: any) {
-            // Ignorar erros de cancelamento
-            if (error?.name === 'AbortError' || error?.message?.includes('abort')) {
-                console.log('[FINANCEIRO] Requisição cancelada');
-                return;
-            }
             console.error('[FINANCEIRO] Erro ao buscar transações:', error);
             toast({
                 message: 'Erro ao carregar dados: ' + getErrorMessage(error),
@@ -127,21 +117,22 @@ export function VisaoGestor() {
         }
     }, [fetchTransacoes, toast]);
 
-    // Efeito para buscar dados iniciais com cancelamento
+    // Efeito para buscar dados iniciais com proteção contra desmontagem
     useEffect(() => {
-        // Cancelar requisição anterior se existir
-        if (abortControllerRef.current) {
-            abortControllerRef.current.abort();
-        }
+        let isMounted = true;
 
-        const controller = new AbortController();
-        abortControllerRef.current = controller;
+        const carregarDados = async () => {
+            await buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null);
+            if (isMounted) {
+                // Qualquer ação pós-carregamento (se necessário)
+            }
+        };
 
-        buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null, controller.signal);
+        carregarDados();
         fetchItens(lojaAtual?.id || null);
 
         fetchAnosDisponiveis(lojaAtual?.id || null).then(anos => {
-            if (anos.length > 0) {
+            if (isMounted && anos.length > 0) {
                 setAnosDisponiveis(anos);
             }
         }).catch(error => {
@@ -149,14 +140,12 @@ export function VisaoGestor() {
         });
 
         return () => {
-            controller.abort();
-            abortControllerRef.current = null;
+            isMounted = false;
         };
     }, [ano, lojaAtual?.id, mesSelecionado, visualizacaoAnual, buscarTransacoesSeguro, fetchItens, fetchAnosDisponiveis]);
 
     // Função para refresh seguro
     const handleRefresh = useCallback(async () => {
-        // Para refresh, podemos usar um novo controller ou ignorar cancelamento
         await buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null);
         toast({ message: 'Dados atualizados!', type: 'success' });
     }, [ano, mesSelecionado, visualizacaoAnual, lojaAtual?.id, buscarTransacoesSeguro, toast]);
@@ -245,7 +234,7 @@ export function VisaoGestor() {
         };
     }, [transacoesDoPeriodo]);
 
-    // Preparar dados para o Gráfico – agora usando estrutura aninhada por loja
+    // Preparar dados para o Gráfico – usando estrutura aninhada por loja
     const chartData = useMemo(() => {
         return Array.from({ length: 12 }, (_, i) => {
             const monthNum = i + 1;
@@ -286,7 +275,7 @@ export function VisaoGestor() {
     const chartSeries = !lojaAtual ? lojasDisponiveis.map((loja, idx) => {
         const colors = ['#3B82F6', '#F59E0B', '#8B5CF6', '#EC4899', '#10B981'];
         return {
-            key: loja.id, // Agora usamos o ID diretamente, pois acessaremos via lojas[loja.id]
+            key: loja.id, // Usamos o ID diretamente, pois acessaremos via lojas[loja.id]
             label: loja.nome_fantasia,
             color: colors[idx % colors.length]
         };
@@ -362,7 +351,7 @@ export function VisaoGestor() {
                 type: 'success'
             });
 
-            // Atualizar a lista após exclusão (sem sinal, pois é uma ação isolada)
+            // Atualizar a lista após exclusão
             await buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null);
 
         } catch (error: any) {
@@ -415,7 +404,7 @@ export function VisaoGestor() {
                 return;
             }
 
-            // Validação de data (não permitir vencimento no passado para lançamentos novos? – opcional)
+            // Validação de data (não permitir vencimento no passado para lançamentos novos – opcional)
             const hoje = new Date().toISOString().split('T')[0];
             if (!editingTransaction && formData.vencimento < hoje) {
                 toast({
