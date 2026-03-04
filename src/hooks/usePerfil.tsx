@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, useRef } from 'react';
+import { createContext, useContext, useEffect, useState, useRef, useMemo } from 'react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import { User } from '@supabase/supabase-js';
 import { getPerfilAction } from './actions';
@@ -40,68 +40,71 @@ const PerfilContext = createContext<PerfilContextType>({
 });
 
 export function PerfilProvider({ children }: { children: React.ReactNode }) {
-    const supabase = createBrowserSupabaseClient();
+    // 🔧 Usar useRef para garantir a mesma instância durante todo o ciclo de vida
+    const supabaseRef = useRef(createBrowserSupabaseClient());
+    const supabase = supabaseRef.current;
+
     const [user, setUser] = useState<User | null>(null);
     const [perfil, setPerfil] = useState<Perfil | null>(null);
     const [loading, setLoading] = useState(true);
 
+    // useRef para controlar o último userId evitando chamadas duplicadas
     const lastUserIdRef = useRef<string | null>(null);
     const isLoadingRef = useRef(true);
 
-    useEffect(() => {
-        const handlePerfilData = (data: any) => {
-            let mappedRole = data.role as UserRole;
-            if (data.role === 'master') mappedRole = 'admin';
-            if (data.role === 'op_master') mappedRole = 'op_admin';
+    // Função auxiliar para mapear e setar o perfil
+    const handlePerfilData = (data: any) => {
+        let mappedRole = data.role as UserRole;
+        if (data.role === 'master') mappedRole = 'admin';
+        if (data.role === 'op_master') mappedRole = 'op_admin';
 
-            const finalPerfil: Perfil = {
-                ...data,
-                role: mappedRole
-            };
-
-
-            setPerfil(finalPerfil);
+        const finalPerfil: Perfil = {
+            ...data,
+            role: mappedRole
         };
+        setPerfil(finalPerfil);
+    };
 
-        const loadPerfil = async (retryCount = 0) => {
-            const watchdogId = setTimeout(() => {
-                if (isLoadingRef.current) {
-                    console.warn('[USE_PERFIL] Watchdog: forçando fim do loading');
-                    setLoading(false);
-                    isLoadingRef.current = false;
-                }
-            }, 12000);
+    // Função que carrega o perfil (chamada apenas quando necessário)
+    const loadPerfil = async () => {
+        // Se já estiver carregando, não faz nada (evita corrida)
+        if (isLoadingRef.current) return;
 
-            try {
-                const result = await getPerfilAction();
+        isLoadingRef.current = true;
+        setLoading(true);
 
-                if (result.error) {
-                    console.warn('[USE_PERFIL] Action falhou, tentando RPC');
-                    const { data: rpcData, error: rpcError } = await supabase.rpc('get_my_profile');
+        try {
+            // Tenta primeiro via server action
+            const result = await getPerfilAction();
 
-                    if (rpcError) {
-                        console.error('[USE_PERFIL] ❌ Falha total:', rpcError.message);
-                        return;
-                    }
+            if (result.error) {
+                console.warn('[USE_PERFIL] Action falhou, tentando RPC');
+                const { data: rpcData, error: rpcError } = await supabase.rpc('get_my_profile');
 
-                    if (rpcData) {
-                        handlePerfilData(rpcData);
-                        return;
-                    }
+                if (rpcError) {
+                    console.error('[USE_PERFIL] ❌ Falha total:', rpcError.message);
+                    return;
                 }
 
-                if (result.data) {
-                    handlePerfilData(result.data);
+                if (rpcData) {
+                    handlePerfilData(rpcData);
+                    return;
                 }
-            } catch (err: any) {
-                console.error('[USE_PERFIL] Falha crítica:', err.message);
-            } finally {
-                clearTimeout(watchdogId);
-                setLoading(false);
-                isLoadingRef.current = false;
             }
-        };
 
+            if (result.data) {
+                handlePerfilData(result.data);
+            }
+        } catch (err: any) {
+            console.error('[USE_PERFIL] Falha crítica:', err.message);
+        } finally {
+            setLoading(false);
+            isLoadingRef.current = false;
+        }
+    };
+
+    useEffect(() => {
+        // Inicializa a autenticação
         const initAuth = async () => {
             const { data: { user: currentUser } } = await supabase.auth.getUser();
 
@@ -117,22 +120,27 @@ export function PerfilProvider({ children }: { children: React.ReactNode }) {
 
         initAuth();
 
+        // Escuta mudanças de autenticação
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
             const currentUser = session?.user ?? null;
             const currentId = currentUser?.id ?? null;
             const lastId = lastUserIdRef.current;
 
+            // Se for apenas refresh de token e o usuário é o mesmo, ignora
             if (event === 'TOKEN_REFRESHED' && currentId === lastId) return;
 
             if (currentId !== lastId) {
                 if (!currentId) {
+                    // Usuário deslogou
                     setUser(null);
                     setPerfil(null);
                     setLoading(false);
                     lastUserIdRef.current = null;
+                    isLoadingRef.current = false;
                     return;
                 }
 
+                // Novo usuário logado
                 setUser(currentUser);
                 lastUserIdRef.current = currentId;
                 setPerfil(null);
@@ -145,11 +153,13 @@ export function PerfilProvider({ children }: { children: React.ReactNode }) {
         return () => {
             subscription.unsubscribe();
         };
-    }, [supabase]);
+    }, [supabase]); // Dependência estável graças ao useRef
 
+    // Determina a role atual
     const currentRole = perfil?.role || 'operador';
 
-    const value = {
+    // Memoiza o objeto de contexto para evitar re-renderizações desnecessárias
+    const value = useMemo(() => ({
         user,
         perfil,
         loading,
@@ -159,7 +169,7 @@ export function PerfilProvider({ children }: { children: React.ReactNode }) {
         isOperador: currentRole === 'operador',
         podeGerenciarCaixaBolao: ['admin', 'op_admin', 'gerente'].includes(currentRole),
         podeValidarFechamentos: currentRole === 'gerente'
-    };
+    }), [user, perfil, loading, currentRole]);
 
     return (
         <PerfilContext.Provider value={value}>
