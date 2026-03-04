@@ -144,43 +144,38 @@ export function useCaixa() {
         return data;
     };
 
-    const registrarMovimentacao = async (mov: Omit<CaixaMovimentacao, 'id' | 'sessao_id' | 'created_at'>) => {
-        if (!sessaoAtiva) throw new Error('Nenhuma sessão de caixa aberta');
+  const registrarMovimentacao = async (mov: Omit<CaixaMovimentacao, 'id' | 'sessao_id' | 'created_at'>) => {
+    if (!sessaoAtiva) throw new Error('Nenhuma sessão de caixa aberta');
 
-        const { data, error } = await supabase
-            .from('caixa_movimentacoes')
-            .insert({
-                sessao_id: sessaoAtiva.id,
-                ...mov
-            })
-            .select()
-            .single();
+    const { data, error } = await supabase
+        .from('caixa_movimentacoes')
+        .insert({
+            sessao_id: sessaoAtiva.id,
+            ...mov
+        })
+        .select()
+        .single();
 
-        if (error) throw error;
+    if (error) throw error;
 
-        // Lógica de Saldo - Determinar se soma ou subtrai
-        let delta = 0;
-        const tipo = mov.tipo as string;
+    // Cálculo correto: respeita o sinal do valor
+    let delta = mov.valor;
+    if (mov.tipo === 'trocados') {
+        delta = 0; // trocados não altera o saldo
+    }
 
-        if (['venda', 'suprimento', 'pix'].includes(tipo)) {
-            delta = mov.valor;
-        } else if (['sangria', 'pagamento', 'deposito', 'boleto', 'estorno'].includes(tipo)) {
-            delta = -mov.valor;
-        }
-        // 'trocados' não altera o saldo líquido total do caixa
+    const novoSaldo = (sessaoAtiva.valor_final_calculado || 0) + delta;
 
-        const novoSaldo = (sessaoAtiva.valor_final_calculado || 0) + delta;
+    await supabase
+        .from('caixa_sessoes')
+        .update({ valor_final_calculado: novoSaldo })
+        .eq('id', sessaoAtiva.id);
 
-        await supabase
-            .from('caixa_sessoes')
-            .update({ valor_final_calculado: novoSaldo })
-            .eq('id', sessaoAtiva.id);
+    setSessaoAtiva(prev => prev ? { ...prev, valor_final_calculado: novoSaldo } : null);
+    setMovimentacoes(prev => [data, ...prev]);
 
-        setSessaoAtiva(prev => prev ? { ...prev, valor_final_calculado: novoSaldo } : null);
-        setMovimentacoes(prev => [data, ...prev]);
-
-        return data;
-    };
+    return data;
+};
 
     const fecharCaixa = async (valorDeclarado: number, observacoes?: string, tflData?: any) => {
         if (!sessaoAtiva) throw new Error('Nenhuma sessão de caixa aberta');
