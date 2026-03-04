@@ -19,9 +19,22 @@ export type TipoLancamento = 'pix' | 'sangria' | 'trocados' | 'deposito' | 'bole
 
 interface ModalLancamentoRapidoProps {
     tipo: TipoLancamento;
+    initialData?: any; // opcional
     onClose: () => void;
-    onSave: (data: any) => Promise<void>; // Agora deve ser uma função assíncrona
+    onSave: (data: any) => Promise<void>;
 }
+
+// Dentro do componente:
+useEffect(() => {
+    if (initialData) {
+        setValor(Math.abs(initialData.valor));
+        setObservacao(initialData.descricao || '');
+        setMetodo(initialData.metodo_pagamento || (tipo === 'pix' ? 'pix' : 'especie'));
+        if (tipo === 'pix' && initialData.classificacao_pix) {
+            setClassificacaoPix(initialData.classificacao_pix);
+        }
+    }
+}, [initialData, tipo]);
 
 export function ModalLancamentoRapido({ tipo, onClose, onSave }: ModalLancamentoRapidoProps) {
     const [valor, setValor] = useState<number>(0);
