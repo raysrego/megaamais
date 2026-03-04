@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import { usePerfil } from '@/hooks/usePerfil';
 import { getLojasAction } from '@/hooks/actions';
@@ -22,21 +22,19 @@ const LojaContext = createContext<LojaContextType | undefined>(undefined);
 
 export const LojaProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { perfil, loading: loadingPerfil } = usePerfil();
+    const supabaseRef = useRef(createBrowserSupabaseClient());
+    const supabase = supabaseRef.current;
+
     const [lojaAtual, setLojaAtual] = useState<Empresa | null>(null);
     const [lojasDisponiveis, setLojasDisponiveis] = useState<Empresa[]>([]);
     const [loading, setLoading] = useState(true);
-    const supabase = createBrowserSupabaseClient();
 
     useEffect(() => {
         let isActive = true;
-        const watchdog = setTimeout(() => {
-            if (isActive && loading) {
-                console.warn('[LOJA_CONTEXT] Watchdog: timeout 10s');
-                setLoading(false);
-            }
-        }, 10000);
+        let timeoutId: NodeJS.Timeout | null = null;
 
         async function fetchLojas() {
+            // Aguarda o perfil carregar antes de prosseguir
             if (loadingPerfil) return;
 
             if (!perfil) {
@@ -49,6 +47,14 @@ export const LojaProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
 
             if (isActive) setLoading(true);
+
+            // Inicia o watchdog apenas para a busca de lojas
+            timeoutId = setTimeout(() => {
+                if (isActive && loading) {
+                    console.warn('[LOJA_CONTEXT] Watchdog: timeout 10s na busca de lojas');
+                    setLoading(false);
+                }
+            }, 10000);
 
             try {
                 const result = await getLojasAction();
@@ -82,7 +88,7 @@ export const LojaProvider: React.FC<{ children: React.ReactNode }> = ({ children
             } finally {
                 if (isActive) {
                     setLoading(false);
-                    clearTimeout(watchdog);
+                    if (timeoutId) clearTimeout(timeoutId);
                 }
             }
         }
@@ -96,8 +102,7 @@ export const LojaProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     const lojaFixa = lojas.find(l => l.id === perfil.loja_id) || lojas[0];
                     setLojaAtual(lojaFixa);
                     localStorage.setItem('@megamais/loja_id', lojaFixa.id);
-                }
-                else {
+                } else {
                     const savedId = localStorage.getItem('@megamais/loja_id');
                     if (savedId === 'all') {
                         setLojaAtual(null);
@@ -115,7 +120,7 @@ export const LojaProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         return () => {
             isActive = false;
-            clearTimeout(watchdog);
+            if (timeoutId) clearTimeout(timeoutId);
         };
     }, [perfil, loadingPerfil, supabase]);
 
