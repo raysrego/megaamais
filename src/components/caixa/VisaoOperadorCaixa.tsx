@@ -164,9 +164,9 @@ export function VisaoOperadorCaixa() {
             .reduce((acc, mov) => acc + Math.abs(mov.valor), 0); // exibimos como valor absoluto
     }, [movimentacoes]);
 
-    const saldoFinal = useMemo(() => {
-        return valorInicialSessao + totalCreditos - totalDebitos;
-    }, [valorInicialSessao, totalCreditos, totalDebitos]);
+   const saldoFinal = useMemo(() => {
+    return totalCreditos - totalDebitos;
+}, [totalCreditos, totalDebitos]);
 
     if (loadingCaixa || loadingTerminais) {
         return (
