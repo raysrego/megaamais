@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
     X,
     Smartphone,
@@ -19,24 +19,12 @@ export type TipoLancamento = 'pix' | 'sangria' | 'trocados' | 'deposito' | 'bole
 
 interface ModalLancamentoRapidoProps {
     tipo: TipoLancamento;
-    initialData?: any; // opcional
+    initialData?: any; // para edição
     onClose: () => void;
     onSave: (data: any) => Promise<void>;
 }
 
-// Dentro do componente:
-useEffect(() => {
-    if (initialData) {
-        setValor(Math.abs(initialData.valor));
-        setObservacao(initialData.descricao || '');
-        setMetodo(initialData.metodo_pagamento || (tipo === 'pix' ? 'pix' : 'especie'));
-        if (tipo === 'pix' && initialData.classificacao_pix) {
-            setClassificacaoPix(initialData.classificacao_pix);
-        }
-    }
-}, [initialData, tipo]);
-
-export function ModalLancamentoRapido({ tipo, onClose, onSave }: ModalLancamentoRapidoProps) {
+export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: ModalLancamentoRapidoProps) {
     const [valor, setValor] = useState<number>(0);
     const [observacao, setObservacao] = useState('');
     const [metodo, setMetodo] = useState<string>(
@@ -45,6 +33,18 @@ export function ModalLancamentoRapido({ tipo, onClose, onSave }: ModalLancamento
     const [classificacaoPix, setClassificacaoPix] = useState('CRED PIX QR COD EST');
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    // Preenche os dados quando estiver editando
+    useEffect(() => {
+        if (initialData) {
+            setValor(Math.abs(initialData.valor));
+            setObservacao(initialData.descricao || '');
+            setMetodo(initialData.metodo_pagamento || (tipo === 'pix' ? 'pix' : 'especie'));
+            if (tipo === 'pix' && initialData.classificacao_pix) {
+                setClassificacaoPix(initialData.classificacao_pix);
+            }
+        }
+    }, [initialData, tipo]);
 
     const config = {
         pix: { title: 'Lançamento Pix', icon: <Smartphone />, color: 'var(--success)', rgb: 'var(--success-rgb)', label: 'Valor Recebido' },
@@ -64,23 +64,18 @@ export function ModalLancamentoRapido({ tipo, onClose, onSave }: ModalLancamento
         setIsSaving(true);
 
         try {
-            // Monta os dados
             const dados = {
                 tipo,
-                valor,
+                valor: tipo === 'sangria' || tipo === 'deposito' ? -valor : valor, // mantém negativo para saídas
                 metodo,
                 observacao: tipo === 'pix' ? `[${classificacaoPix}] ${observacao}`.trim() : observacao,
                 data: new Date().toISOString(),
                 classificacao_pix: tipo === 'pix' ? classificacaoPix : null
             };
 
-            // Aguarda a operação de salvamento real (onSave deve ser assíncrona)
             await onSave(dados);
-
-            // Se chegou aqui, sucesso – fecha o modal
             onClose();
         } catch (err: any) {
-            // Exibe a mensagem de erro no próprio modal
             setError(err.message || 'Erro ao salvar lançamento. Tente novamente.');
             setIsSaving(false);
         }
@@ -119,7 +114,6 @@ export function ModalLancamentoRapido({ tipo, onClose, onSave }: ModalLancamento
                 </div>
 
                 <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                    {/* Exibe erro, se houver */}
                     {error && (
                         <div style={{
                             padding: '0.75rem',
@@ -277,7 +271,7 @@ export function ModalLancamentoRapido({ tipo, onClose, onSave }: ModalLancamento
                                 </span>
                             ) : (
                                 <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                    <Check size={20} /> Confirmar Lançamento
+                                    <Check size={20} /> {initialData ? 'Atualizar' : 'Confirmar'} Lançamento
                                 </span>
                             )}
                         </button>
