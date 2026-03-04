@@ -385,7 +385,7 @@ export function VisaoOperadorCaixa() {
                                                     <div className="flex items-center gap-2">
                                                         {getIcon(mov.tipo as TipoLancamento)}
                                                         <div className="flex flex-col">
-                                                            <span className="text-[0.8rem] font-bold text-text-primary">{getLabel(mov.tipo)}</span>
+                                                            <span className="text-[0.8rem] font-bold text-text-primary">{mov.categorias_operacionais?.nome || getLabel(mov.tipo)}</span>
                                                             <span className="text-[0.65rem] text-text-muted flex items-center gap-1">
                                                                 {mov.metodo_pagamento === 'pix' ? <Smartphone size={10} /> : <Wallet size={10} />}
                                                                 {mov.metodo_pagamento === 'pix' ? 'Pix / Digital' : 'Dinheiro Fisico'}
