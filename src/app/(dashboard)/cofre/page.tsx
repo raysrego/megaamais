@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
     ShieldCheck,
     ArrowUpFromLine,
@@ -21,12 +21,19 @@ export default function GestaoCofrePage() {
     const { saldo, pendencias, movimentacoes, loading, confirmarSangria, registrarDeposito } = useCofre();
     const [showDepositoModal, setShowDepositoModal] = useState(false);
     const { toast } = useToast();
-    const confirm = useConfirm();
+    const confirm = useConfirm(); // assume que useConfirm retorna a função diretamente
 
     // Estados locais para formulários
     const [depositoValor, setDepositoValor] = useState('');
     const [depositoBanco, setDepositoBanco] = useState('Caixa Econômica (001)');
     const [processing, setProcessing] = useState(false);
+
+    // Filtra apenas movimentações do tipo "entrada_sangria" e "saida_deposito" (saída sangria ou cofre)
+    const movimentacoesFiltradas = useMemo(() => {
+        return movimentacoes.filter(m =>
+            ['entrada_sangria', 'saida_deposito'].includes(m.tipo)
+        );
+    }, [movimentacoes]);
 
     // Cálculos derivados
     const totalPendente = pendencias.reduce((acc, s) => acc + s.valor, 0);
@@ -82,9 +89,7 @@ export default function GestaoCofrePage() {
 
     return (
         <div className="dashboard-content">
-            <PageHeader
-                title="Gestão de Cofre & Depósitos"
-            />
+            <PageHeader title="Gestão de Cofre & Depósitos" />
 
             <div className="flex justify-end mb-6">
                 <button
@@ -182,21 +187,21 @@ export default function GestaoCofrePage() {
                     )}
                 </div>
 
-                {/* Coluna 2: Histórico */}
+                {/* Coluna 2: Histórico (apenas saída sangria ou cofre) */}
                 <div className="card">
                     <h3 className="chart-title"><History size={18} /> Histórico do Cofre</h3>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '400px', overflowY: 'auto' }}>
-                        {movimentacoes.length === 0 && (
+                        {movimentacoesFiltradas.length === 0 && (
                             <div className="text-center text-muted text-xs py-4">Sem movimentações recentes.</div>
                         )}
-                        {movimentacoes.map(m => (
+                        {movimentacoesFiltradas.map(m => (
                             <div key={m.id} className="card" style={{ padding: '0.8rem', background: 'rgba(255,255,255,0.02)' }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
                                     <div style={{ fontWeight: 700, color: m.tipo.includes('entrada') ? '#22c55e' : '#ef4444' }}>
                                         {m.tipo.includes('entrada') ? '+' : '-'} R$ {m.valor.toLocaleString('pt-BR')}
                                     </div>
                                     <span className="badge" style={{ fontSize: '0.6rem', opacity: 0.8 }}>
-                                        {m.tipo.replace('_', ' ').toUpperCase()}
+                                        {m.tipo === 'entrada_sangria' ? 'SANGRIA' : 'DEPÓSITO'}
                                     </span>
                                 </div>
                                 <div className="text-xs text-muted flex justify-between mt-1">
@@ -209,54 +214,53 @@ export default function GestaoCofrePage() {
                 </div>
             </div>
 
-            {
-                showDepositoModal && (
-                    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-                        <div className="card" style={{ width: '100%', maxWidth: '450px', padding: '2rem' }}>
-                            <h2 style={{ fontSize: '1.4rem', fontWeight: 800, marginBottom: '0.5rem' }}>Registrar Depósito</h2>
-                            <div style={{ padding: '1rem', background: 'rgba(34, 197, 94, 0.1)', borderRadius: 12, marginBottom: '1.5rem' }}>
-                                <div className="text-xs text-muted">Saldo Disponível no Cofre</div>
-                                <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#22c55e' }}>R$ {saldo.toLocaleString('pt-BR')}</div>
-                            </div>
-                            <div className="flex flex-col gap-4">
-                                <div className="form-group">
-                                    <label className="text-xs text-muted uppercase font-bold">Conta de Destino</label>
-                                    <select
-                                        className="input"
-                                        value={depositoBanco}
-                                        onChange={e => setDepositoBanco(e.target.value)}
-                                    >
-                                        <option>Caixa Econômica (001)</option>
-                                        <option>Banco do Brasil (002)</option>
-                                        <option>Cofre Inteligente Natureza</option>
-                                        <option>Transportadora de Valores</option>
-                                    </select>
-                                </div>
-                                <div className="form-group">
-                                    <label className="text-xs text-muted uppercase font-bold">Valor do Depósito</label>
-                                    <input
-                                        type="number"
-                                        className="input"
-                                        placeholder="0.00"
-                                        value={depositoValor}
-                                        onChange={e => setDepositoValor(e.target.value)}
-                                    />
-                                </div>
-                            </div>
-                            <div className="flex gap-3 justify-end mt-8">
-                                <button className="btn btn-ghost" onClick={() => setShowDepositoModal(false)} disabled={processing}>Cancelar</button>
-                                <button
-                                    className="btn btn-primary"
-                                    onClick={handleSalvarDeposito}
-                                    disabled={processing}
+            {/* Modal de Depósito */}
+            {showDepositoModal && (
+                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+                    <div className="card" style={{ width: '100%', maxWidth: '450px', padding: '2rem' }}>
+                        <h2 style={{ fontSize: '1.4rem', fontWeight: 800, marginBottom: '0.5rem' }}>Registrar Depósito</h2>
+                        <div style={{ padding: '1rem', background: 'rgba(34, 197, 94, 0.1)', borderRadius: 12, marginBottom: '1.5rem' }}>
+                            <div className="text-xs text-muted">Saldo Disponível no Cofre</div>
+                            <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#22c55e' }}>R$ {saldo.toLocaleString('pt-BR')}</div>
+                        </div>
+                        <div className="flex flex-col gap-4">
+                            <div className="form-group">
+                                <label className="text-xs text-muted uppercase font-bold">Conta de Destino</label>
+                                <select
+                                    className="input"
+                                    value={depositoBanco}
+                                    onChange={e => setDepositoBanco(e.target.value)}
                                 >
-                                    {processing ? <Loader2 className="animate-spin" size={16} /> : 'Confirmar Saída'}
-                                </button>
+                                    <option>Caixa Econômica (001)</option>
+                                    <option>Banco do Brasil (002)</option>
+                                    <option>Cofre Inteligente Natureza</option>
+                                    <option>Transportadora de Valores</option>
+                                </select>
+                            </div>
+                            <div className="form-group">
+                                <label className="text-xs text-muted uppercase font-bold">Valor do Depósito</label>
+                                <input
+                                    type="number"
+                                    className="input"
+                                    placeholder="0.00"
+                                    value={depositoValor}
+                                    onChange={e => setDepositoValor(e.target.value)}
+                                />
                             </div>
                         </div>
+                        <div className="flex gap-3 justify-end mt-8">
+                            <button className="btn btn-ghost" onClick={() => setShowDepositoModal(false)} disabled={processing}>Cancelar</button>
+                            <button
+                                className="btn btn-primary"
+                                onClick={handleSalvarDeposito}
+                                disabled={processing}
+                            >
+                                {processing ? <Loader2 className="animate-spin" size={16} /> : 'Confirmar Saída'}
+                            </button>
+                        </div>
                     </div>
-                )
-            }
+                </div>
+            )}
         </div>
     );
 }
