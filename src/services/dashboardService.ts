@@ -15,7 +15,9 @@ export interface DashboardKPIs {
 }
 
 export const getDashboardKPIs = async (supabase: SupabaseClient, lojaId: string): Promise<DashboardKPIs> => {
-    // 1. Buscar nome da loja (necessário para filtrar a view)
+    console.log('[KPI] Iniciando busca para loja:', lojaId);
+
+    // 1. Buscar nome da loja
     const { data: nomeData, error: nomeError } = await supabase
         .from('empresas')
         .select('nome_fantasia')
@@ -26,7 +28,7 @@ export const getDashboardKPIs = async (supabase: SupabaseClient, lojaId: string)
         console.error('[KPI] Erro ao buscar nome da loja:', nomeError);
     }
 
-    // 2. Dados da view consolidada (agora corrigida)
+    // 2. Dados da view consolidada (já corrigida)
     let resumo = { vendas_jogos: 0, vendas_boloes: 0, premios_pagos: 0, resultado_liquido: 0 };
     if (nomeData?.nome_fantasia) {
         const { data: consolidado, error: viewError } = await supabase
@@ -41,7 +43,7 @@ export const getDashboardKPIs = async (supabase: SupabaseClient, lojaId: string)
         }
     }
 
-    // 3. Lucro real de bolões (bolões vendidos hoje)
+    // 3. Lucro real de bolões (hoje)
     const hoje = new Date().toISOString().split('T')[0];
     const { data: boloesData } = await supabase
         .from('boloes')
@@ -54,7 +56,7 @@ export const getDashboardKPIs = async (supabase: SupabaseClient, lojaId: string)
         return acc + comissaoPorCota * Number(bolao.cotas_vendidas);
     }, 0);
 
-    // 4. Terminais ativos e totais
+    // 4. Terminais
     const { count: totalTerminais } = await supabase
         .from('terminais')
         .select('*', { count: 'exact', head: true })
@@ -66,7 +68,7 @@ export const getDashboardKPIs = async (supabase: SupabaseClient, lojaId: string)
         .eq('loja_id', lojaId)
         .eq('status', 'aberto');
 
-    // 5. Quebras de hoje
+    // 5. Quebras
     const { data: quebras } = await supabase
         .from('caixa_sessoes')
         .select('diferenca_quebra')
@@ -76,13 +78,13 @@ export const getDashboardKPIs = async (supabase: SupabaseClient, lojaId: string)
 
     const quebrasTotal = (quebras || []).reduce((acc, q) => acc + Math.abs(Number(q.diferenca_quebra)), 0);
 
-    // 6. Saldo do cofre (via view, igual ao hook useCofre)
+    // 6. Saldo do cofre (mesma view usada pelo hook useCofre)
     const { data: saldoCofreView } = await supabase
         .from('cofre_saldo_atual')
         .select('saldo')
         .maybeSingle();
 
-    // 7. Saldo em bancos
+    // 7. Saldo bancário
     const { data: saldoBancosData } = await supabase
         .from('financeiro_contas_bancarias')
         .select('saldo_atual')
@@ -104,4 +106,65 @@ export const getDashboardKPIs = async (supabase: SupabaseClient, lojaId: string)
     };
 };
 
-// As funções getFluxoSemanal e getConsolidadoFiliais permanecem como estão (já revisadas)
+export const getFluxoSemanal = async (supabase: SupabaseClient, lojaId: string) => {
+    console.log('[Fluxo] Iniciando para loja:', lojaId);
+    const today = new Date();
+    const sevenDaysAgo = new Date(today);
+    sevenDaysAgo.setDate(today.getDate() - 6);
+    const startDate = sevenDaysAgo.toISOString().split('T')[0];
+
+    const { data, error } = await supabase
+        .from('financeiro_contas')
+        .select('valor, tipo, data_pagamento')
+        .eq('loja_id', lojaId)
+        .eq('status', 'pago')
+        .gte('data_pagamento', startDate);
+
+    if (error) {
+        console.error('[Fluxo] Erro:', error);
+        return [];
+    }
+
+    const daysMap = new Map<string, { dia: string; entradas: number; saidas: number; sortDate: string }>();
+    for (let i = 0; i < 7; i++) {
+        const d = new Date(sevenDaysAgo);
+        d.setDate(d.getDate() + i);
+        const dateStr = d.toISOString().split('T')[0];
+        const dayName = d.toLocaleDateString('pt-BR', { weekday: 'short' });
+        daysMap.set(dateStr, {
+            dia: dayName.charAt(0).toUpperCase() + dayName.slice(1),
+            entradas: 0,
+            saidas: 0,
+            sortDate: dateStr
+        });
+    }
+
+    data?.forEach(t => {
+        const dateKey = t.data_pagamento ? t.data_pagamento.split('T')[0] : '';
+        const entry = daysMap.get(dateKey);
+        if (entry) {
+            if (t.tipo === 'receita') entry.entradas += t.valor;
+            if (t.tipo === 'despesa') entry.saidas += t.valor;
+        }
+    });
+
+    const result = Array.from(daysMap.values()).sort((a, b) => a.sortDate.localeCompare(b.sortDate));
+    console.log('[Fluxo] Resultado:', result);
+    return result;
+};
+
+export const getConsolidadoFiliais = async (supabase: SupabaseClient) => {
+    console.log('[Consolidado] Buscando dados da view');
+    const { data, error } = await supabase
+        .from('vw_dashboard_consolidado')
+        .select('*')
+        .order('filial', { ascending: true });
+
+    if (error) {
+        console.error('[Consolidado] Erro:', error);
+        return [];
+    }
+    console.log('[Consolidado] Dados:', data);
+    return data || [];
+};
+
