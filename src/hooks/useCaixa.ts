@@ -1,13 +1,14 @@
 'use client';
 
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
+import { RealtimeChannel } from '@supabase/supabase-js';
 
 export interface CaixaSessao {
     id: number;
     operador_id: string;
-    terminal_id: string | null; // Manter legatário por enquanto
-    terminal_id_ref: number | null; // Referência formal
+    terminal_id: string | null;
+    terminal_id_ref: number | null;
     data_abertura: string;
     data_fechamento: string | null;
     valor_inicial: number;
@@ -15,23 +16,17 @@ export interface CaixaSessao {
     valor_final_calculado: number;
     status: 'aberto' | 'fechado' | 'conferido' | 'discrepante';
     observacoes: string | null;
-    tem_fundo_caixa?: boolean; // Indica se o fundo de R$100 estava presente
-
-    // Dados TFL
+    tem_fundo_caixa?: boolean;
     tfl_vendas?: number;
     tfl_premios?: number;
     tfl_contas?: number;
     tfl_saldo_projetado?: number;
     tfl_comprovante_url?: string;
-    tfl_pix_total?: number; // NOVO: PIX do relatório TFL (QR Code maquininha)
-
-    // Totalizadores de Fechamento (NOVOS)
-    total_pix_manual?: number; // PIX lançados manualmente (outras chaves)
-    total_sangrias?: number; // Sangrias informadas no fechamento
-    total_depositos_filial?: number; // Depósitos em outras filiais
-    saldo_liquido_final?: number; // Saldo TFL - PIX TFL - PIX Manual - Sangrias - Depósitos
-
-    // Validação Gerencial (NOVOS)
+    tfl_pix_total?: number;
+    total_pix_manual?: number;
+    total_sangrias?: number;
+    total_depositos_filial?: number;
+    saldo_liquido_final?: number;
     status_validacao?: 'pendente' | 'aprovado' | 'rejeitado';
     validado_por_id?: string;
     data_validacao?: string;
@@ -62,44 +57,9 @@ export function useCaixa() {
     const [sessaoAtiva, setSessaoAtiva] = useState<CaixaSessao | null>(null);
     const [loading, setLoading] = useState(true);
     const [movimentacoes, setMovimentacoes] = useState<CaixaMovimentacao[]>([]);
+    const realtimeChannel = useRef<RealtimeChannel | null>(null);
 
-    const fetchSessaoAtiva = useCallback(async () => {
-        try {
-            // [OTIMIZAÇÃO] Evitar waterfall - Verificar sessão apenas se usuário existe
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) {
-                setLoading(false);
-                return;
-            }
-
-            const { data, error } = await supabase
-                .from('caixa_sessoes')
-                .select('*, terminais!terminal_id_ref(codigo, descricao)')
-                .eq('operador_id', user.id)
-                .eq('status', 'aberto')
-                .maybeSingle();
-
-            if (error) {
-                console.error('Erro ao buscar sessão (PostgrestError):', error);
-                setSessaoAtiva(null);
-                setLoading(false);
-            } else {
-                setSessaoAtiva(data || null);
-                // [OTIMIZAÇÃO] Fetch de movimentações independente e sem travar o loading principal
-                if (data) {
-                    fetchMovimentacoes(data.id);
-                } else {
-                    setLoading(false); // Se não tem sessão, libera o loading
-                }
-            }
-        } catch (err) {
-            console.error('Erro inesperado em fetchSessaoAtiva:', err);
-            setLoading(false);
-        }
-        // Nota: O setLoading(false) final do fetchMovimentacoes irá liberar a UI se houver sessão
-    }, [supabase]);
-
-    const fetchMovimentacoes = async (sessaoId: number) => {
+    const fetchMovimentacoes = useCallback(async (sessaoId: number) => {
         try {
             const { data, error } = await supabase
                 .from('caixa_movimentacoes')
@@ -119,7 +79,81 @@ export function useCaixa() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [supabase]);
+
+    const fetchSessaoAtiva = useCallback(async () => {
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                setLoading(false);
+                return;
+            }
+
+            const { data, error } = await supabase
+                .from('caixa_sessoes')
+                .select('*, terminais!terminal_id_ref(codigo, descricao)')
+                .eq('operador_id', user.id)
+                .eq('status', 'aberto')
+                .maybeSingle();
+
+            if (error) {
+                console.error('Erro ao buscar sessão:', error);
+                setSessaoAtiva(null);
+                setLoading(false);
+            } else {
+                setSessaoAtiva(data || null);
+                if (data) {
+                    fetchMovimentacoes(data.id);
+                } else {
+                    setLoading(false);
+                }
+            }
+        } catch (err) {
+            console.error('Erro inesperado:', err);
+            setLoading(false);
+        }
+    }, [supabase, fetchMovimentacoes]);
+
+    // Configurar Realtime quando a sessão ativa mudar
+    useEffect(() => {
+        if (!sessaoAtiva) {
+            if (realtimeChannel.current) {
+                supabase.removeChannel(realtimeChannel.current);
+                realtimeChannel.current = null;
+            }
+            return;
+        }
+
+        if (realtimeChannel.current) {
+            supabase.removeChannel(realtimeChannel.current);
+        }
+
+        const channel = supabase
+            .channel(`movimentacoes:sessao_id=eq.${sessaoAtiva.id}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'caixa_movimentacoes',
+                    filter: `sessao_id=eq.${sessaoAtiva.id}`,
+                },
+                () => {
+                    // Qualquer mudança (INSERT, UPDATE, DELETE) recarrega a lista
+                    fetchMovimentacoes(sessaoAtiva.id);
+                }
+            )
+            .subscribe();
+
+        realtimeChannel.current = channel;
+
+        return () => {
+            if (realtimeChannel.current) {
+                supabase.removeChannel(realtimeChannel.current);
+                realtimeChannel.current = null;
+            }
+        };
+    }, [sessaoAtiva, supabase, fetchMovimentacoes]);
 
     const abrirCaixa = async (valorInicial: number, terminalCodigo?: string, terminalId?: number, temFundoCaixa: boolean = true) => {
         const { data: { user } } = await supabase.auth.getUser();
@@ -144,38 +178,39 @@ export function useCaixa() {
         return data;
     };
 
-  const registrarMovimentacao = async (mov: Omit<CaixaMovimentacao, 'id' | 'sessao_id' | 'created_at'>) => {
-    if (!sessaoAtiva) throw new Error('Nenhuma sessão de caixa aberta');
+    const registrarMovimentacao = async (mov: Omit<CaixaMovimentacao, 'id' | 'sessao_id' | 'created_at'>) => {
+        if (!sessaoAtiva) throw new Error('Nenhuma sessão de caixa aberta');
 
-    const { data, error } = await supabase
-        .from('caixa_movimentacoes')
-        .insert({
-            sessao_id: sessaoAtiva.id,
-            ...mov
-        })
-        .select()
-        .single();
+        const { data, error } = await supabase
+            .from('caixa_movimentacoes')
+            .insert({
+                sessao_id: sessaoAtiva.id,
+                ...mov
+            })
+            .select()
+            .single();
 
-    if (error) throw error;
+        if (error) throw error;
 
-    // Cálculo correto: respeita o sinal do valor
-    let delta = mov.valor;
-    if (mov.tipo === 'trocados') {
-        delta = 0; // trocados não altera o saldo
-    }
+        // Cálculo de saldo: respeita o sinal do valor. Apenas 'trocados' não altera o saldo.
+        let delta = mov.valor;
+        if (mov.tipo === 'trocados') {
+            delta = 0;
+        }
 
-    const novoSaldo = (sessaoAtiva.valor_final_calculado || 0) + delta;
+        const novoSaldo = (sessaoAtiva.valor_final_calculado || 0) + delta;
 
-    await supabase
-        .from('caixa_sessoes')
-        .update({ valor_final_calculado: novoSaldo })
-        .eq('id', sessaoAtiva.id);
+        // Atualiza o valor calculado na sessão (para manter consistência no banco)
+        await supabase
+            .from('caixa_sessoes')
+            .update({ valor_final_calculado: novoSaldo })
+            .eq('id', sessaoAtiva.id);
 
-    setSessaoAtiva(prev => prev ? { ...prev, valor_final_calculado: novoSaldo } : null);
-    setMovimentacoes(prev => [data, ...prev]);
+        setSessaoAtiva(prev => prev ? { ...prev, valor_final_calculado: novoSaldo } : null);
+        setMovimentacoes(prev => [data, ...prev]);
 
-    return data;
-};
+        return data;
+    };
 
     const fecharCaixa = async (valorDeclarado: number, observacoes?: string, tflData?: any) => {
         if (!sessaoAtiva) throw new Error('Nenhuma sessão de caixa aberta');
@@ -203,8 +238,7 @@ export function useCaixa() {
 
     useEffect(() => {
         fetchSessaoAtiva();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [fetchSessaoAtiva]);
 
     return {
         sessaoAtiva,
