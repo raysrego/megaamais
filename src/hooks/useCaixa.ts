@@ -60,57 +60,63 @@ export function useCaixa() {
     const realtimeChannel = useRef<RealtimeChannel | null>(null);
     const isMounted = useRef(true);
 
-useEffect(() => {
-    isMounted.current = true;
-    return () => { isMounted.current = false; };
-}, []);
+    useEffect(() => {
+        isMounted.current = true;
+        return () => { isMounted.current = false; };
+    }, []);
 
-   const fetchMovimentacoes = useCallback(async (sessaoId: number) => {
-    if (!isMounted.current) return;
-    try {
-        const { data, error } = await supabase
-            .from('caixa_movimentacoes')
-            .select(`*, categorias_operacionais!categoria_operacional_id(id, nome, cor)`)
-            .eq('sessao_id', sessaoId)
-            .is('deleted_at', null)
-            .order('created_at', { ascending: false });
-        if (error) throw error;
-        if (isMounted.current) setMovimentacoes(data || []);
-    } catch (err) {
-        console.error('Erro ao buscar movimentações:', err);
-    } finally {
-        if (isMounted.current) setLoading(false);
-    }
-}, [supabase]);
-
-const fetchSessaoAtiva = useCallback(async () => {
-    if (!isMounted.current) return;
-    try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
+    const fetchMovimentacoes = useCallback(async (sessaoId: number) => {
+        if (!isMounted.current) return;
+        console.time('fetchMovimentacoes');
+        try {
+            const { data, error } = await supabase
+                .from('caixa_movimentacoes')
+                .select(`*, categorias_operacionais!categoria_operacional_id(id, nome, cor)`)
+                .eq('sessao_id', sessaoId)
+                .is('deleted_at', null)
+                .order('created_at', { ascending: false })
+                .limit(100); // 🔥 LIMITE para evitar carregar milhares de registros
+            if (error) throw error;
+            if (isMounted.current) setMovimentacoes(data || []);
+        } catch (err) {
+            console.error('Erro ao buscar movimentações:', err);
+        } finally {
+            console.timeEnd('fetchMovimentacoes');
             if (isMounted.current) setLoading(false);
-            return;
         }
-        const { data, error } = await supabase
-            .from('caixa_sessoes')
-            .select('*, terminais!terminal_id_ref(codigo, descricao)')
-            .eq('operador_id', user.id)
-            .eq('status', 'aberto')
-            .maybeSingle();
-        if (error) throw error;
-        if (isMounted.current) {
-            setSessaoAtiva(data);
-            if (data) {
-                await fetchMovimentacoes(data.id);
-            } else {
-                setLoading(false);
+    }, [supabase]);
+
+    const fetchSessaoAtiva = useCallback(async () => {
+        if (!isMounted.current) return;
+        console.time('fetchSessaoAtiva');
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                if (isMounted.current) setLoading(false);
+                return;
             }
+            const { data, error } = await supabase
+                .from('caixa_sessoes')
+                .select('*, terminais!terminal_id_ref(codigo, descricao)')
+                .eq('operador_id', user.id)
+                .eq('status', 'aberto')
+                .maybeSingle();
+            if (error) throw error;
+            console.timeEnd('fetchSessaoAtiva');
+            if (isMounted.current) {
+                setSessaoAtiva(data);
+                if (data) {
+                    await fetchMovimentacoes(data.id);
+                } else {
+                    setLoading(false);
+                }
+            }
+        } catch (err) {
+            console.error('Erro ao buscar sessão:', err);
+            console.timeEnd('fetchSessaoAtiva');
+            if (isMounted.current) setLoading(false);
         }
-    } catch (err) {
-        console.error('Erro ao buscar sessão:', err);
-        if (isMounted.current) setLoading(false);
-    }
-}, [supabase, fetchMovimentacoes]);
+    }, [supabase, fetchMovimentacoes]);
 
     // Configurar Realtime quando a sessão ativa mudar
     useEffect(() => {
@@ -137,7 +143,6 @@ const fetchSessaoAtiva = useCallback(async () => {
                     filter: `sessao_id=eq.${sessaoAtiva.id}`,
                 },
                 () => {
-                    // Qualquer mudança (INSERT, UPDATE, DELETE) recarrega a lista
                     fetchMovimentacoes(sessaoAtiva.id);
                 }
             )
@@ -190,7 +195,6 @@ const fetchSessaoAtiva = useCallback(async () => {
 
         if (error) throw error;
 
-        // Cálculo de saldo: respeita o sinal do valor. Apenas 'trocados' não altera o saldo.
         let delta = mov.valor;
         if (mov.tipo === 'trocados') {
             delta = 0;
@@ -198,7 +202,6 @@ const fetchSessaoAtiva = useCallback(async () => {
 
         const novoSaldo = (sessaoAtiva.valor_final_calculado || 0) + delta;
 
-        // Atualiza o valor calculado na sessão (para manter consistência no banco)
         await supabase
             .from('caixa_sessoes')
             .update({ valor_final_calculado: novoSaldo })
