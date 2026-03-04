@@ -67,42 +67,69 @@ export function useCaixa() {
 
     const fetchMovimentacoes = useCallback(async (sessaoId: number) => {
         if (!isMounted.current) return;
+        
         console.time('fetchMovimentacoes');
+        
+        // Filtrar apenas os últimos 30 dias para evitar escanear toda a tabela
+        const trintaDiasAtras = new Date();
+        trintaDiasAtras.setDate(trintaDiasAtras.getDate() - 30);
+        const dataLimite = trintaDiasAtras.toISOString();
+
         try {
             const { data, error } = await supabase
                 .from('caixa_movimentacoes')
                 .select(`*, categorias_operacionais!categoria_operacional_id(id, nome, cor)`)
                 .eq('sessao_id', sessaoId)
                 .is('deleted_at', null)
+                .gte('created_at', dataLimite) // 🔥 filtra por data
                 .order('created_at', { ascending: false })
-                .limit(100); // 🔥 LIMITE para evitar carregar milhares de registros
+                .limit(100); // limite de segurança
+
             if (error) throw error;
-            if (isMounted.current) setMovimentacoes(data || []);
+            console.timeEnd('fetchMovimentacoes');
+            
+            if (isMounted.current) {
+                setMovimentacoes(data || []);
+            }
         } catch (err) {
             console.error('Erro ao buscar movimentações:', err);
-        } finally {
             console.timeEnd('fetchMovimentacoes');
+        } finally {
             if (isMounted.current) setLoading(false);
         }
     }, [supabase]);
 
     const fetchSessaoAtiva = useCallback(async () => {
         if (!isMounted.current) return;
+        
         console.time('fetchSessaoAtiva');
+        
+        // Timeout de 8 segundos para evitar loading infinito
+        const timeoutId = setTimeout(() => {
+            if (isMounted.current) {
+                console.error('[Caixa] Timeout ao carregar dados');
+                setLoading(false);
+            }
+        }, 8000);
+
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) {
                 if (isMounted.current) setLoading(false);
+                clearTimeout(timeoutId);
                 return;
             }
+
             const { data, error } = await supabase
                 .from('caixa_sessoes')
                 .select('*, terminais!terminal_id_ref(codigo, descricao)')
                 .eq('operador_id', user.id)
                 .eq('status', 'aberto')
                 .maybeSingle();
+
             if (error) throw error;
             console.timeEnd('fetchSessaoAtiva');
+            
             if (isMounted.current) {
                 setSessaoAtiva(data);
                 if (data) {
@@ -115,6 +142,8 @@ export function useCaixa() {
             console.error('Erro ao buscar sessão:', err);
             console.timeEnd('fetchSessaoAtiva');
             if (isMounted.current) setLoading(false);
+        } finally {
+            clearTimeout(timeoutId);
         }
     }, [supabase, fetchMovimentacoes]);
 
