@@ -91,6 +91,12 @@ export default function DashboardPage() {
 
     const supabase = createBrowserSupabaseClient();
 
+    // Função auxiliar para formatar moeda com segurança
+    const formatCurrency = (value: number | undefined | null): string => {
+        if (value === undefined || value === null) return '0,00';
+        return value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    };
+
     // Proteção de Rota
     useEffect(() => {
         if (!loadingPerfil && !isAdmin) {
@@ -229,7 +235,7 @@ export default function DashboardPage() {
         saldoBancos: 0
     };
 
-    // Dados para o gráfico de pizza
+    // Dados para o gráfico de pizza (apenas com valores > 0)
     const dataPie = [
         { name: 'Bolões', value: kpiData.vendasBoloes, color: '#8b5cf6' },
         { name: 'Vendas Jogos', value: kpiData.vendasJogos, color: '#3b82f6' },
@@ -255,13 +261,13 @@ export default function DashboardPage() {
             <div className="kpi-grid">
                 <KPICard
                     label="Faturamento Hoje"
-                    value={`R$ ${kpiData.faturamentoHoje.toLocaleString('pt-BR')}`}
+                    value={`R$ ${formatCurrency(kpiData.faturamentoHoje)}`}
                     icon={DollarSign}
                     trend={{ value: '18%', direction: 'up', description: 'vs ontem' }}
                     onClick={() => setDrillDownConfig({
                         isOpen: true,
                         title: 'Detalhamento de Faturamento',
-                        kpiValue: `R$ ${kpiData.faturamentoHoje.toLocaleString('pt-BR')}`,
+                        kpiValue: `R$ ${formatCurrency(kpiData.faturamentoHoje)}`,
                         data: mockMovimentacoes,
                         columns: [
                             { key: 'horario', label: 'Hora' },
@@ -275,14 +281,14 @@ export default function DashboardPage() {
 
                 <KPICard
                     label="Lucro Bolões"
-                    value={`R$ ${kpiData.lucroBoloes.toLocaleString('pt-BR')}`}
+                    value={`R$ ${formatCurrency(kpiData.lucroBoloes)}`}
                     icon={Ticket}
                     trend={{ value: '12%', direction: 'up', description: 'Ágio acumulado' }}
                     variant="success"
                     onClick={() => setDrillDownConfig({
                         isOpen: true,
                         title: 'Lucro de Bolões (Ágio)',
-                        kpiValue: `R$ ${kpiData.lucroBoloes.toLocaleString('pt-BR')}`,
+                        kpiValue: `R$ ${formatCurrency(kpiData.lucroBoloes)}`,
                         data: mockBoloesData,
                         columns: [
                             { key: 'jogo', label: 'Jogo' },
@@ -296,14 +302,14 @@ export default function DashboardPage() {
 
                 <KPICard
                     label="Terminais Ativos"
-                    value={`${kpiData.terminaisAtivos} / ${kpiData.terminaisTotal}`}
+                    value={`${kpiData.terminaisAtivos ?? 0} / ${kpiData.terminaisTotal ?? 0}`}
                     icon={Monitor}
                     trend={{ value: 'OK', direction: 'neutral', description: 'Operação normal' }}
                     variant="accent"
                     onClick={() => setDrillDownConfig({
                         isOpen: true,
                         title: 'Status dos Terminais (TFL)',
-                        kpiValue: `${kpiData.terminaisAtivos} / ${kpiData.terminaisTotal}`,
+                        kpiValue: `${kpiData.terminaisAtivos ?? 0} / ${kpiData.terminaisTotal ?? 0}`,
                         data: mockTerminaisData,
                         columns: [
                             { key: 'numeroTFL', label: 'Terminal' },
@@ -316,14 +322,14 @@ export default function DashboardPage() {
 
                 <KPICard
                     label="Caixas Abertos"
-                    value={kpiData.caixasAbertos}
+                    value={kpiData.caixasAbertos ?? 0}
                     icon={BarChart3}
                     trend={{ value: 'Ativo', direction: 'neutral', description: 'No turno atual' }}
                 />
 
                 <KPICard
                     label="Saldo em Cofre"
-                    value={`R$ ${kpiData.saldoCofre.toLocaleString('pt-BR')}`}
+                    value={`R$ ${formatCurrency(kpiData.saldoCofre)}`}
                     icon={Wallet}
                     trend={{ value: 'Físico', direction: 'neutral', description: 'Dinheiro em espécie' }}
                     variant="warning"
@@ -331,7 +337,7 @@ export default function DashboardPage() {
 
                 <KPICard
                     label="Saldo em Bancos"
-                    value={`R$ ${kpiData.saldoBancos.toLocaleString('pt-BR')}`}
+                    value={`R$ ${formatCurrency(kpiData.saldoBancos)}`}
                     icon={ShieldCheck}
                     trend={{ value: 'Digital', direction: 'neutral', description: 'Dinheiro em conta' }}
                     variant="accent"
