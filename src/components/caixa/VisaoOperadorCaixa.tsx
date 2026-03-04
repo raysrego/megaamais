@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
     Calculator,
     Smartphone,
@@ -17,7 +17,9 @@ import {
     Unlock,
     Lock,
     Loader2,
-    AlertTriangle
+    AlertTriangle,
+    ArrowUpCircle,
+    ArrowDownCircle
 } from 'lucide-react';
 import { ModalLancamentoRapido, type TipoLancamento } from '@/components/financeiro/ModalLancamentoRapido';
 import { ModalFechamentoCaixa } from '@/components/financeiro/ModalFechamentoCaixa';
@@ -41,7 +43,6 @@ export function VisaoOperadorCaixa() {
         podeGerenciarCaixaBolao
     } = usePerfil();
 
-    // Todos podem ver a aba Bolao (Operadores veem Caixa Virtual, Op.Admin/Gerente gerenciam)
     const canSeeBolao = true;
 
     const [categoriasOperacionais, setCategoriasOperacionais] = useState<any[]>([]);
@@ -52,7 +53,8 @@ export function VisaoOperadorCaixa() {
         loading: loadingCaixa,
         abrirCaixa,
         registrarMovimentacao,
-        fecharCaixa
+        fecharCaixa,
+        refresh
     } = useCaixa();
 
     const { terminais, loading: loadingTerminais } = useTerminais();
@@ -60,14 +62,12 @@ export function VisaoOperadorCaixa() {
     const [tipoSelecionado, setTipoSelecionado] = useState<TipoLancamento | null>(null);
     const [showFechamento, setShowFechamento] = useState(false);
     const [showMovimentacaoGeral, setShowMovimentacaoGeral] = useState(false);
-    const [valorInicial, setValorInicial] = useState<number>(100.00); // Fundo de troco padrÃ£o
-    const [terminalSelecionado, setTerminalSelecionado] = useState<string>(''); // CÃ³digo do terminal
-    const [terminalId, setTerminalId] = useState<number | undefined>(); // ID do terminal
-    const [temFundoCaixa, setTemFundoCaixa] = useState<boolean>(true); // Confirmação de fundo R$100
+    const [valorInicial, setValorInicial] = useState<number>(100.00);
+    const [terminalSelecionado, setTerminalSelecionado] = useState<string>('');
+    const [terminalId, setTerminalId] = useState<number | undefined>();
+    const [temFundoCaixa, setTemFundoCaixa] = useState<boolean>(true);
     const { toast } = useToast();
     const [isOpening, setIsOpening] = useState(false);
-
-    // Novo Estado para Abas de Caixa
     const [abaCaixa, setAbaCaixa] = useState<'tfl' | 'bolao'>('tfl');
 
     const handleSaveEntry = async (data: any) => {
@@ -149,6 +149,25 @@ export function VisaoOperadorCaixa() {
         }
     };
 
+    // Cálculos dos totais
+    const valorInicialSessao = sessaoAtiva?.valor_inicial || 0;
+
+    const totalCreditos = useMemo(() => {
+        return movimentacoes
+            .filter(mov => mov.valor > 0)
+            .reduce((acc, mov) => acc + mov.valor, 0);
+    }, [movimentacoes]);
+
+    const totalDebitos = useMemo(() => {
+        return movimentacoes
+            .filter(mov => mov.valor < 0)
+            .reduce((acc, mov) => acc + Math.abs(mov.valor), 0); // exibimos como valor absoluto
+    }, [movimentacoes]);
+
+    const saldoFinal = useMemo(() => {
+        return valorInicialSessao + totalCreditos - totalDebitos;
+    }, [valorInicialSessao, totalCreditos, totalDebitos]);
+
     if (loadingCaixa || loadingTerminais) {
         return (
             <div className="flex items-center justify-center p-24">
@@ -159,6 +178,7 @@ export function VisaoOperadorCaixa() {
     }
 
     if (!sessaoAtiva) {
+        // Tela de abertura de caixa (igual ao original)
         return (
             <div className="dashboard-content max-w-2xl mx-auto py-12">
                 <div className="card p-8 border-t-4 border-primary-blue-light">
@@ -192,7 +212,7 @@ export function VisaoOperadorCaixa() {
                                     ))}
                                 </select>
                                 {terminais.length === 0 && (
-                                    <p className="text-[10px] text-danger mt-1 font-bold">âš ï¸ Nenhum terminal cadastrado. VÃ¡ em Cadastros &gt; Terminais TFL.</p>
+                                    <p className="text-[10px] text-danger mt-1 font-bold">⚠️ Nenhum terminal cadastrado. Vá em Cadastros &gt; Terminais TFL.</p>
                                 )}
                             </div>
 
@@ -255,26 +275,51 @@ export function VisaoOperadorCaixa() {
 
     return (
         <div className="visao-operador-container mt-4">
-            <div className="card mb-6 bg-surface-subtle border-border flex items-center gap-6 p-5">
-                <div className="w-11 h-11 bg-success rounded-xl flex items-center justify-center">
-                    <Unlock size={20} className="text-white" />
+            {/* Cabeçalho com resumo financeiro */}
+            <div className="card mb-6 bg-surface-subtle border-border p-5">
+                <div className="grid grid-cols-4 gap-4">
+                    <div className="text-center">
+                        <div className="text-[10px] text-text-muted uppercase font-bold tracking-wider">Valor Inicial</div>
+                        <div className="text-lg font-extrabold text-text-primary">
+                            R$ {valorInicialSessao.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </div>
+                    </div>
+                    <div className="text-center border-l border-border/30">
+                        <div className="text-[10px] text-text-muted uppercase font-bold tracking-wider flex items-center justify-center gap-1">
+                            <ArrowUpCircle size={12} className="text-success" /> Entradas
+                        </div>
+                        <div className="text-lg font-extrabold text-success">
+                            R$ {totalCreditos.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </div>
+                    </div>
+                    <div className="text-center border-l border-border/30">
+                        <div className="text-[10px] text-text-muted uppercase font-bold tracking-wider flex items-center justify-center gap-1">
+                            <ArrowDownCircle size={12} className="text-danger" /> Saídas
+                        </div>
+                        <div className="text-lg font-extrabold text-danger">
+                            R$ {totalDebitos.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </div>
+                    </div>
+                    <div className="text-center border-l border-border/30">
+                        <div className="text-[10px] text-text-muted uppercase font-bold tracking-wider">Saldo Final</div>
+                        <div className={`text-lg font-extrabold ${saldoFinal >= 0 ? 'text-success' : 'text-danger'}`}>
+                            R$ {saldoFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </div>
+                    </div>
                 </div>
-                <div className="flex-1">
+                <div className="flex items-center justify-between mt-3 pt-3 border-t border-border/30">
                     <div className="flex items-center gap-2">
-                        <h3 className="font-bold text-text-primary">Caixa em Operacao: {sessaoAtiva.terminal_id}</h3>
-                        <span className="badge success text-[0.6rem]">ABERTO</span>
+                        <div className="w-2 h-2 rounded-full bg-success" />
+                        <span className="text-xs text-text-muted">Caixa: {sessaoAtiva.terminal_id}</span>
+                        <span className="badge success text-[0.6rem] ml-2">ABERTO</span>
                     </div>
-                    <p className="text-xs text-text-muted">Aberto em {new Date(sessaoAtiva.data_abertura).toLocaleString('pt-BR')}</p>
-                </div>
-                <div className="text-right">
-                    <div className="text-[10px] text-text-muted uppercase font-bold tracking-wider">Saldo em Tela</div>
-                    <div className="text-xl font-extrabold text-success">
-                        R$ {(sessaoAtiva?.valor_final_calculado || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                    </div>
+                    <p className="text-xs text-text-muted">
+                        Aberto em {new Date(sessaoAtiva.data_abertura).toLocaleString('pt-BR')}
+                    </p>
                 </div>
             </div>
 
-            {/* SELETOR DE CAIXA (TFL vs BOLÃƒO) */}
+            {/* SELETOR DE CAIXA (TFL vs BOLÃO) */}
             <div className="flex justify-between items-center mb-6 border-b border-white/5 pb-6">
                 <div className="flex gap-2">
                     <button
@@ -288,7 +333,7 @@ export function VisaoOperadorCaixa() {
                             onClick={() => setAbaCaixa('bolao')}
                             className={`btn ${abaCaixa === 'bolao' ? 'bg-[#4f46e5] text-white' : 'btn-ghost'} h-10 px-6 text-xs font-bold rounded-xl`}
                         >
-                            <Ticket size={16} /> Caixa BolÃ£o
+                            <Ticket size={16} /> Caixa Bolão
                         </button>
                     )}
                 </div>
@@ -296,7 +341,7 @@ export function VisaoOperadorCaixa() {
                 {(abaCaixa === 'bolao' && canSeeBolao) && (
                     <div className="flex items-center gap-3 px-4 py-2 bg-indigo-500/5 rounded-full border border-indigo-500/10">
                         <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
-                        <span className="text-[10px] uppercase font-bold text-indigo-400 tracking-widest">Controle Central de BolÃµes</span>
+                        <span className="text-[10px] uppercase font-bold text-indigo-400 tracking-widest">Controle Central de Bolões</span>
                     </div>
                 )}
             </div>
@@ -313,7 +358,7 @@ export function VisaoOperadorCaixa() {
                         <div className="card">
                             <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
                                 <Calculator size={22} className="text-primary-blue-light" />
-                                Painel de Lancamentos
+                                Painel de Lançamentos
                             </h3>
 
                             <div className="grid gap-4">
@@ -366,7 +411,7 @@ export function VisaoOperadorCaixa() {
                             <div className="flex items-center justify-between mb-6">
                                 <h3 className="text-sm font-bold flex items-center gap-2 uppercase tracking-wide opacity-80 text-text-primary">
                                     <History size={16} className="text-text-muted" />
-                                    MovimentaÃ§Ãµes
+                                    Movimentações
                                 </h3>
                                 <span className="badge text-[0.6rem]">TURNO ATIVO</span>
                             </div>
@@ -385,15 +430,17 @@ export function VisaoOperadorCaixa() {
                                                     <div className="flex items-center gap-2">
                                                         {getIcon(mov.tipo as TipoLancamento)}
                                                         <div className="flex flex-col">
-                                                            <span className="text-[0.8rem] font-bold text-text-primary">{mov.categorias_operacionais?.nome || getLabel(mov.tipo)}</span>
+                                                            <span className="text-[0.8rem] font-bold text-text-primary">
+                                                                {mov.categorias_operacionais?.nome || getLabel(mov.tipo)}
+                                                            </span>
                                                             <span className="text-[0.65rem] text-text-muted flex items-center gap-1">
                                                                 {mov.metodo_pagamento === 'pix' ? <Smartphone size={10} /> : <Wallet size={10} />}
                                                                 {mov.metodo_pagamento === 'pix' ? 'Pix / Digital' : 'Dinheiro Fisico'}
                                                             </span>
                                                         </div>
                                                     </div>
-                                                    <span className={`text-[0.9rem] font-extrabold ${(mov.tipo === 'sangria' || mov.tipo === 'pagamento') ? 'text-danger' : 'text-success'}`}>
-                                                        {(mov.tipo === 'sangria' || mov.tipo === 'pagamento') ? '-' : '+'} R$ {(mov.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    <span className={`text-[0.9rem] font-extrabold ${mov.valor < 0 ? 'text-danger' : 'text-success'}`}>
+                                                        {mov.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                                                     </span>
                                                 </div>
 
@@ -411,8 +458,8 @@ export function VisaoOperadorCaixa() {
                             <div className="mt-auto pt-6 border-t-2 border-border">
                                 <div className="flex items-center justify-between mb-4">
                                     <span className="text-xs font-bold text-text-muted uppercase tracking-wider">Saldo em Caixa</span>
-                                    <span className="font-extrabold text-xl text-text-primary">
-                                        R$ {(sessaoAtiva?.valor_final_calculado || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    <span className={`font-extrabold text-xl ${saldoFinal >= 0 ? 'text-success' : 'text-danger'}`}>
+                                        R$ {saldoFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                     </span>
                                 </div>
                                 <button
@@ -456,5 +503,3 @@ export function VisaoOperadorCaixa() {
         </div>
     );
 }
-
-
