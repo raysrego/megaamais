@@ -115,12 +115,16 @@ export function ModalMovimentacaoGeral({ onClose, onSave }: ModalMovimentacaoGer
             const categoriaNome = categoria?.nome.toLowerCase() || '';
 
             // Determinar tipo de movimentação baseado na categoria
-            let tipoMovimentacao = tipo === 'entrada' ? 'venda' : 'sangria';
+           let tipoMovimentacao = tipo === 'entrada' ? 'venda' : 'pagamento'; // ou 'despesa'
 
-            // Se for saída e categoria contém "cofre", é depósito no cofre
-            if (tipo === 'saida' && (categoriaNome.includes('cofre') || categoriaNome.includes('deposito'))) {
-                tipoMovimentacao = 'deposito';
-            }
+// Se for saída e categoria contém "sangria" ou "cofre" → sangria (dinheiro físico indo para o cofre)
+if (tipo === 'saida' && (categoriaNome.includes('sangria') || categoriaNome.includes('cofre'))) {
+    tipoMovimentacao = 'sangria';
+}
+// Se for saída e categoria contém "deposito" → deposito (ex.: depósito bancário)
+else if (tipo === 'saida' && categoriaNome.includes('deposito')) {
+    tipoMovimentacao = 'deposito';
+}
 
             const dados = {
                 tipo: tipoMovimentacao,
