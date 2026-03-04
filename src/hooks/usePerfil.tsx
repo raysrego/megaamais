@@ -40,7 +40,6 @@ const PerfilContext = createContext<PerfilContextType>({
 });
 
 export function PerfilProvider({ children }: { children: React.ReactNode }) {
-    // Criar cliente Supabase apenas uma vez
     const supabaseRef = useRef(createBrowserSupabaseClient());
     const supabase = supabaseRef.current;
 
@@ -51,21 +50,14 @@ export function PerfilProvider({ children }: { children: React.ReactNode }) {
     const lastUserIdRef = useRef<string | null>(null);
     const isLoadingRef = useRef(true);
 
-    // Função para processar dados do perfil
     const handlePerfilData = useCallback((data: any) => {
         let mappedRole = data.role as UserRole;
         if (data.role === 'master') mappedRole = 'admin';
         if (data.role === 'op_master') mappedRole = 'op_admin';
-
-        const finalPerfil: Perfil = {
-            ...data,
-            role: mappedRole
-        };
-        setPerfil(finalPerfil);
+        setPerfil({ ...data, role: mappedRole });
     }, []);
 
-    // Função para carregar perfil
-    const loadPerfil = useCallback(async (retryCount = 0) => {
+    const loadPerfil = useCallback(async () => {
         const watchdogId = setTimeout(() => {
             if (isLoadingRef.current) {
                 console.warn('[USE_PERFIL] Watchdog: forçando fim do loading');
@@ -76,27 +68,15 @@ export function PerfilProvider({ children }: { children: React.ReactNode }) {
 
         try {
             const result = await getPerfilAction();
-
             if (result.error) {
-                console.warn('[USE_PERFIL] Action falhou, tentando RPC');
                 const { data: rpcData, error: rpcError } = await supabase.rpc('get_my_profile');
-
-                if (rpcError) {
-                    console.error('[USE_PERFIL] ❌ Falha total:', rpcError.message);
-                    return;
-                }
-
-                if (rpcData) {
-                    handlePerfilData(rpcData);
-                    return;
-                }
-            }
-
-            if (result.data) {
+                if (rpcError) throw rpcError;
+                if (rpcData) handlePerfilData(rpcData);
+            } else if (result.data) {
                 handlePerfilData(result.data);
             }
         } catch (err: any) {
-            console.error('[USE_PERFIL] Falha crítica:', err.message);
+            console.error('[USE_PERFIL] Falha:', err.message);
         } finally {
             clearTimeout(watchdogId);
             setLoading(false);
@@ -104,11 +84,9 @@ export function PerfilProvider({ children }: { children: React.ReactNode }) {
         }
     }, [supabase, handlePerfilData]);
 
-    // Inicialização e listener de auth
     useEffect(() => {
         const initAuth = async () => {
             const { data: { user: currentUser } } = await supabase.auth.getUser();
-
             if (currentUser) {
                 setUser(currentUser);
                 lastUserIdRef.current = currentUser.id;
@@ -118,7 +96,6 @@ export function PerfilProvider({ children }: { children: React.ReactNode }) {
                 isLoadingRef.current = false;
             }
         };
-
         initAuth();
 
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -127,7 +104,6 @@ export function PerfilProvider({ children }: { children: React.ReactNode }) {
             const lastId = lastUserIdRef.current;
 
             if (event === 'TOKEN_REFRESHED' && currentId === lastId) return;
-
             if (currentId !== lastId) {
                 if (!currentId) {
                     setUser(null);
@@ -136,7 +112,6 @@ export function PerfilProvider({ children }: { children: React.ReactNode }) {
                     lastUserIdRef.current = null;
                     return;
                 }
-
                 setUser(currentUser);
                 lastUserIdRef.current = currentId;
                 setPerfil(null);
@@ -146,14 +121,10 @@ export function PerfilProvider({ children }: { children: React.ReactNode }) {
             }
         });
 
-        return () => {
-            subscription.unsubscribe();
-        };
-    }, [supabase, loadPerfil]); // dependências: supabase e loadPerfil (estável)
+        return () => subscription.unsubscribe();
+    }, [supabase, loadPerfil]);
 
     const currentRole = perfil?.role || 'operador';
-
-    // Memoizar o valor do contexto para evitar re-renderizações desnecessárias
     const value = useMemo(() => ({
         user,
         perfil,
