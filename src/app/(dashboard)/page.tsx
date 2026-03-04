@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useEffect, useState } from 'react';
 import {
@@ -91,47 +91,46 @@ export default function DashboardPage() {
 
     const supabase = createBrowserSupabaseClient();
 
-    // Proteção de Rota
-
+    // Proteção de Rota - redireciona se não for admin
     useEffect(() => {
         if (!loadingPerfil && !isAdmin) {
             router.replace('/caixa');
         }
     }, [isAdmin, loadingPerfil, router]);
 
+    // Carregamento dos dados
     useEffect(() => {
         async function loadData() {
-            // Se ainda está carregando perfil, não faz nada
-            if (loadingPerfil) return;
-
-
-            // Caso 1: Sem loja selecionada e NÃO é admin (Erros de acesso ou operador sem loja)
-            if (!lojaAtual && !isAdmin) {
-                setLoading(false);
-                return;
-            }
+            if (loadingPerfil) return; // aguarda perfil
 
             setLoading(true);
 
-            // Caso 2: Carregamento de dados (Com loja ou visão consolidada de Admin)
             try {
-                // Se tem loja, carrega dados específicos dela
                 if (lojaAtual) {
-
-                    const [kpiRes, consolidadoRes, dataFluxo] = await Promise.all([
+                    // Carrega dados da loja específica
+                    const [kpiRes, consolidadoRes, fluxo] = await Promise.all([
                         getDashboardKPIsAction(lojaAtual.id),
                         getConsolidadoFiliaisAction(),
                         getFluxoSemanal(supabase, lojaAtual.id)
                     ]);
 
-                    if (kpiRes.data) setKpis(kpiRes.data as any);
-                    if (consolidadoRes.data) setConsolidadoFiliais(consolidadoRes.data as any);
-                    setFluxoSemanal(dataFluxo);
-                }
-                // Se não tem loja mas é Admin (Visão Geral)
-                else if (isAdmin) {
+                    // Log para inspeção
+                    console.log('[Dashboard] KPIs:', kpiRes);
+                    console.log('[Dashboard] Consolidado:', consolidadoRes);
+                    console.log('[Dashboard] Fluxo:', fluxo);
+
+                    if (kpiRes.data) setKpis(kpiRes.data as DashboardKPIs);
+                    if (consolidadoRes.data) setConsolidadoFiliais(consolidadoRes.data as any[]);
+                    setFluxoSemanal(fluxo || []);
+                } else if (isAdmin) {
+                    // Visão geral do admin (sem loja selecionada)
                     const consolidadoRes = await getConsolidadoFiliaisAction();
-                    if (consolidadoRes.data) setConsolidadoFiliais(consolidadoRes.data as any);
+                    console.log('[Dashboard] Consolidado (Admin):', consolidadoRes);
+                    if (consolidadoRes.data) setConsolidadoFiliais(consolidadoRes.data as any[]);
+                    setKpis(null); // sem KPIs específicos de loja
+                } else {
+                    // Sem loja e não admin: provavelmente erro de permissão
+                    setConsolidadoFiliais([]);
                     setKpis(null);
                 }
             } catch (err: any) {
@@ -141,34 +140,18 @@ export default function DashboardPage() {
             }
         }
         loadData();
-    }, [lojaAtual, supabase, isAdmin, loadingPerfil]);
+    }, [lojaAtual, isAdmin, loadingPerfil, supabase]);
 
-    // Loading State
-    if (loadingPerfil || (loading && !kpis && !consolidadoFiliais.length)) {
-        return <LoadingState type="dashboard" />;
-    }
-
-    const kpiData = kpis || {
-        faturamentoHoje: 0,
-        vendasJogos: 0,
-        vendasBoloes: 0,
-        lucroBoloes: 0,
-        terminaisAtivos: 0,
-        terminaisTotal: 0,
-        caixasAbertos: 0,
-        quebrasHoje: 0,
-        saldoCofre: 0,
-        saldoBancos: 0
+    // Função auxiliar para converter valores com fallback seguro
+    const safeNumber = (value: any): number => {
+        const num = Number(value);
+        return isNaN(num) ? 0 : num;
     };
 
-    // Dados Reais para PieChart
-    const dataPie = [
-        { name: 'Bolões', value: kpiData.vendasBoloes, color: '#8b5cf6' },
-        { name: 'Vendas Jogos', value: kpiData.vendasJogos, color: '#3b82f6' },
-        // Outros pode ser calculado se houver serviços etc. Por enquanto 0.
-        { name: 'Outros', value: 0, color: '#f59e0b' },
-    ].filter(item => item.value > 0);
-    // Filter para não mostrar fatias vazias na legenda ou feio no gráfico
+    // Função para formatar valor com fallback
+    const formatCurrency = (value: any): string => {
+        return `R$ ${safeNumber(value).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+    };
 
     if (loadingPerfil || loading) {
         return <LoadingState type="dashboard" />;
@@ -185,6 +168,27 @@ export default function DashboardPage() {
             </div>
         );
     }
+
+    // Dados padrão para KPIs caso não existam
+    const kpiData = {
+        faturamentoHoje: safeNumber(kpis?.faturamentoHoje),
+        vendasJogos: safeNumber(kpis?.vendasJogos),
+        vendasBoloes: safeNumber(kpis?.vendasBoloes),
+        lucroBoloes: safeNumber(kpis?.lucroBoloes),
+        terminaisAtivos: safeNumber(kpis?.terminaisAtivos),
+        terminaisTotal: safeNumber(kpis?.terminaisTotal),
+        caixasAbertos: safeNumber(kpis?.caixasAbertos),
+        quebrasHoje: safeNumber(kpis?.quebrasHoje),
+        saldoCofre: safeNumber(kpis?.saldoCofre),
+        saldoBancos: safeNumber(kpis?.saldoBancos)
+    };
+
+    // Dados para gráfico de pizza (apenas valores positivos)
+    const dataPie = [
+        { name: 'Bolões', value: kpiData.vendasBoloes, color: '#8b5cf6' },
+        { name: 'Vendas Jogos', value: kpiData.vendasJogos, color: '#3b82f6' },
+        { name: 'Outros', value: 0, color: '#f59e0b' },
+    ].filter(item => item.value > 0);
 
     return (
         <div className="dashboard-content animate-in fade-in duration-700">
@@ -205,19 +209,19 @@ export default function DashboardPage() {
             <div className="kpi-grid">
                 <KPICard
                     label="Faturamento Hoje"
-                    value={`R$ ${kpiData.faturamentoHoje.toLocaleString('pt-BR')}`}
+                    value={formatCurrency(kpiData.faturamentoHoje)}
                     icon={DollarSign}
                     trend={{ value: '18%', direction: 'up', description: 'vs ontem' }}
                     onClick={() => setDrillDownConfig({
                         isOpen: true,
                         title: 'Detalhamento de Faturamento',
-                        kpiValue: `R$ ${kpiData.faturamentoHoje.toLocaleString('pt-BR')}`,
+                        kpiValue: formatCurrency(kpiData.faturamentoHoje),
                         data: mockMovimentacoes,
                         columns: [
                             { key: 'horario', label: 'Hora' },
                             { key: 'tipo', label: 'Tipo' },
                             { key: 'descricao', label: 'Descrição' },
-                            { key: 'valor', label: 'Valor', format: (v: any) => `R$ ${v.toLocaleString('pt-BR')}` },
+                            { key: 'valor', label: 'Valor', format: (v: any) => formatCurrency(v) },
                             { key: 'terminal', label: 'Terminal' }
                         ]
                     })}
@@ -225,21 +229,21 @@ export default function DashboardPage() {
 
                 <KPICard
                     label="Lucro Bolões"
-                    value={`R$ ${kpiData.lucroBoloes.toLocaleString('pt-BR')}`}
+                    value={formatCurrency(kpiData.lucroBoloes)}
                     icon={Ticket}
                     trend={{ value: '12%', direction: 'up', description: 'Ágio acumulado' }}
                     variant="success"
                     onClick={() => setDrillDownConfig({
                         isOpen: true,
                         title: 'Lucro de Bolões (Ágio)',
-                        kpiValue: `R$ ${kpiData.lucroBoloes.toLocaleString('pt-BR')}`,
+                        kpiValue: formatCurrency(kpiData.lucroBoloes),
                         data: mockBoloesData,
                         columns: [
                             { key: 'jogo', label: 'Jogo' },
                             { key: 'concurso', label: 'Concurso' },
-                            { key: 'valorCota', label: 'Vlr Cota', format: (v: any) => `R$ ${v.toLocaleString('pt-BR')}` },
+                            { key: 'valorCota', label: 'Vlr Cota', format: (v: any) => formatCurrency(v) },
                             { key: 'cotasVendidas', label: 'Vendidas' },
-                            { key: 'agio', label: 'Ágio', format: (v: any) => `${v}%` }
+                            { key: 'agio', label: 'Ágio', format: (v: any) => `${safeNumber(v)}%` }
                         ]
                     })}
                 />
@@ -258,7 +262,7 @@ export default function DashboardPage() {
                         columns: [
                             { key: 'numeroTFL', label: 'Terminal' },
                             { key: 'operador', label: 'Operador' },
-                            { key: 'volumeVendas', label: 'Vendas', format: (v: any) => `R$ ${v.toLocaleString('pt-BR')}` },
+                            { key: 'volumeVendas', label: 'Vendas', format: (v: any) => formatCurrency(v) },
                             { key: 'status', label: 'Status' }
                         ]
                     })}
@@ -273,7 +277,7 @@ export default function DashboardPage() {
 
                 <KPICard
                     label="Saldo em Cofre"
-                    value={`R$ ${kpiData.saldoCofre.toLocaleString('pt-BR')}`}
+                    value={formatCurrency(kpiData.saldoCofre)}
                     icon={Wallet}
                     trend={{ value: 'Físico', direction: 'neutral', description: 'Dinheiro em espécie' }}
                     variant="warning"
@@ -281,7 +285,7 @@ export default function DashboardPage() {
 
                 <KPICard
                     label="Saldo em Bancos"
-                    value={`R$ ${kpiData.saldoBancos.toLocaleString('pt-BR')}`}
+                    value={formatCurrency(kpiData.saldoBancos)}
                     icon={ShieldCheck}
                     trend={{ value: 'Digital', direction: 'neutral', description: 'Dinheiro em conta' }}
                     variant="accent"
@@ -340,7 +344,7 @@ export default function DashboardPage() {
                                         borderRadius: '12px',
                                         color: 'var(--text-primary)'
                                     }}
-                                    formatter={(v: any) => `R$ ${Number(v).toLocaleString('pt-BR')}`}
+                                    formatter={(v: any) => formatCurrency(v)}
                                 />
                             </PieChart>
                         </ResponsiveContainer>
@@ -369,23 +373,38 @@ export default function DashboardPage() {
                         <tbody>
                             {consolidadoFiliais.map((f, idx) => (
                                 <tr key={idx} className="hover:bg-muted/50 transition-colors">
-                                    <td className="font-bold py-5">{f.filial}</td>
-                                    <td>R$ {Number(f.vendas_jogos).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                                    <td>R$ {Number(f.vendas_boloes).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                                    <td className="font-bold py-5">{f.filial || '-'}</td>
+                                    <td>{formatCurrency(f.vendas_jogos)}</td>
+                                    <td>{formatCurrency(f.vendas_boloes)}</td>
                                     <td>R$ 0,00</td>
-                                    <td className="text-danger">R$ {Number(f.premios_pagos).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                                    <td className="text-success font-black">R$ {Number(f.resultado_liquido).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                                    <td className="text-danger">{formatCurrency(f.premios_pagos)}</td>
+                                    <td className="text-success font-black">{formatCurrency(f.resultado_liquido)}</td>
                                 </tr>
                             ))}
+                            {consolidadoFiliais.length === 0 && (
+                                <tr>
+                                    <td colSpan={6} className="text-center py-8 text-muted">
+                                        Nenhum dado de consolidação disponível.
+                                    </td>
+                                </tr>
+                            )}
                         </tbody>
                         <tfoot className="border-t border-border bg-muted/30">
                             <tr>
                                 <td className="p-5 font-black text-foreground text-base">TOTAL GERAL</td>
-                                <td className="p-5 font-bold">R$ {consolidadoFiliais.reduce((acc, f) => acc + Number(f.vendas_jogos), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                                <td className="p-5 font-bold">R$ {consolidadoFiliais.reduce((acc, f) => acc + Number(f.vendas_boloes), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                                <td className="p-5 font-bold">
+                                    {formatCurrency(consolidadoFiliais.reduce((acc, f) => acc + safeNumber(f.vendas_jogos), 0))}
+                                </td>
+                                <td className="p-5 font-bold">
+                                    {formatCurrency(consolidadoFiliais.reduce((acc, f) => acc + safeNumber(f.vendas_boloes), 0))}
+                                </td>
                                 <td className="p-5 font-bold">R$ 0,00</td>
-                                <td className="p-5 font-bold text-danger">R$ {consolidadoFiliais.reduce((acc, f) => acc + Number(f.premios_pagos), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                                <td className="p-5 font-black text-primary-blue-light text-xl">R$ {consolidadoFiliais.reduce((acc, f) => acc + Number(f.resultado_liquido), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                                <td className="p-5 font-bold text-danger">
+                                    {formatCurrency(consolidadoFiliais.reduce((acc, f) => acc + safeNumber(f.premios_pagos), 0))}
+                                </td>
+                                <td className="p-5 font-black text-primary-blue-light text-xl">
+                                    {formatCurrency(consolidadoFiliais.reduce((acc, f) => acc + safeNumber(f.resultado_liquido), 0))}
+                                </td>
                             </tr>
                         </tfoot>
                     </table>
@@ -415,5 +434,4 @@ export default function DashboardPage() {
         </div>
     );
 }
-
 
