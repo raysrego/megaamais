@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, memo } from 'react';
 import {
     Calculator,
     Smartphone,
@@ -36,6 +36,57 @@ import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmContext';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 
+// Componente memoizado para cada item da lista
+const MovimentacaoItem = memo(({ mov, onEdit, onDelete, getIcon, getLabel }: any) => {
+    return (
+        <div className="card p-3.5 bg-bg-dark border-border relative group">
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                    {getIcon(mov.tipo)}
+                    <div className="flex flex-col">
+                        <span className="text-[0.8rem] font-bold text-text-primary">
+                            {mov.categorias_operacionais?.nome || getLabel(mov.tipo)}
+                        </span>
+                        <span className="text-[0.65rem] text-muted flex items-center gap-1">
+                            {mov.metodo_pagamento === 'pix' ? <Smartphone size={10} /> : <Wallet size={10} />}
+                            {mov.metodo_pagamento === 'pix' ? 'Pix / Digital' : 'Dinheiro Físico'}
+                        </span>
+                    </div>
+                </div>
+                <span className={`text-[0.9rem] font-extrabold ${mov.valor < 0 ? 'text-danger' : 'text-success'}`}>
+                    {mov.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                </span>
+            </div>
+
+            {mov.descricao && (
+                <p className="text-[0.65rem] text-muted mt-2 italic border-t border-border/30 pt-2">
+                    "{mov.descricao}"
+                </p>
+            )}
+
+            {/* Botões de ação */}
+            <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                    onClick={() => onEdit(mov)}
+                    className="p-1 rounded bg-blue-500/10 hover:bg-blue-500/20 text-blue-500"
+                    title="Editar"
+                >
+                    <Pencil size={14} />
+                </button>
+                <button
+                    onClick={() => onDelete(mov)}
+                    className="p-1 rounded bg-danger/10 hover:bg-danger/20 text-danger"
+                    title="Excluir"
+                >
+                    <Trash2 size={14} />
+                </button>
+            </div>
+        </div>
+    );
+});
+
+MovimentacaoItem.displayName = 'MovimentacaoItem';
+
 export function VisaoOperadorCaixa() {
     const supabase = createBrowserSupabaseClient();
     const { perfil, podeGerenciarCaixaBolao } = usePerfil();
@@ -64,6 +115,7 @@ export function VisaoOperadorCaixa() {
     const [temFundoCaixa, setTemFundoCaixa] = useState<boolean>(true);
     const [isOpening, setIsOpening] = useState(false);
     const [abaCaixa, setAbaCaixa] = useState<'tfl' | 'bolao'>('tfl');
+    const [limiteExibicao, setLimiteExibicao] = useState(50); // limite inicial
 
     const canSeeBolao = true;
 
@@ -157,7 +209,7 @@ export function VisaoOperadorCaixa() {
         }
     };
 
-    const getIcon = (tipo: TipoLancamento) => {
+    const getIcon = useCallback((tipo: TipoLancamento) => {
         switch (tipo) {
             case 'pix': return <Smartphone size={16} className="text-success" />;
             case 'sangria': return <Building size={16} className="text-danger" />;
@@ -166,9 +218,9 @@ export function VisaoOperadorCaixa() {
             case 'boleto': return <FileText size={16} className="text-orange-500" />;
             default: return <DollarSign size={16} />;
         }
-    };
+    }, []);
 
-    const getLabel = (tipo: string) => {
+    const getLabel = useCallback((tipo: string) => {
         switch (tipo) {
             case 'pix': return 'Pix';
             case 'sangria': return 'Sangria';
@@ -177,7 +229,7 @@ export function VisaoOperadorCaixa() {
             case 'boleto': return 'Boleto';
             default: return 'Lançamento';
         }
-    };
+    }, []);
 
     const valorInicialSessao = sessaoAtiva?.valor_inicial || 0;
 
@@ -194,6 +246,13 @@ export function VisaoOperadorCaixa() {
     }, [movimentacoes]);
 
     const saldoFinal = useMemo(() => totalCreditos - totalDebitos, [totalCreditos, totalDebitos]);
+
+    // Apenas as primeiras N movimentações para exibição
+    const movimentacoesLimitadas = useMemo(() => {
+        return movimentacoes.slice(0, limiteExibicao);
+    }, [movimentacoes, limiteExibicao]);
+
+    const podeCarregarMais = movimentacoes.length > limiteExibicao;
 
     if (loadingCaixa || loadingTerminais) {
         return (
@@ -457,61 +516,34 @@ export function VisaoOperadorCaixa() {
                             </div>
 
                             <div className="flex-1 overflow-y-auto custom-scrollbar">
-                                {movimentacoes.length === 0 ? (
+                                {movimentacoesLimitadas.length === 0 ? (
                                     <div className="text-center py-16 px-4">
                                         <Clock size={40} className="mx-auto mb-6 text-muted opacity-10" />
                                         <p className="text-xs text-muted">Aguardando seu primeiro lançamento...</p>
                                     </div>
                                 ) : (
                                     <div className="flex flex-col gap-3">
-                                        {movimentacoes.map((mov) => (
-                                            <div key={mov.id} className="card p-3.5 bg-bg-dark border-border relative group">
-                                                <div className="flex items-center justify-between">
-                                                    <div className="flex items-center gap-2">
-                                                        {getIcon(mov.tipo as TipoLancamento)}
-                                                        <div className="flex flex-col">
-                                                            <span className="text-[0.8rem] font-bold text-text-primary">
-                                                                {mov.categorias_operacionais?.nome || getLabel(mov.tipo)}
-                                                            </span>
-                                                            <span className="text-[0.65rem] text-muted flex items-center gap-1">
-                                                                {mov.metodo_pagamento === 'pix' ? <Smartphone size={10} /> : <Wallet size={10} />}
-                                                                {mov.metodo_pagamento === 'pix' ? 'Pix / Digital' : 'Dinheiro Físico'}
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                    <span className={`text-[0.9rem] font-extrabold ${mov.valor < 0 ? 'text-danger' : 'text-success'}`}>
-                                                        {mov.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                                    </span>
-                                                </div>
-
-                                                {mov.descricao && (
-                                                    <p className="text-[0.65rem] text-muted mt-2 italic border-t border-border/30 pt-2">
-                                                        "{mov.descricao}"
-                                                    </p>
-                                                )}
-
-                                                {/* Botões de ação */}
-                                                <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    <button
-                                                        onClick={() => {
-                                                            setEditandoMovimentacao(mov);
-                                                            setTipoSelecionado(mov.tipo as TipoLancamento);
-                                                        }}
-                                                        className="p-1 rounded bg-blue-500/10 hover:bg-blue-500/20 text-blue-500"
-                                                        title="Editar"
-                                                    >
-                                                        <Pencil size={14} />
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleDelete(mov)}
-                                                        className="p-1 rounded bg-danger/10 hover:bg-danger/20 text-danger"
-                                                        title="Excluir"
-                                                    >
-                                                        <Trash2 size={14} />
-                                                    </button>
-                                                </div>
-                                            </div>
+                                        {movimentacoesLimitadas.map((mov) => (
+                                            <MovimentacaoItem
+                                                key={mov.id}
+                                                mov={mov}
+                                                onEdit={() => {
+                                                    setEditandoMovimentacao(mov);
+                                                    setTipoSelecionado(mov.tipo as TipoLancamento);
+                                                }}
+                                                onDelete={handleDelete}
+                                                getIcon={getIcon}
+                                                getLabel={getLabel}
+                                            />
                                         ))}
+                                        {podeCarregarMais && (
+                                            <button
+                                                onClick={() => setLimiteExibicao(prev => prev + 50)}
+                                                className="btn btn-ghost text-xs py-2 mt-2"
+                                            >
+                                                Carregar mais ({movimentacoes.length - limiteExibicao} restantes)
+                                            </button>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -548,7 +580,7 @@ export function VisaoOperadorCaixa() {
                 <ModalLancamentoRapido
                     key={editandoMovimentacao ? editandoMovimentacao.id : 'new'}
                     tipo={tipoSelecionado}
-                    initialData={editandoMovimentacao} // Você precisará adaptar o modal para aceitar esta prop
+                    initialData={editandoMovimentacao}
                     onClose={() => {
                         setTipoSelecionado(null);
                         setEditandoMovimentacao(null);
