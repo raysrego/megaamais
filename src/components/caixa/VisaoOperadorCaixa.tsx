@@ -588,7 +588,8 @@ export function VisaoOperadorCaixa() {
                 />
             )}
 
-               <ModalFechamentoCaixa
+              {showFechamento && (
+    <ModalFechamentoCaixa
         sessao={sessaoAtiva}
         transacoes={movimentacoes}
         onClose={() => setShowFechamento(false)}
