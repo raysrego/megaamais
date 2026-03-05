@@ -83,7 +83,14 @@ export function VisaoOperador() {
             case 'boleto': return 'Boleto';
             default: return 'Lançamento';
         }
-    };
+
+        const handleFinishCaixa = async (result: { observacoes?: string; tflData?: any }) => {
+    setShowFechamento(false);
+    toast({ message: 'Turno finalizado com sucesso!', type: 'success' });
+};
+    
+
+    
 
     return (
         <div className="visao-operador-container" style={{ marginTop: '1rem' }}>
@@ -239,11 +246,11 @@ export function VisaoOperador() {
                 />
             )}
             {/* Modal de Fechamento */}
-            {showFechamento && (
-                <ModalFechamentoCaixa
-                    transacoes={movimentacoes}
-                    onClose={() => setShowFechamento(false)}
-                    onFinish={() => setShowFechamento(false)}
+           {showFechamento && (
+    <ModalFechamentoCaixa
+        transacoes={movimentacoes}
+        onClose={() => setShowFechamento(false)}
+        onFinish={handleFinishCaixa}
                 />
             )}
         </div>
