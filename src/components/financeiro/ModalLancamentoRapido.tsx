@@ -26,6 +26,7 @@ interface ModalLancamentoRapidoProps {
 
 export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: ModalLancamentoRapidoProps) {
     const [valor, setValor] = useState<number>(0);
+    const [dataVencimento, setDataVencimento] = useState<string>(''); // formato YYYY-MM-DD
     const [observacao, setObservacao] = useState('');
     const [metodo, setMetodo] = useState<string>(
         tipo === 'pix' ? 'pix' : 'especie'
@@ -42,6 +43,13 @@ export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: Mo
             setMetodo(initialData.metodo_pagamento || (tipo === 'pix' ? 'pix' : 'especie'));
             if (tipo === 'pix' && initialData.classificacao_pix) {
                 setClassificacaoPix(initialData.classificacao_pix);
+            }
+            // Preenche a data de vencimento se existir (espera-se string ISO ou Date)
+            if (initialData.data_vencimento) {
+                const date = new Date(initialData.data_vencimento);
+                if (!isNaN(date.getTime())) {
+                    setDataVencimento(date.toISOString().split('T')[0]); // extrai YYYY-MM-DD
+                }
             }
         }
     }, [initialData, tipo]);
@@ -69,7 +77,8 @@ export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: Mo
                 valor: tipo === 'sangria' || tipo === 'deposito' ? -valor : valor, // mantém negativo para saídas
                 metodo,
                 observacao: tipo === 'pix' ? `[${classificacaoPix}] ${observacao}`.trim() : observacao,
-                data: new Date().toISOString(),
+                data: new Date().toISOString(), // data do lançamento (gerada automaticamente)
+                data_vencimento: dataVencimento ? new Date(dataVencimento).toISOString() : null, // data de vencimento informada
                 classificacao_pix: tipo === 'pix' ? classificacaoPix : null
             };
 
@@ -140,6 +149,21 @@ export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: Mo
                             className="text-xl font-bold h-[60px]"
                             placeholder="0,00"
                             disabled={isSaving}
+                        />
+                    </div>
+
+                    {/* NOVO CAMPO: Data de Vencimento */}
+                    <div className="form-group">
+                        <label style={{ color: 'var(--text-muted)', marginBottom: '0.5rem', display: 'block' }}>
+                            Data de Vencimento <span style={{ fontSize: '0.7rem', opacity: 0.7 }}>(opcional)</span>
+                        </label>
+                        <input
+                            type="date"
+                            className="input"
+                            value={dataVencimento}
+                            onChange={(e) => setDataVencimento(e.target.value)}
+                            disabled={isSaving}
+                            style={{ width: '100%', height: '48px' }}
                         />
                     </div>
 
