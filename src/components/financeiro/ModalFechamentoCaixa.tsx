@@ -26,7 +26,7 @@ interface TransacaoBase {
 
 interface ModalFechamentoCaixaProps {
     sessao: CaixaSessao;
-    transacoes: TransacaoBase[]; // Agora aceita qualquer tipo com essas propriedades
+    transacoes: TransacaoBase[]; // Aceita qualquer array com essas propriedades
     onClose: () => void;
     onFinish: (result: {
         observacoes?: string;
