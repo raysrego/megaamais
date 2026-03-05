@@ -3,7 +3,6 @@
 import { useState, useRef, useMemo } from 'react';
 import {
     X,
-    Check,
     AlertTriangle,
     Smartphone,
     Calculator,
@@ -14,14 +13,20 @@ import {
     ArrowDownCircle
 } from 'lucide-react';
 import { processarRelatorioTFL } from '@/actions/ocr';
-import { CaixaSessao, CaixaMovimentacao } from '@/hooks/useCaixa';
+import { CaixaSessao } from '@/hooks/useCaixa';
 import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmContext';
 import { MoneyInput } from '../ui/MoneyInput';
 
+// Interface mínima para transações – apenas o que o modal precisa
+interface TransacaoBase {
+    valor: number;
+    metodo_pagamento: string;
+}
+
 interface ModalFechamentoCaixaProps {
     sessao: CaixaSessao;
-    transacoes: CaixaMovimentacao[];
+    transacoes: TransacaoBase[]; // Agora aceita qualquer tipo com essas propriedades
     onClose: () => void;
     onFinish: (result: {
         observacoes?: string;
@@ -57,7 +62,6 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
     const confirm = useConfirm();
 
     const temFundoCaixa = sessao?.tem_fundo_caixa ?? true;
-    const VALOR_FUNDO = 100;
 
     // Cálculos dos totais do sistema
     const totalCreditos = useMemo(() => {
@@ -99,7 +103,6 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
                     const base64 = event.target?.result as string;
                     const result = await processarRelatorioTFL(base64);
 
-                    // Validação de Data
                     const hoje = new Date().toLocaleDateString('pt-BR');
                     if (result.dataRelatorio && result.dataRelatorio !== hoje) {
                         const confirmarAntigo = await confirm({
@@ -115,9 +118,8 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
                         }
                     }
 
-                    // Alerta de estornos
                     if (parseFloat(result.estornos) > 0) {
-                        toast({ message: `Atenção: Identificamos R$ ${result.estornos} em ESTORNOS neste relatório. Verifique se o saldo final foi impactado.`, type: 'warning' });
+                        toast({ message: `Atenção: Identificamos R$ ${result.estornos} em ESTORNOS neste relatório.`, type: 'warning' });
                     }
 
                     setTflVendas(parseFloat(result.vendas));
@@ -129,14 +131,14 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
                     setStep(1);
                 } catch (err: any) {
                     console.error('Erro na extração OCR:', err);
-                    toast({ message: `Não foi possível ler o relatório: ${err.message || 'Erro desconhecido'}`, type: 'error' });
+                    toast({ message: `Não foi possível ler o relatório: ${err.message}`, type: 'error' });
                     setIsScanning(false);
                 }
             };
             reader.readAsDataURL(file);
         } catch (error) {
             console.error('Erro scan:', error);
-            toast({ message: 'Não foi possível ler o relatório. Tente enviar uma foto mais nítida.', type: 'error' });
+            toast({ message: 'Não foi possível ler o relatório.', type: 'error' });
             setIsScanning(false);
         }
     };
@@ -160,7 +162,6 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
     };
 
     const handleConfirm = async () => {
-        // Se fundo ausente, exige justificativa
         if (!temFundoCaixa && !justificativaFundoAusente.trim()) {
             toast({ message: 'Justifique a ausência do fundo de caixa.', type: 'warning' });
             return;
@@ -176,7 +177,6 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
                 tfl_comprovante_url: tflComprovanteUrl || undefined
             };
 
-            // Monta observações finais
             let observacoesFinais = observacoes;
             if (!temFundoCaixa && justificativaFundoAusente.trim()) {
                 observacoesFinais = (observacoesFinais ? observacoesFinais + '\n\n' : '') +
@@ -197,7 +197,6 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
         }
     };
 
-    // Renderização condicional
     const renderStep = () => {
         if (isSuccess) {
             return (
