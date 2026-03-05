@@ -18,10 +18,10 @@ import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmContext';
 import { MoneyInput } from '../ui/MoneyInput';
 
-// Interface mínima para transações – apenas o que o modal precisa
+// Interface mínima para transações – metodo_pagamento opcional
 interface TransacaoBase {
     valor: number;
-    metodo_pagamento: string;
+    metodo_pagamento?: string; // agora opcional
 }
 
 interface ModalFechamentoCaixaProps {
