@@ -12,7 +12,7 @@ export interface CaixaSessao {
     data_abertura: string;
     data_fechamento: string | null;
     valor_inicial: number;
-    valor_final_declarado: number | null;
+    valor_final_declarado: number | null; // pode ser null se não informado
     valor_final_calculado: number;
     status: 'aberto' | 'fechado' | 'conferido' | 'discrepante';
     observacoes: string | null;
@@ -22,11 +22,7 @@ export interface CaixaSessao {
     tfl_contas?: number;
     tfl_saldo_projetado?: number;
     tfl_comprovante_url?: string;
-    tfl_pix_total?: number;
-    total_pix_manual?: number;
-    total_sangrias?: number;
-    total_depositos_filial?: number;
-    saldo_liquido_final?: number;
+    // campos para validação posterior
     status_validacao?: 'pendente' | 'aprovado' | 'rejeitado';
     validado_por_id?: string;
     data_validacao?: string;
@@ -67,7 +63,6 @@ export function useCaixa() {
 
     const fetchMovimentacoes = useCallback(async (sessaoId: number) => {
         if (!isMounted.current) return;
-        console.time('fetchMovimentacoes');
         try {
             const { data, error } = await supabase
                 .from('caixa_movimentacoes')
@@ -75,20 +70,18 @@ export function useCaixa() {
                 .eq('sessao_id', sessaoId)
                 .is('deleted_at', null)
                 .order('created_at', { ascending: false })
-                .limit(100); // 🔥 LIMITE para evitar carregar milhares de registros
+                .limit(100);
             if (error) throw error;
             if (isMounted.current) setMovimentacoes(data || []);
         } catch (err) {
             console.error('Erro ao buscar movimentações:', err);
         } finally {
-            console.timeEnd('fetchMovimentacoes');
             if (isMounted.current) setLoading(false);
         }
     }, [supabase]);
 
     const fetchSessaoAtiva = useCallback(async () => {
         if (!isMounted.current) return;
-        console.time('fetchSessaoAtiva');
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) {
@@ -102,7 +95,6 @@ export function useCaixa() {
                 .eq('status', 'aberto')
                 .maybeSingle();
             if (error) throw error;
-            console.timeEnd('fetchSessaoAtiva');
             if (isMounted.current) {
                 setSessaoAtiva(data);
                 if (data) {
@@ -113,7 +105,6 @@ export function useCaixa() {
             }
         } catch (err) {
             console.error('Erro ao buscar sessão:', err);
-            console.timeEnd('fetchSessaoAtiva');
             if (isMounted.current) setLoading(false);
         }
     }, [supabase, fetchMovimentacoes]);
@@ -197,7 +188,7 @@ export function useCaixa() {
 
         let delta = mov.valor;
         if (mov.tipo === 'trocados') {
-            delta = 0;
+            delta = 0; // trocados não altera saldo
         }
 
         const novoSaldo = (sessaoAtiva.valor_final_calculado || 0) + delta;
@@ -213,16 +204,26 @@ export function useCaixa() {
         return data;
     };
 
-    const fecharCaixa = async (valorDeclarado: number, observacoes?: string, tflData?: any) => {
+    const fecharCaixa = async (
+        observacoes?: string,
+        tflData?: {
+            tfl_vendas?: number;
+            tfl_premios?: number;
+            tfl_contas?: number;
+            tfl_saldo_projetado?: number;
+            tfl_comprovante_url?: string;
+        }
+    ) => {
         if (!sessaoAtiva) throw new Error('Nenhuma sessão de caixa aberta');
 
-        const isDiscrepante = valorDeclarado !== (tflData?.tfl_saldo_projetado || sessaoAtiva.valor_final_calculado);
+        // O valor declarado é o mesmo que o calculado (não há contagem manual)
+        const valorDeclarado = sessaoAtiva.valor_final_calculado;
 
         const { data, error } = await supabase
             .from('caixa_sessoes')
             .update({
                 valor_final_declarado: valorDeclarado,
-                status: isDiscrepante ? 'discrepante' : 'fechado',
+                status: 'fechado', // sempre fecha como fechado (discrepância será apurada depois)
                 data_fechamento: new Date().toISOString(),
                 observacoes: observacoes,
                 ...tflData
@@ -232,6 +233,7 @@ export function useCaixa() {
             .single();
 
         if (error) throw error;
+
         setSessaoAtiva(null);
         setMovimentacoes([]);
         return data;
