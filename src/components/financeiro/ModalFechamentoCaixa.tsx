@@ -18,15 +18,14 @@ import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmContext';
 import { MoneyInput } from '../ui/MoneyInput';
 
-// Interface mínima para transações – metodo_pagamento opcional
 interface TransacaoBase {
     valor: number;
-    metodo_pagamento?: string; // agora opcional
+    metodo_pagamento?: string;
 }
 
 interface ModalFechamentoCaixaProps {
-    sessao: CaixaSessao;
-    transacoes: TransacaoBase[]; // Aceita qualquer array com essas propriedades
+    sessao?: CaixaSessao; // opcional
+    transacoes: TransacaoBase[];
     onClose: () => void;
     onFinish: (result: {
         observacoes?: string;
@@ -41,29 +40,27 @@ interface ModalFechamentoCaixaProps {
 }
 
 export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: ModalFechamentoCaixaProps) {
-    const [step, setStep] = useState(0); // 0: Escolha TFL, 1: Dados TFL, 2: Revisão
+    const [step, setStep] = useState(0);
     const [metodoEntrada, setMetodoEntrada] = useState<'manual' | 'scan' | null>(null);
     const [isScanning, setIsScanning] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [isSuccess, setIsSuccess] = useState(false);
 
-    // Dados TFL
     const [tflVendas, setTflVendas] = useState<number>(0);
     const [tflPremios, setTflPremios] = useState<number>(0);
     const [tflContas, setTflContas] = useState<number>(0);
     const [tflSaldoProjetado, setTflSaldoProjetado] = useState<number>(0);
     const [tflComprovanteUrl, setTflComprovanteUrl] = useState<string>('');
 
-    // Observações do operador
     const [observacoes, setObservacoes] = useState('');
     const [justificativaFundoAusente, setJustificativaFundoAusente] = useState('');
 
     const { toast } = useToast();
     const confirm = useConfirm();
 
-    const temFundoCaixa = sessao?.tem_fundo_caixa ?? true;
+    const temFundoCaixa = sessao?.tem_fundo_caixa ?? false;
 
-    // Cálculos dos totais do sistema
+    // Cálculos
     const totalCreditos = useMemo(() => {
         return transacoes
             .filter(mov => mov.valor > 0)
@@ -77,7 +74,8 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
     }, [transacoes]);
 
     const saldoEsperado = useMemo(() => {
-        return (sessao?.valor_inicial || 0) + totalCreditos - totalDebitos;
+        const valorInicial = sessao?.valor_inicial || 0;
+        return valorInicial + totalCreditos - totalDebitos;
     }, [sessao, totalCreditos, totalDebitos]);
 
     const totalPix = useMemo(() => {
@@ -111,7 +109,6 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
                             variant: 'danger',
                             confirmLabel: 'Sim, continuar'
                         });
-
                         if (!confirmarAntigo) {
                             setIsScanning(false);
                             return;
@@ -162,7 +159,7 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
     };
 
     const handleConfirm = async () => {
-        if (!temFundoCaixa && !justificativaFundoAusente.trim()) {
+        if (sessao && !temFundoCaixa && !justificativaFundoAusente.trim()) {
             toast({ message: 'Justifique a ausência do fundo de caixa.', type: 'warning' });
             return;
         }
@@ -178,16 +175,12 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
             };
 
             let observacoesFinais = observacoes;
-            if (!temFundoCaixa && justificativaFundoAusente.trim()) {
+            if (sessao && !temFundoCaixa && justificativaFundoAusente.trim()) {
                 observacoesFinais = (observacoesFinais ? observacoesFinais + '\n\n' : '') +
                     `FUNDO DE CAIXA AUSENTE: ${justificativaFundoAusente}`;
             }
 
-            await onFinish({
-                observacoes: observacoesFinais || undefined,
-                tflData
-            });
-
+            await onFinish({ observacoes: observacoesFinais || undefined, tflData });
             setIsSuccess(true);
         } catch (error) {
             console.error('Erro ao fechar caixa:', error);
@@ -229,12 +222,8 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
                             className="btn btn-ghost w-full h-20 flex items-center justify-center gap-3 border-border bg-primary-blue/5 hover:bg-primary-blue/10"
                             disabled={isScanning}
                         >
-                            {isScanning ? (
-                                <Loader2 size={24} className="animate-spin" />
-                            ) : (
-                                <Smartphone size={24} className="text-primary-blue-light" />
-                            )}
-                            <span className="font-bold">Smart Scan (foto do relatório)</span>
+                            {isScanning ? <Loader2 size={24} className="animate-spin" /> : <Smartphone size={24} className="text-primary-blue-light" />}
+                            <span className="font-bold">Smart Scan</span>
                         </button>
                         <button
                             onClick={() => { setMetodoEntrada('manual'); setStep(1); }}
@@ -243,11 +232,7 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
                             <Calculator size={24} className="text-muted" />
                             <span className="font-bold">Preenchimento Manual</span>
                         </button>
-                        {isScanning && (
-                            <p className="text-xs text-center text-primary-blue-light animate-pulse">
-                                Processando imagem...
-                            </p>
-                        )}
+                        {isScanning && <p className="text-xs text-center text-primary-blue-light animate-pulse">Processando...</p>}
                     </div>
                 );
 
@@ -255,7 +240,7 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
                 return (
                     <div className="space-y-4 animate-in fade-in">
                         <h4 className="text-xs font-black uppercase text-muted mb-2">
-                            {metodoEntrada === 'scan' ? 'Dados extraídos do scan' : 'Informe os dados do TFL'}
+                            {metodoEntrada === 'scan' ? 'Dados extraídos' : 'Informe os dados do TFL'}
                         </h4>
                         <div className="grid grid-cols-2 gap-3">
                             <div className="form-group">
@@ -268,17 +253,12 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
                             </div>
                         </div>
                         <div className="form-group">
-                            <label className="text-[10px] font-black uppercase text-muted">Recebimento de Contas</label>
+                            <label className="text-[10px] font-black uppercase text-muted">Contas Recebidas</label>
                             <MoneyInput value={tflContas} onValueChange={setTflContas} placeholder="0,00" />
                         </div>
                         <div className="form-group pt-2 border-t border-border">
                             <label className="text-[10px] font-black uppercase text-primary-blue-light">Saldo Projetado (TFL)</label>
-                            <MoneyInput
-                                value={tflSaldoProjetado}
-                                onValueChange={setTflSaldoProjetado}
-                                className="border-primary-blue-light/30 font-black"
-                                placeholder="0,00"
-                            />
+                            <MoneyInput value={tflSaldoProjetado} onValueChange={setTflSaldoProjetado} className="border-primary-blue-light/30 font-black" placeholder="0,00" />
                         </div>
                         <div className="flex gap-2 mt-6">
                             <button className="btn btn-ghost flex-1" onClick={() => setStep(0)}>Voltar</button>
@@ -295,14 +275,14 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
                             <div className="space-y-2 text-sm">
                                 <div className="flex justify-between">
                                     <span className="text-muted">Valor Inicial:</span>
-                                    <span className="font-bold">R$ {sessao.valor_inicial.toFixed(2)}</span>
+                                    <span className="font-bold">R$ {sessao?.valor_inicial?.toFixed(2) || '0,00'}</span>
                                 </div>
                                 <div className="flex justify-between text-success">
-                                    <span className="flex items-center gap-1"><ArrowUpCircle size={14} /> Entradas:</span>
+                                    <span><ArrowUpCircle size={14} className="inline mr-1" /> Entradas:</span>
                                     <span className="font-bold">R$ {totalCreditos.toFixed(2)}</span>
                                 </div>
                                 <div className="flex justify-between text-danger">
-                                    <span className="flex items-center gap-1"><ArrowDownCircle size={14} /> Saídas:</span>
+                                    <span><ArrowDownCircle size={14} className="inline mr-1" /> Saídas:</span>
                                     <span className="font-bold">R$ {totalDebitos.toFixed(2)}</span>
                                 </div>
                                 <div className="flex justify-between pt-2 border-t border-border font-black">
@@ -318,7 +298,7 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
                             </div>
                         </div>
 
-                        {!temFundoCaixa && (
+                        {sessao && !temFundoCaixa && (
                             <div className="card bg-warning/10 border-warning/30 p-4">
                                 <div className="flex items-center gap-2 mb-2">
                                     <AlertTriangle size={18} className="text-warning" />
