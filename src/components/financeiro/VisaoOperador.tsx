@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
     Calculator,
     Smartphone,
@@ -20,7 +20,6 @@ import { ModalFechamentoCaixa } from './ModalFechamentoCaixa';
 import { useFinanceiro } from '@/hooks/useFinanceiro';
 import { useLoja } from '@/contexts/LojaContext';
 import { usePerfil } from '@/hooks/usePerfil';
-import { useEffect } from 'react';
 import { useToast } from '@/contexts/ToastContext';
 
 export function VisaoOperador() {
@@ -58,8 +57,7 @@ export function VisaoOperador() {
         setTipoSelecionado(null);
     };
 
-    // Filtrar apenas o que o operador lançou HOJE (Simulado via created_at em uso real)
-    // Para o protótipo, filtramos as transações retornadas pelo hook que batem com hoje
+    // Filtrar apenas transações de hoje (simplificado)
     const hojeStr = new Date().toISOString().split('T')[0];
     const movimentacoes = transacoes.filter(t => t.data_vencimento === hojeStr);
 
@@ -83,14 +81,12 @@ export function VisaoOperador() {
             case 'boleto': return 'Boleto';
             default: return 'Lançamento';
         }
+    };
 
-        const handleFinishCaixa = async (result: { observacoes?: string; tflData?: any }) => {
-    setShowFechamento(false);
-    toast({ message: 'Turno finalizado com sucesso!', type: 'success' });
-};
-    
-
-    
+    const handleFinishCaixa = async (result: { observacoes?: string; tflData?: any }) => {
+        setShowFechamento(false);
+        toast({ message: 'Turno finalizado com sucesso!', type: 'success' });
+    };
 
     return (
         <div className="visao-operador-container" style={{ marginTop: '1rem' }}>
@@ -246,11 +242,11 @@ export function VisaoOperador() {
                 />
             )}
             {/* Modal de Fechamento */}
-           {showFechamento && (
-    <ModalFechamentoCaixa
-        transacoes={movimentacoes}
-        onClose={() => setShowFechamento(false)}
-        onFinish={handleFinishCaixa}
+            {showFechamento && (
+                <ModalFechamentoCaixa
+                    transacoes={movimentacoes}
+                    onClose={() => setShowFechamento(false)}
+                    onFinish={handleFinishCaixa}
                 />
             )}
         </div>
