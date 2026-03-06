@@ -64,6 +64,7 @@ export function useCaixa() {
     const fetchMovimentacoes = useCallback(async (sessaoId: number) => {
         if (!isMounted.current) return;
         try {
+            console.log(`[useCaixa] Buscando movimentações da sessão ${sessaoId}`);
             const { data, error } = await supabase
                 .from('caixa_movimentacoes')
                 .select(`*, categorias_operacionais!categoria_operacional_id(id, nome, cor)`)
@@ -72,9 +73,12 @@ export function useCaixa() {
                 .order('created_at', { ascending: false })
                 .limit(100);
             if (error) throw error;
-            if (isMounted.current) setMovimentacoes(data || []);
+            if (isMounted.current) {
+                console.log(`[useCaixa] ${data?.length || 0} movimentações carregadas`);
+                setMovimentacoes(data || []);
+            }
         } catch (err) {
-            console.error('Erro ao buscar movimentações:', err);
+            console.error('[useCaixa] Erro ao buscar movimentações:', err);
         } finally {
             if (isMounted.current) setLoading(false);
         }
@@ -83,8 +87,10 @@ export function useCaixa() {
     const fetchSessaoAtiva = useCallback(async () => {
         if (!isMounted.current) return;
         try {
+            console.log('[useCaixa] Verificando sessão ativa do usuário');
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) {
+                console.log('[useCaixa] Usuário não autenticado');
                 if (isMounted.current) setLoading(false);
                 return;
             }
@@ -96,15 +102,18 @@ export function useCaixa() {
                 .maybeSingle();
             if (error) throw error;
             if (isMounted.current) {
-                setSessaoAtiva(data);
                 if (data) {
+                    console.log('[useCaixa] Sessão ativa encontrada:', data.id);
+                    setSessaoAtiva(data);
                     await fetchMovimentacoes(data.id);
                 } else {
+                    console.log('[useCaixa] Nenhuma sessão ativa encontrada');
+                    setSessaoAtiva(null);
                     setLoading(false);
                 }
             }
         } catch (err) {
-            console.error('Erro ao buscar sessão:', err);
+            console.error('[useCaixa] Erro ao buscar sessão:', err);
             if (isMounted.current) setLoading(false);
         }
     }, [supabase, fetchMovimentacoes]);
@@ -123,6 +132,7 @@ export function useCaixa() {
             supabase.removeChannel(realtimeChannel.current);
         }
 
+        console.log(`[useCaixa] Configurando Realtime para sessão ${sessaoAtiva.id}`);
         const channel = supabase
             .channel(`movimentacoes:sessao_id=eq.${sessaoAtiva.id}`)
             .on(
@@ -134,6 +144,7 @@ export function useCaixa() {
                     filter: `sessao_id=eq.${sessaoAtiva.id}`,
                 },
                 () => {
+                    console.log('[useCaixa] Realtime: movimentação alterada, atualizando...');
                     fetchMovimentacoes(sessaoAtiva.id);
                 }
             )
@@ -155,6 +166,7 @@ export function useCaixa() {
         terminalId?: number,
         temFundoCaixa: boolean = true
     ) => {
+        console.log('[useCaixa] abrirCaixa chamado', { valorInicial, terminalCodigo, terminalId, temFundoCaixa });
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error('Usuário não autenticado');
 
@@ -173,6 +185,7 @@ export function useCaixa() {
             .single();
 
         if (error) throw error;
+        console.log('[useCaixa] Caixa aberto, sessão criada:', data.id);
         setSessaoAtiva(data);
         return data;
     };
@@ -181,6 +194,7 @@ export function useCaixa() {
         mov: Omit<CaixaMovimentacao, 'id' | 'sessao_id' | 'created_at'>
     ) => {
         if (!sessaoAtiva) throw new Error('Nenhuma sessão de caixa aberta');
+        console.log('[useCaixa] registrarMovimentacao', { tipo: mov.tipo, valor: mov.valor });
 
         const { data, error } = await supabase
             .from('caixa_movimentacoes')
@@ -199,6 +213,7 @@ export function useCaixa() {
         }
 
         const novoSaldo = (sessaoAtiva.valor_final_calculado || 0) + delta;
+        console.log('[useCaixa] Atualizando saldo calculado para', novoSaldo);
 
         await supabase
             .from('caixa_sessoes')
@@ -221,30 +236,69 @@ export function useCaixa() {
             tfl_comprovante_url?: string;
         }
     ) => {
-        if (!sessaoAtiva) throw new Error('Nenhuma sessão de caixa aberta');
+        console.log('[useCaixa] fecharCaixa iniciado', { observacoes, tflData });
 
-        // O valor declarado é o mesmo que o calculado (operação sem conferência manual)
-        const valorDeclarado = sessaoAtiva.valor_final_calculado;
-        const status = 'fechado'; // Poderia ser 'discrepante' se houver lógica de divergência
+        if (!sessaoAtiva) {
+            console.error('[useCaixa] Erro: sessão ativa é nula');
+            throw new Error('Nenhuma sessão de caixa aberta');
+        }
 
-        const { data, error } = await supabase
+        // Verifica se a sessão ainda está aberta no banco (opcional, mas útil)
+        const { data: sessaoAtual, error: checkError } = await supabase
             .from('caixa_sessoes')
-            .update({
-                valor_final_declarado: valorDeclarado,
-                status,
-                data_fechamento: new Date().toISOString(),
-                observacoes: observacoes,
-                ...tflData
-            })
+            .select('status')
+            .eq('id', sessaoAtiva.id)
+            .single();
+
+        if (checkError) {
+            console.error('[useCaixa] Erro ao verificar status da sessão:', checkError);
+            throw checkError;
+        }
+
+        if (sessaoAtual.status !== 'aberto') {
+            console.error('[useCaixa] Sessão já não está mais aberta');
+            throw new Error('Sessão já foi fechada por outro processo');
+        }
+
+        const valorDeclarado = sessaoAtiva.valor_final_calculado;
+        const status = 'fechado'; // ou poderia ser 'discrepante' se houver lógica
+
+        // Garante que tflData seja um objeto (evita spread de undefined)
+        const updateData = {
+            valor_final_declarado: valorDeclarado,
+            status,
+            data_fechamento: new Date().toISOString(),
+            observacoes: observacoes,
+            ...(tflData || {})
+        };
+
+        console.log('[useCaixa] Enviando update para Supabase:', updateData);
+
+        // Adiciona um timeout para evitar pendência infinita (30 segundos)
+        const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Timeout na requisição ao Supabase')), 30000)
+        );
+
+        const updatePromise = supabase
+            .from('caixa_sessoes')
+            .update(updateData)
             .eq('id', sessaoAtiva.id)
             .select()
             .single();
 
-        if (error) throw error;
+        const result = await Promise.race([updatePromise, timeoutPromise]) as any;
+
+        if (result.error) {
+            console.error('[useCaixa] Erro no update do Supabase:', result.error);
+            throw result.error;
+        }
+
+        console.log('[useCaixa] Sessão fechada com sucesso, dados retornados:', result.data);
 
         setSessaoAtiva(null);
         setMovimentacoes([]);
-        return data;
+
+        return result.data;
     };
 
     useEffect(() => {
