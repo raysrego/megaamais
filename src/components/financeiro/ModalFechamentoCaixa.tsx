@@ -1,64 +1,38 @@
 'use client';
 
-import { useState, useRef, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import {
     X,
     AlertTriangle,
-    Smartphone,
-    Calculator,
     Loader2,
     CheckCircle2,
-    Lock,
     ArrowUpCircle,
-    ArrowDownCircle
+    ArrowDownCircle,
+    DollarSign
 } from 'lucide-react';
-import { processarRelatorioTFL } from '@/actions/ocr';
 import { CaixaSessao } from '@/hooks/useCaixa';
-import { useToast } from '@/contexts/ToastContext';
-import { useConfirm } from '@/contexts/ConfirmContext';
-import { MoneyInput } from '../ui/MoneyInput';
 
 interface TransacaoBase {
     valor: number;
-    metodo_pagamento?: string;
+    tipo?: string; // para identificar sangria
+    // outras propriedades podem existir, mas não precisamos
 }
 
 interface ModalFechamentoCaixaProps {
-    sessao?: CaixaSessao; // opcional
+    sessao: CaixaSessao;
     transacoes: TransacaoBase[];
     onClose: () => void;
     onFinish: (result: {
         observacoes?: string;
-        tflData?: {
-            tfl_vendas?: number;
-            tfl_premios?: number;
-            tfl_contas?: number;
-            tfl_saldo_projetado?: number;
-            tfl_comprovante_url?: string;
-        };
+        tflData?: any; // mantido para compatibilidade, mas não usado
     }) => void;
 }
 
 export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: ModalFechamentoCaixaProps) {
-    const [step, setStep] = useState(0);
-    const [metodoEntrada, setMetodoEntrada] = useState<'manual' | 'scan' | null>(null);
-    const [isScanning, setIsScanning] = useState(false);
+    const [confirmado, setConfirmado] = useState<boolean | null>(null);
+    const [justificativa, setJustificativa] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
     const [isSuccess, setIsSuccess] = useState(false);
-
-    const [tflVendas, setTflVendas] = useState<number>(0);
-    const [tflPremios, setTflPremios] = useState<number>(0);
-    const [tflContas, setTflContas] = useState<number>(0);
-    const [tflSaldoProjetado, setTflSaldoProjetado] = useState<number>(0);
-    const [tflComprovanteUrl, setTflComprovanteUrl] = useState<string>('');
-
-    const [observacoes, setObservacoes] = useState('');
-    const [justificativaFundoAusente, setJustificativaFundoAusente] = useState('');
-
-    const { toast } = useToast();
-    const confirm = useConfirm();
-
-    const temFundoCaixa = sessao?.tem_fundo_caixa ?? false;
 
     // Cálculos
     const totalCreditos = useMemo(() => {
@@ -73,279 +47,63 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
             .reduce((acc, mov) => acc + Math.abs(mov.valor), 0);
     }, [transacoes]);
 
-    const saldoEsperado = useMemo(() => {
-        const valorInicial = sessao?.valor_inicial || 0;
-        return valorInicial + totalCreditos - totalDebitos;
-    }, [sessao, totalCreditos, totalDebitos]);
-
-    const totalPix = useMemo(() => {
+    const totalSangria = useMemo(() => {
         return transacoes
-            .filter(mov => mov.metodo_pagamento === 'pix')
-            .reduce((acc, mov) => acc + mov.valor, 0);
+            .filter(mov => mov.tipo === 'sangria')
+            .reduce((acc, mov) => acc + Math.abs(mov.valor), 0);
     }, [transacoes]);
 
-    // Scan do TFL
-    const fileInputRef = useRef<HTMLInputElement>(null);
+    const saldoEsperado = useMemo(() => {
+        return (sessao?.valor_inicial || 0) + totalCreditos - totalDebitos;
+    }, [sessao, totalCreditos, totalDebitos]);
 
-    const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-
-        setIsScanning(true);
-        setMetodoEntrada('scan');
-
-        try {
-            const reader = new FileReader();
-            reader.onload = async (event) => {
-                try {
-                    const base64 = event.target?.result as string;
-                    const result = await processarRelatorioTFL(base64);
-
-                    const hoje = new Date().toLocaleDateString('pt-BR');
-                    if (result.dataRelatorio && result.dataRelatorio !== hoje) {
-                        const confirmarAntigo = await confirm({
-                            title: 'Data Incorreta',
-                            description: `ATENÇÃO: A data do relatório (${result.dataRelatorio}) não é de hoje (${hoje}). Deseja continuar mesmo assim?`,
-                            variant: 'danger',
-                            confirmLabel: 'Sim, continuar'
-                        });
-                        if (!confirmarAntigo) {
-                            setIsScanning(false);
-                            return;
-                        }
-                    }
-
-                    if (parseFloat(result.estornos) > 0) {
-                        toast({ message: `Atenção: Identificamos R$ ${result.estornos} em ESTORNOS neste relatório.`, type: 'warning' });
-                    }
-
-                    setTflVendas(parseFloat(result.vendas));
-                    setTflContas(parseFloat(result.contas));
-                    setTflPremios(parseFloat(result.premios));
-                    setTflSaldoProjetado(parseFloat(result.saldo));
-
-                    setIsScanning(false);
-                    setStep(1);
-                } catch (err: any) {
-                    console.error('Erro na extração OCR:', err);
-                    toast({ message: `Não foi possível ler o relatório: ${err.message}`, type: 'error' });
-                    setIsScanning(false);
-                }
-            };
-            reader.readAsDataURL(file);
-        } catch (error) {
-            console.error('Erro scan:', error);
-            toast({ message: 'Não foi possível ler o relatório.', type: 'error' });
-            setIsScanning(false);
-        }
-    };
-
-    const triggerScan = () => {
-        fileInputRef.current?.click();
-    };
-
-    const handleNext = () => {
-        if (step === 0 && !metodoEntrada) {
-            toast({ message: 'Selecione um método de entrada para os dados do TFL.', type: 'warning' });
-            return;
-        }
-        if (step === 1) {
-            if (metodoEntrada === 'manual' && tflSaldoProjetado === 0) {
-                toast({ message: 'Informe o saldo projetado do TFL para continuar.', type: 'warning' });
-                return;
-            }
-            setStep(2);
-        }
-    };
+    const temFundoCaixa = sessao?.tem_fundo_caixa ?? true;
 
     const handleConfirm = async () => {
-        if (sessao && !temFundoCaixa && !justificativaFundoAusente.trim()) {
-            toast({ message: 'Justifique a ausência do fundo de caixa.', type: 'warning' });
+        if (confirmado === null) {
+            // Não deveria acontecer porque o botão estaria desabilitado
+            return;
+        }
+
+        if (!confirmado && !justificativa.trim()) {
+            alert('Por favor, informe a justificativa para a divergência.');
             return;
         }
 
         setIsProcessing(true);
+
+        // Monta observações: se não confirmado, inclui justificativa
+        const observacoes = !confirmado
+            ? `Divergência informada: ${justificativa}`
+            : '';
+
         try {
-            const tflData = {
-                tfl_vendas: tflVendas,
-                tfl_premios: tflPremios,
-                tfl_contas: tflContas,
-                tfl_saldo_projetado: tflSaldoProjetado,
-                tfl_comprovante_url: tflComprovanteUrl || undefined
-            };
-
-            let observacoesFinais = observacoes;
-            if (sessao && !temFundoCaixa && justificativaFundoAusente.trim()) {
-                observacoesFinais = (observacoesFinais ? observacoesFinais + '\n\n' : '') +
-                    `FUNDO DE CAIXA AUSENTE: ${justificativaFundoAusente}`;
-            }
-
-            await onFinish({ observacoes: observacoesFinais || undefined, tflData });
+            await onFinish({
+                observacoes: observacoes || undefined,
+                tflData: {} // vazio para compatibilidade
+            });
             setIsSuccess(true);
         } catch (error) {
             console.error('Erro ao fechar caixa:', error);
-            toast({ message: 'Erro ao processar fechamento.', type: 'error' });
+            alert('Erro ao fechar caixa. Tente novamente.');
         } finally {
             setIsProcessing(false);
         }
     };
 
-    const renderStep = () => {
-        if (isSuccess) {
-            return (
-                <div className="text-center py-6 animate-in fade-in zoom-in">
+    if (isSuccess) {
+        return (
+            <>
+                <div className="fixed inset-0 bg-black/70 z-50" onClick={onClose} />
+                <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-md bg-bg-card border border-border rounded-2xl z-50 shadow-2xl overflow-hidden p-6 text-center">
                     <CheckCircle2 size={56} className="mx-auto text-success mb-4" />
                     <h3 className="text-xl font-black mb-2">Caixa Encerrado</h3>
                     <p className="text-sm text-muted mb-6">O turno foi finalizado com sucesso.</p>
                     <button className="btn btn-primary w-full" onClick={onClose}>Concluir</button>
                 </div>
-            );
-        }
-
-        switch (step) {
-            case 0:
-                return (
-                    <div className="space-y-4 animate-in fade-in">
-                        <div className="text-center mb-4">
-                            <p className="text-sm text-muted">Informe os dados do terminal TFL</p>
-                        </div>
-                        <input
-                            type="file"
-                            ref={fileInputRef}
-                            onChange={handleFileSelect}
-                            accept="image/*"
-                            capture="environment"
-                            style={{ display: 'none' }}
-                        />
-                        <button
-                            onClick={triggerScan}
-                            className="btn btn-ghost w-full h-20 flex items-center justify-center gap-3 border-border bg-primary-blue/5 hover:bg-primary-blue/10"
-                            disabled={isScanning}
-                        >
-                            {isScanning ? <Loader2 size={24} className="animate-spin" /> : <Smartphone size={24} className="text-primary-blue-light" />}
-                            <span className="font-bold">Smart Scan</span>
-                        </button>
-                        <button
-                            onClick={() => { setMetodoEntrada('manual'); setStep(1); }}
-                            className="btn btn-ghost w-full h-20 flex items-center justify-center gap-3 border-border"
-                        >
-                            <Calculator size={24} className="text-muted" />
-                            <span className="font-bold">Preenchimento Manual</span>
-                        </button>
-                        {isScanning && <p className="text-xs text-center text-primary-blue-light animate-pulse">Processando...</p>}
-                    </div>
-                );
-
-            case 1:
-                return (
-                    <div className="space-y-4 animate-in fade-in">
-                        <h4 className="text-xs font-black uppercase text-muted mb-2">
-                            {metodoEntrada === 'scan' ? 'Dados extraídos' : 'Informe os dados do TFL'}
-                        </h4>
-                        <div className="grid grid-cols-2 gap-3">
-                            <div className="form-group">
-                                <label className="text-[10px] font-black uppercase text-muted">Vendas Totais</label>
-                                <MoneyInput value={tflVendas} onValueChange={setTflVendas} placeholder="0,00" />
-                            </div>
-                            <div className="form-group">
-                                <label className="text-[10px] font-black uppercase text-muted">Prêmios Pagos</label>
-                                <MoneyInput value={tflPremios} onValueChange={setTflPremios} placeholder="0,00" />
-                            </div>
-                        </div>
-                        <div className="form-group">
-                            <label className="text-[10px] font-black uppercase text-muted">Contas Recebidas</label>
-                            <MoneyInput value={tflContas} onValueChange={setTflContas} placeholder="0,00" />
-                        </div>
-                        <div className="form-group pt-2 border-t border-border">
-                            <label className="text-[10px] font-black uppercase text-primary-blue-light">Saldo Projetado (TFL)</label>
-                            <MoneyInput value={tflSaldoProjetado} onValueChange={setTflSaldoProjetado} className="border-primary-blue-light/30 font-black" placeholder="0,00" />
-                        </div>
-                        <div className="flex gap-2 mt-6">
-                            <button className="btn btn-ghost flex-1" onClick={() => setStep(0)}>Voltar</button>
-                            <button className="btn btn-primary flex-2" onClick={handleNext}>Próximo</button>
-                        </div>
-                    </div>
-                );
-
-            case 2:
-                return (
-                    <div className="space-y-4 animate-in fade-in">
-                        <div className="bg-surface-subtle p-4 rounded-xl border border-border">
-                            <p className="text-xs font-bold mb-3">Resumo do Turno</p>
-                            <div className="space-y-2 text-sm">
-                                <div className="flex justify-between">
-                                    <span className="text-muted">Valor Inicial:</span>
-                                    <span className="font-bold">R$ {sessao?.valor_inicial?.toFixed(2) || '0,00'}</span>
-                                </div>
-                                <div className="flex justify-between text-success">
-                                    <span><ArrowUpCircle size={14} className="inline mr-1" /> Entradas:</span>
-                                    <span className="font-bold">R$ {totalCreditos.toFixed(2)}</span>
-                                </div>
-                                <div className="flex justify-between text-danger">
-                                    <span><ArrowDownCircle size={14} className="inline mr-1" /> Saídas:</span>
-                                    <span className="font-bold">R$ {totalDebitos.toFixed(2)}</span>
-                                </div>
-                                <div className="flex justify-between pt-2 border-t border-border font-black">
-                                    <span>Saldo Final:</span>
-                                    <span className={saldoEsperado >= 0 ? 'text-success' : 'text-danger'}>
-                                        R$ {saldoEsperado.toFixed(2)}
-                                    </span>
-                                </div>
-                                <div className="flex justify-between text-xs text-muted">
-                                    <span>Total PIX:</span>
-                                    <span>R$ {totalPix.toFixed(2)}</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        {sessao && !temFundoCaixa && (
-                            <div className="card bg-warning/10 border-warning/30 p-4">
-                                <div className="flex items-center gap-2 mb-2">
-                                    <AlertTriangle size={18} className="text-warning" />
-                                    <p className="text-sm font-bold text-warning">Fundo de Caixa Ausente</p>
-                                </div>
-                                <p className="text-xs text-muted mb-2">
-                                    Na abertura foi informado que os R$ 100,00 do fundo não estavam presentes.
-                                </p>
-                                <textarea
-                                    className="input w-full"
-                                    rows={2}
-                                    value={justificativaFundoAusente}
-                                    onChange={(e) => setJustificativaFundoAusente(e.target.value)}
-                                    placeholder="Justifique o motivo..."
-                                />
-                            </div>
-                        )}
-
-                        <div className="form-group">
-                            <label className="text-[10px] font-black uppercase text-muted">Observações (opcional)</label>
-                            <textarea
-                                className="input w-full"
-                                rows={3}
-                                value={observacoes}
-                                onChange={(e) => setObservacoes(e.target.value)}
-                                placeholder="Alguma observação sobre o turno?"
-                            />
-                        </div>
-
-                        <div className="flex gap-2 mt-4">
-                            <button className="btn btn-ghost flex-1" onClick={() => setStep(1)}>Voltar</button>
-                            <button
-                                className="btn btn-primary flex-2 font-black"
-                                onClick={handleConfirm}
-                                disabled={isProcessing}
-                            >
-                                {isProcessing ? <Loader2 className="animate-spin mr-2" size={18} /> : null}
-                                {isProcessing ? 'Processando...' : 'Confirmar e Encerrar'}
-                            </button>
-                        </div>
-                    </div>
-                );
-
-            default:
-                return null;
-        }
-    };
+            </>
+        );
+    }
 
     return (
         <>
@@ -353,15 +111,114 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
             <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-md bg-bg-card border border-border rounded-2xl z-50 shadow-2xl overflow-hidden">
                 <div className="p-5 border-b border-border flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                        <Lock size={18} className="text-primary-blue-light" />
-                        <h2 className="text-lg font-black">Fechamento de Jornada</h2>
+                        <DollarSign size={18} className="text-primary-blue-light" />
+                        <h2 className="text-lg font-black">Fechamento de Caixa</h2>
                     </div>
                     <button onClick={onClose} className="p-1 hover:bg-white/5 rounded">
                         <X size={20} />
                     </button>
                 </div>
+
                 <div className="p-5 max-h-[80vh] overflow-y-auto custom-scrollbar">
-                    {renderStep()}
+                    {/* Resumo */}
+                    <div className="bg-surface-subtle p-4 rounded-xl border border-border mb-6">
+                        <p className="text-xs font-bold mb-3">Resumo do Turno</p>
+                        <div className="space-y-2 text-sm">
+                            <div className="flex justify-between">
+                                <span className="text-muted">Valor Inicial:</span>
+                                <span className="font-bold">R$ {sessao.valor_inicial.toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between text-success">
+                                <span className="flex items-center gap-1"><ArrowUpCircle size={14} /> Entradas:</span>
+                                <span className="font-bold">R$ {totalCreditos.toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between text-danger">
+                                <span className="flex items-center gap-1"><ArrowDownCircle size={14} /> Saídas:</span>
+                                <span className="font-bold">R$ {totalDebitos.toFixed(2)}</span>
+                            </div>
+                            {totalSangria > 0 && (
+                                <div className="flex justify-between text-warning">
+                                    <span className="flex items-center gap-1"><AlertTriangle size={14} /> Sangria/Cofre:</span>
+                                    <span className="font-bold">R$ {totalSangria.toFixed(2)}</span>
+                                </div>
+                            )}
+                            <div className="flex justify-between pt-2 border-t border-border font-black">
+                                <span>Saldo Final:</span>
+                                <span className={saldoEsperado >= 0 ? 'text-success' : 'text-danger'}>
+                                    R$ {saldoEsperado.toFixed(2)}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Pergunta de confirmação */}
+                    <div className="space-y-4">
+                        <p className="text-sm font-bold text-center">O saldo final está correto?</p>
+                        <div className="flex gap-4">
+                            <button
+                                onClick={() => setConfirmado(true)}
+                                className={`flex-1 py-3 px-4 rounded-xl border-2 font-bold transition-all ${
+                                    confirmado === true
+                                        ? 'border-success bg-success/10 text-success'
+                                        : 'border-border bg-surface-subtle text-muted hover:border-success/50'
+                                }`}
+                            >
+                                <CheckCircle2 size={20} className="inline mr-2" />
+                                Sim
+                            </button>
+                            <button
+                                onClick={() => setConfirmado(false)}
+                                className={`flex-1 py-3 px-4 rounded-xl border-2 font-bold transition-all ${
+                                    confirmado === false
+                                        ? 'border-danger bg-danger/10 text-danger'
+                                        : 'border-border bg-surface-subtle text-muted hover:border-danger/50'
+                                }`}
+                            >
+                                <AlertTriangle size={20} className="inline mr-2" />
+                                Não
+                            </button>
+                        </div>
+
+                        {confirmado === false && (
+                            <div className="animate-in slide-in-from-top-2 fade-in">
+                                <label className="text-sm font-bold text-muted block mb-2">
+                                    Justificativa <span className="text-danger">*</span>
+                                </label>
+                                <textarea
+                                    className="input w-full"
+                                    rows={3}
+                                    value={justificativa}
+                                    onChange={(e) => setJustificativa(e.target.value)}
+                                    placeholder="Explique o motivo da divergência..."
+                                    disabled={isProcessing}
+                                />
+                            </div>
+                        )}
+
+                        {!temFundoCaixa && (
+                            <div className="bg-warning/10 border border-warning/30 p-3 rounded-lg">
+                                <p className="text-xs text-warning font-bold flex items-center gap-2">
+                                    <AlertTriangle size={14} />
+                                    Fundo de caixa ausente na abertura.
+                                </p>
+                                {/* Se quiser, pode adicionar campo de justificativa específico, mas a justificativa geral já cobre */}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                <div className="border-t border-border p-5 flex justify-end gap-3">
+                    <button className="btn btn-ghost" onClick={onClose} disabled={isProcessing}>
+                        Cancelar
+                    </button>
+                    <button
+                        className="btn btn-primary"
+                        onClick={handleConfirm}
+                        disabled={confirmado === null || isProcessing || (confirmado === false && !justificativa.trim())}
+                    >
+                        {isProcessing ? <Loader2 className="animate-spin mr-2" size={18} /> : null}
+                        {isProcessing ? 'Processando...' : 'Confirmar e Encerrar'}
+                    </button>
                 </div>
             </div>
         </>
