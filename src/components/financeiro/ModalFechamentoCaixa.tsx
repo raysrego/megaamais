@@ -92,18 +92,17 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
     };
 
     if (isSuccess) {
-        return (
-            <>
-                <div className="fixed inset-0 bg-black/70 z-50" onClick={onClose} />
-                <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-md bg-bg-card border border-border rounded-2xl z-50 shadow-2xl overflow-hidden p-6 text-center">
-                    <CheckCircle2 size={56} className="mx-auto text-success mb-4" />
-                    <h3 className="text-xl font-black mb-2">Caixa Encerrado</h3>
-                    <p className="text-sm text-muted mb-6">O turno foi finalizado com sucesso.</p>
-                    <button className="btn btn-primary w-full" onClick={onClose}>Concluir</button>
-                </div>
-            </>
-        );
-    }
+    return (
+        <div className="fixed inset-0 bg-black/70 z-50" onClick={onClose}>
+            <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-md bg-bg-card border border-border rounded-2xl z-50 shadow-2xl overflow-hidden p-6 text-center">
+                <CheckCircle2 size={56} className="mx-auto text-success mb-4" />
+                <h3 className="text-xl font-black mb-2">Caixa Encerrado</h3>
+                <p className="text-sm text-muted mb-6">O turno foi finalizado com sucesso.</p>
+                <button className="btn btn-primary w-full" onClick={onClose}>Concluir</button>
+            </div>
+        </div>
+    );
+}
 
     return (
         <>
