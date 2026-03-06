@@ -178,16 +178,21 @@ export function VisaoOperadorCaixa() {
         }
     }, [supabase, toast, confirm, refresh]);
 
-   const handleFinishCaixa = async (result: { observacoes?: string; tflData?: any }) => {
-    try {
-        await fecharCaixa(result.observacoes, result.tflData);
-        setShowFechamento(false);
-        toast({ message: 'Caixa fechado com sucesso!', type: 'success' });
-    } catch (error) {
-        console.error('Erro ao fechar caixa:', error);
-        toast({ message: 'Erro ao fechar caixa.', type: 'error' });
-    }
-};
+    // Função de fechamento com logs detalhados
+    const handleFinishCaixa = async (result: { observacoes?: string; tflData?: any }) => {
+        console.log('[handleFinishCaixa] Recebido resultado do modal:', result);
+        try {
+            console.log('[handleFinishCaixa] Chamando fecharCaixa...');
+            await fecharCaixa(result.observacoes, result.tflData);
+            console.log('[handleFinishCaixa] fecharCaixa executado com sucesso');
+            setShowFechamento(false);
+            toast({ message: 'Caixa fechado com sucesso!', type: 'success' });
+        } catch (error) {
+            console.error('[handleFinishCaixa] Erro ao fechar caixa:', error);
+            toast({ message: 'Erro ao fechar caixa: ' + (error instanceof Error ? error.message : 'Erro desconhecido'), type: 'error' });
+            // Não fechar o modal em caso de erro para que o usuário possa tentar novamente ou ver a mensagem
+        }
+    };
 
     const handleAbrirCaixa = async () => {
         if (!terminalSelecionado) {
