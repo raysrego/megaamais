@@ -89,7 +89,7 @@ MovimentacaoItem.displayName = 'MovimentacaoItem';
 
 export function VisaoOperadorCaixa() {
     const supabase = createBrowserSupabaseClient();
-    const { perfil, podeGerenciarCaixaBolao } = usePerfil();
+    const { podeGerenciarCaixaBolao } = usePerfil();
     const { toast } = useToast();
     const confirm = useConfirm();
 
@@ -115,7 +115,7 @@ export function VisaoOperadorCaixa() {
     const [temFundoCaixa, setTemFundoCaixa] = useState<boolean>(true);
     const [isOpening, setIsOpening] = useState(false);
     const [abaCaixa, setAbaCaixa] = useState<'tfl' | 'bolao'>('tfl');
-    const [limiteExibicao, setLimiteExibicao] = useState(50); // limite inicial
+    const [limiteExibicao, setLimiteExibicao] = useState(50);
 
     const canSeeBolao = true;
 
@@ -123,7 +123,6 @@ export function VisaoOperadorCaixa() {
     const handleSaveEntry = useCallback(async (data: any) => {
         try {
             if (editandoMovimentacao) {
-                // Atualizar movimentação existente
                 const { error } = await supabase
                     .from('caixa_movimentacoes')
                     .update({
@@ -138,7 +137,6 @@ export function VisaoOperadorCaixa() {
                 if (error) throw error;
                 toast({ message: 'Lançamento atualizado!', type: 'success' });
             } else {
-                // Criar novo
                 await registrarMovimentacao({
                     tipo: data.tipo,
                     valor: data.valor,
@@ -151,14 +149,13 @@ export function VisaoOperadorCaixa() {
             }
             setTipoSelecionado(null);
             setEditandoMovimentacao(null);
-            refresh(); // recarrega a lista
+            refresh();
         } catch (error: any) {
             console.error('Erro ao salvar movimentação:', error);
             toast({ message: 'Erro: ' + error.message, type: 'error' });
         }
     }, [registrarMovimentacao, editandoMovimentacao, supabase, toast, refresh]);
 
-    // Função para deletar
     const handleDelete = useCallback(async (movimentacao: any) => {
         const confirmed = await confirm({
             title: 'Excluir Lançamento',
@@ -171,7 +168,7 @@ export function VisaoOperadorCaixa() {
         try {
             const { error } = await supabase
                 .from('caixa_movimentacoes')
-                .update({ deleted_at: new Date().toISOString() }) // soft delete
+                .update({ deleted_at: new Date().toISOString() })
                 .eq('id', movimentacao.id);
             if (error) throw error;
             toast({ message: 'Lançamento excluído!', type: 'success' });
@@ -181,17 +178,16 @@ export function VisaoOperadorCaixa() {
         }
     }, [supabase, toast, confirm, refresh]);
 
-    const handleFinishCaixa = async (result: any) => {
-        try {
-            const { totalInformado, justificativa, ...tflData } = result;
-            await fecharCaixa(totalInformado, justificativa, tflData);
-            setShowFechamento(false);
-            toast({ message: 'Caixa fechado com sucesso e enviado para validação!', type: 'success' });
-        } catch (error) {
-            console.error('Erro ao fechar caixa:', error);
-            toast({ message: 'Erro ao fechar caixa.', type: 'error' });
-        }
-    };
+   const handleFinishCaixa = async (result: { observacoes?: string; tflData?: any }) => {
+    try {
+        await fecharCaixa(result.observacoes, result.tflData);
+        setShowFechamento(false);
+        toast({ message: 'Caixa fechado com sucesso!', type: 'success' });
+    } catch (error) {
+        console.error('Erro ao fechar caixa:', error);
+        toast({ message: 'Erro ao fechar caixa.', type: 'error' });
+    }
+};
 
     const handleAbrirCaixa = async () => {
         if (!terminalSelecionado) {
@@ -247,7 +243,6 @@ export function VisaoOperadorCaixa() {
 
     const saldoFinal = useMemo(() => totalCreditos - totalDebitos, [totalCreditos, totalDebitos]);
 
-    // Apenas as primeiras N movimentações para exibição
     const movimentacoesLimitadas = useMemo(() => {
         return movimentacoes.slice(0, limiteExibicao);
     }, [movimentacoes, limiteExibicao]);
@@ -264,7 +259,6 @@ export function VisaoOperadorCaixa() {
     }
 
     if (!sessaoAtiva) {
-        // Tela de abertura de caixa (igual ao original)
         return (
             <div className="dashboard-content max-w-2xl mx-auto py-12">
                 <div className="card p-8 border-t-4 border-primary-blue-light">
@@ -592,6 +586,7 @@ export function VisaoOperadorCaixa() {
             {showFechamento && (
                 <ModalFechamentoCaixa
                     sessao={sessaoAtiva}
+                    transacoes={movimentacoes}
                     onClose={() => setShowFechamento(false)}
                     onFinish={handleFinishCaixa}
                 />
