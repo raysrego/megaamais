@@ -14,17 +14,16 @@ import { CaixaSessao } from '@/hooks/useCaixa';
 
 interface TransacaoBase {
     valor: number;
-    tipo?: string; // para identificar sangria
-    // outras propriedades podem existir, mas não precisamos
+    tipo?: string;
 }
 
 interface ModalFechamentoCaixaProps {
-    sessao: CaixaSessao;
+    sessao?: CaixaSessao; // opcional
     transacoes: TransacaoBase[];
     onClose: () => void;
     onFinish: (result: {
         observacoes?: string;
-        tflData?: any; // mantido para compatibilidade, mas não usado
+        tflData?: any;
     }) => void;
 }
 
@@ -34,7 +33,6 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
     const [isProcessing, setIsProcessing] = useState(false);
     const [isSuccess, setIsSuccess] = useState(false);
 
-    // Cálculos
     const totalCreditos = useMemo(() => {
         return transacoes
             .filter(mov => mov.valor > 0)
@@ -54,16 +52,14 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
     }, [transacoes]);
 
     const saldoEsperado = useMemo(() => {
-        return (sessao?.valor_inicial || 0) + totalCreditos - totalDebitos;
+        const inicial = sessao?.valor_inicial ?? 0;
+        return inicial + totalCreditos - totalDebitos;
     }, [sessao, totalCreditos, totalDebitos]);
 
     const temFundoCaixa = sessao?.tem_fundo_caixa ?? true;
 
     const handleConfirm = async () => {
-        if (confirmado === null) {
-            // Não deveria acontecer porque o botão estaria desabilitado
-            return;
-        }
+        if (confirmado === null) return;
 
         if (!confirmado && !justificativa.trim()) {
             alert('Por favor, informe a justificativa para a divergência.');
@@ -72,7 +68,6 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
 
         setIsProcessing(true);
 
-        // Monta observações: se não confirmado, inclui justificativa
         const observacoes = !confirmado
             ? `Divergência informada: ${justificativa}`
             : '';
@@ -80,7 +75,7 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
         try {
             await onFinish({
                 observacoes: observacoes || undefined,
-                tflData: {} // vazio para compatibilidade
+                tflData: {}
             });
             setIsSuccess(true);
         } catch (error) {
@@ -92,17 +87,17 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
     };
 
     if (isSuccess) {
-    return (
-        <div className="fixed inset-0 bg-black/70 z-50" onClick={onClose}>
-            <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-md bg-bg-card border border-border rounded-2xl z-50 shadow-2xl overflow-hidden p-6 text-center">
-                <CheckCircle2 size={56} className="mx-auto text-success mb-4" />
-                <h3 className="text-xl font-black mb-2">Caixa Encerrado</h3>
-                <p className="text-sm text-muted mb-6">O turno foi finalizado com sucesso.</p>
-                <button className="btn btn-primary w-full" onClick={onClose}>Concluir</button>
+        return (
+            <div className="fixed inset-0 bg-black/70 z-50" onClick={onClose}>
+                <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-md bg-bg-card border border-border rounded-2xl z-50 shadow-2xl overflow-hidden p-6 text-center">
+                    <CheckCircle2 size={56} className="mx-auto text-success mb-4" />
+                    <h3 className="text-xl font-black mb-2">Caixa Encerrado</h3>
+                    <p className="text-sm text-muted mb-6">O turno foi finalizado com sucesso.</p>
+                    <button className="btn btn-primary w-full" onClick={onClose}>Concluir</button>
+                </div>
             </div>
-        </div>
-    );
-}
+        );
+    }
 
     return (
         <>
@@ -123,10 +118,12 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
                     <div className="bg-surface-subtle p-4 rounded-xl border border-border mb-6">
                         <p className="text-xs font-bold mb-3">Resumo do Turno</p>
                         <div className="space-y-2 text-sm">
-                            <div className="flex justify-between">
-                                <span className="text-muted">Valor Inicial:</span>
-                                <span className="font-bold">R$ {sessao.valor_inicial.toFixed(2)}</span>
-                            </div>
+                            {sessao && (
+                                <div className="flex justify-between">
+                                    <span className="text-muted">Valor Inicial:</span>
+                                    <span className="font-bold">R$ {sessao.valor_inicial.toFixed(2)}</span>
+                                </div>
+                            )}
                             <div className="flex justify-between text-success">
                                 <span className="flex items-center gap-1"><ArrowUpCircle size={14} /> Entradas:</span>
                                 <span className="font-bold">R$ {totalCreditos.toFixed(2)}</span>
@@ -194,13 +191,12 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
                             </div>
                         )}
 
-                        {!temFundoCaixa && (
+                        {sessao && !sessao.tem_fundo_caixa && (
                             <div className="bg-warning/10 border border-warning/30 p-3 rounded-lg">
                                 <p className="text-xs text-warning font-bold flex items-center gap-2">
                                     <AlertTriangle size={14} />
                                     Fundo de caixa ausente na abertura.
                                 </p>
-                                {/* Se quiser, pode adicionar campo de justificativa específico, mas a justificativa geral já cobre */}
                             </div>
                         )}
                     </div>
