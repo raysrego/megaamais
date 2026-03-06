@@ -18,13 +18,13 @@ interface TransacaoBase {
 }
 
 interface ModalFechamentoCaixaProps {
-    sessao?: CaixaSessao; // opcional
+    sessao?: CaixaSessao;
     transacoes: TransacaoBase[];
     onClose: () => void;
     onFinish: (result: {
         observacoes?: string;
         tflData?: any;
-    }) => void;
+    }) => Promise<void>; // Importante: deve retornar Promise
 }
 
 export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: ModalFechamentoCaixaProps) {
@@ -59,7 +59,12 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
     const temFundoCaixa = sessao?.tem_fundo_caixa ?? true;
 
     const handleConfirm = async () => {
-        if (confirmado === null) return;
+        console.log('[Modal] handleConfirm iniciado', { confirmado, justificativa });
+
+        if (confirmado === null) {
+            console.warn('[Modal] confirmado é null, abortando');
+            return;
+        }
 
         if (!confirmado && !justificativa.trim()) {
             alert('Por favor, informe a justificativa para a divergência.');
@@ -67,21 +72,25 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
         }
 
         setIsProcessing(true);
+        console.log('[Modal] isProcessing = true');
 
         const observacoes = !confirmado
             ? `Divergência informada: ${justificativa}`
             : '';
 
         try {
+            console.log('[Modal] Chamando onFinish com', { observacoes, tflData: {} });
             await onFinish({
                 observacoes: observacoes || undefined,
                 tflData: {}
             });
+            console.log('[Modal] onFinish resolved com sucesso');
             setIsSuccess(true);
         } catch (error) {
-            console.error('Erro ao fechar caixa:', error);
+            console.error('[Modal] Erro no onFinish:', error);
             alert('Erro ao fechar caixa. Tente novamente.');
         } finally {
+            console.log('[Modal] finally: set isProcessing false');
             setIsProcessing(false);
         }
     };
