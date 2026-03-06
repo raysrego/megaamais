@@ -1,255 +1,219 @@
 'use client';
 
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
-import { RealtimeChannel } from '@supabase/supabase-js';
+import { useState, useMemo } from 'react';
+import {
+    X,
+    AlertTriangle,
+    Loader2,
+    CheckCircle2,
+    ArrowUpCircle,
+    ArrowDownCircle,
+    DollarSign
+} from 'lucide-react';
+import { CaixaSessao } from '@/hooks/useCaixa';
 
-export interface CaixaSessao {
-    id: number;
-    operador_id: string;
-    terminal_id: string | null;
-    terminal_id_ref: number | null;
-    data_abertura: string;
-    data_fechamento: string | null;
-    valor_inicial: number;
-    valor_final_declarado: number | null; // pode ser null se não informado
-    valor_final_calculado: number;
-    status: 'aberto' | 'fechado' | 'conferido' | 'discrepante';
-    observacoes: string | null;
-    tem_fundo_caixa?: boolean;
-    tfl_vendas?: number;
-    tfl_premios?: number;
-    tfl_contas?: number;
-    tfl_saldo_projetado?: number;
-    tfl_comprovante_url?: string;
-    // campos para validação posterior
-    status_validacao?: 'pendente' | 'aprovado' | 'rejeitado';
-    validado_por_id?: string;
-    data_validacao?: string;
-    observacoes_gerente?: string;
-}
-
-export interface CaixaMovimentacao {
-    id: number;
-    sessao_id: number;
-    tipo: 'venda' | 'sangria' | 'suprimento' | 'pagamento' | 'estorno' | 'pix' | 'trocados' | 'deposito' | 'boleto';
+interface TransacaoBase {
     valor: number;
-    descricao: string | null;
-    metodo_pagamento: string;
-    referencia_id: string | null;
-    classificacao_pix: string | null;
-    item_financeiro_id?: number | null;
-    categoria_operacional_id?: number | null;
-    created_at: string;
-    categorias_operacionais?: {
-        id: number;
-        nome: string;
-        cor: string;
-    } | null;
+    tipo?: string; // usado para identificar sangria
 }
 
-export function useCaixa() {
-    const supabase = useMemo(() => createBrowserSupabaseClient(), []);
-    const [sessaoAtiva, setSessaoAtiva] = useState<CaixaSessao | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [movimentacoes, setMovimentacoes] = useState<CaixaMovimentacao[]>([]);
-    const realtimeChannel = useRef<RealtimeChannel | null>(null);
-    const isMounted = useRef(true);
+interface ModalFechamentoCaixaProps {
+    sessao: CaixaSessao;
+    transacoes: TransacaoBase[];
+    onClose: () => void;
+    onFinish: (result: {
+        observacoes?: string;
+        tflData?: any; // mantido para compatibilidade
+    }) => void;
+}
 
-    useEffect(() => {
-        isMounted.current = true;
-        return () => { isMounted.current = false; };
-    }, []);
+export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: ModalFechamentoCaixaProps) {
+    const [confirmado, setConfirmado] = useState<boolean | null>(null);
+    const [justificativa, setJustificativa] = useState('');
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [isSuccess, setIsSuccess] = useState(false);
 
-    const fetchMovimentacoes = useCallback(async (sessaoId: number) => {
-        if (!isMounted.current) return;
-        try {
-            const { data, error } = await supabase
-                .from('caixa_movimentacoes')
-                .select(`*, categorias_operacionais!categoria_operacional_id(id, nome, cor)`)
-                .eq('sessao_id', sessaoId)
-                .is('deleted_at', null)
-                .order('created_at', { ascending: false })
-                .limit(100);
-            if (error) throw error;
-            if (isMounted.current) setMovimentacoes(data || []);
-        } catch (err) {
-            console.error('Erro ao buscar movimentações:', err);
-        } finally {
-            if (isMounted.current) setLoading(false);
-        }
-    }, [supabase]);
+    const totalCreditos = useMemo(() => {
+        return transacoes
+            .filter(mov => mov.valor > 0)
+            .reduce((acc, mov) => acc + mov.valor, 0);
+    }, [transacoes]);
 
-    const fetchSessaoAtiva = useCallback(async () => {
-        if (!isMounted.current) return;
-        try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) {
-                if (isMounted.current) setLoading(false);
-                return;
-            }
-            const { data, error } = await supabase
-                .from('caixa_sessoes')
-                .select('*, terminais!terminal_id_ref(codigo, descricao)')
-                .eq('operador_id', user.id)
-                .eq('status', 'aberto')
-                .maybeSingle();
-            if (error) throw error;
-            if (isMounted.current) {
-                setSessaoAtiva(data);
-                if (data) {
-                    await fetchMovimentacoes(data.id);
-                } else {
-                    setLoading(false);
-                }
-            }
-        } catch (err) {
-            console.error('Erro ao buscar sessão:', err);
-            if (isMounted.current) setLoading(false);
-        }
-    }, [supabase, fetchMovimentacoes]);
+    const totalDebitos = useMemo(() => {
+        return transacoes
+            .filter(mov => mov.valor < 0)
+            .reduce((acc, mov) => acc + Math.abs(mov.valor), 0);
+    }, [transacoes]);
 
-    // Configurar Realtime quando a sessão ativa mudar
-    useEffect(() => {
-        if (!sessaoAtiva) {
-            if (realtimeChannel.current) {
-                supabase.removeChannel(realtimeChannel.current);
-                realtimeChannel.current = null;
-            }
+    const totalSangria = useMemo(() => {
+        return transacoes
+            .filter(mov => mov.tipo === 'sangria')
+            .reduce((acc, mov) => acc + Math.abs(mov.valor), 0);
+    }, [transacoes]);
+
+    const saldoEsperado = useMemo(() => {
+        return (sessao?.valor_inicial || 0) + totalCreditos - totalDebitos;
+    }, [sessao, totalCreditos, totalDebitos]);
+
+    const temFundoCaixa = sessao?.tem_fundo_caixa ?? true;
+
+    const handleConfirm = async () => {
+        if (confirmado === null) return;
+
+        if (!confirmado && !justificativa.trim()) {
+            alert('Por favor, informe a justificativa para a divergência.');
             return;
         }
 
-        if (realtimeChannel.current) {
-            supabase.removeChannel(realtimeChannel.current);
+        setIsProcessing(true);
+
+        const observacoes = !confirmado
+            ? `Divergência informada: ${justificativa}`
+            : '';
+
+        try {
+            await onFinish({
+                observacoes: observacoes || undefined,
+                tflData: {} // compatibilidade
+            });
+            setIsSuccess(true);
+        } catch (error) {
+            console.error('Erro ao fechar caixa:', error);
+            alert('Erro ao fechar caixa. Tente novamente.');
+        } finally {
+            setIsProcessing(false);
         }
-
-        const channel = supabase
-            .channel(`movimentacoes:sessao_id=eq.${sessaoAtiva.id}`)
-            .on(
-                'postgres_changes',
-                {
-                    event: '*',
-                    schema: 'public',
-                    table: 'caixa_movimentacoes',
-                    filter: `sessao_id=eq.${sessaoAtiva.id}`,
-                },
-                () => {
-                    fetchMovimentacoes(sessaoAtiva.id);
-                }
-            )
-            .subscribe();
-
-        realtimeChannel.current = channel;
-
-        return () => {
-            if (realtimeChannel.current) {
-                supabase.removeChannel(realtimeChannel.current);
-                realtimeChannel.current = null;
-            }
-        };
-    }, [sessaoAtiva, supabase, fetchMovimentacoes]);
-
-    const abrirCaixa = async (valorInicial: number, terminalCodigo?: string, terminalId?: number, temFundoCaixa: boolean = true) => {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) throw new Error('Usuário não autenticado');
-
-        const { data, error } = await supabase
-            .from('caixa_sessoes')
-            .insert({
-                operador_id: user.id,
-                terminal_id: terminalCodigo || 'TFL-WEB',
-                terminal_id_ref: terminalId || null,
-                valor_inicial: valorInicial,
-                valor_final_calculado: valorInicial,
-                status: 'aberto',
-                tem_fundo_caixa: temFundoCaixa
-            })
-            .select()
-            .single();
-
-        if (error) throw error;
-        setSessaoAtiva(data);
-        return data;
     };
 
-    const registrarMovimentacao = async (mov: Omit<CaixaMovimentacao, 'id' | 'sessao_id' | 'created_at'>) => {
-        if (!sessaoAtiva) throw new Error('Nenhuma sessão de caixa aberta');
+    if (isSuccess) {
+        return (
+            <>
+                <div className="fixed inset-0 bg-black/70 z-50" onClick={onClose} />
+                <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-md bg-bg-card border border-border rounded-2xl z-50 shadow-2xl overflow-hidden p-6 text-center">
+                    <CheckCircle2 size={56} className="mx-auto text-success mb-4" />
+                    <h3 className="text-xl font-black mb-2">Caixa Encerrado</h3>
+                    <p className="text-sm text-muted mb-6">O turno foi finalizado com sucesso.</p>
+                    <button className="btn btn-primary w-full" onClick={onClose}>Concluir</button>
+                </div>
+            </>
+        );
+    }
 
-        const { data, error } = await supabase
-            .from('caixa_movimentacoes')
-            .insert({
-                sessao_id: sessaoAtiva.id,
-                ...mov
-            })
-            .select()
-            .single();
+    return (
+        <>
+            <div className="fixed inset-0 bg-black/70 z-50" onClick={onClose} />
+            <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-md bg-bg-card border border-border rounded-2xl z-50 shadow-2xl overflow-hidden">
+                <div className="p-5 border-b border-border flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <DollarSign size={18} className="text-primary-blue-light" />
+                        <h2 className="text-lg font-black">Fechamento de Caixa</h2>
+                    </div>
+                    <button onClick={onClose} className="p-1 hover:bg-white/5 rounded">
+                        <X size={20} />
+                    </button>
+                </div>
 
-        if (error) throw error;
+                <div className="p-5 max-h-[80vh] overflow-y-auto custom-scrollbar">
+                    {/* Resumo */}
+                    <div className="bg-surface-subtle p-4 rounded-xl border border-border mb-6">
+                        <p className="text-xs font-bold mb-3">Resumo do Turno</p>
+                        <div className="space-y-2 text-sm">
+                            <div className="flex justify-between">
+                                <span className="text-muted">Valor Inicial:</span>
+                                <span className="font-bold">R$ {sessao.valor_inicial.toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between text-success">
+                                <span className="flex items-center gap-1"><ArrowUpCircle size={14} /> Entradas:</span>
+                                <span className="font-bold">R$ {totalCreditos.toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between text-danger">
+                                <span className="flex items-center gap-1"><ArrowDownCircle size={14} /> Saídas:</span>
+                                <span className="font-bold">R$ {totalDebitos.toFixed(2)}</span>
+                            </div>
+                            {totalSangria > 0 && (
+                                <div className="flex justify-between text-warning">
+                                    <span className="flex items-center gap-1"><AlertTriangle size={14} /> Sangria/Cofre:</span>
+                                    <span className="font-bold">R$ {totalSangria.toFixed(2)}</span>
+                                </div>
+                            )}
+                            <div className="flex justify-between pt-2 border-t border-border font-black">
+                                <span>Saldo Final:</span>
+                                <span className={saldoEsperado >= 0 ? 'text-success' : 'text-danger'}>
+                                    R$ {saldoEsperado.toFixed(2)}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
 
-        let delta = mov.valor;
-        if (mov.tipo === 'trocados') {
-            delta = 0; // trocados não altera saldo
-        }
+                    {/* Pergunta de confirmação */}
+                    <div className="space-y-4">
+                        <p className="text-sm font-bold text-center">O saldo final está correto?</p>
+                        <div className="flex gap-4">
+                            <button
+                                onClick={() => setConfirmado(true)}
+                                className={`flex-1 py-3 px-4 rounded-xl border-2 font-bold transition-all ${
+                                    confirmado === true
+                                        ? 'border-success bg-success/10 text-success'
+                                        : 'border-border bg-surface-subtle text-muted hover:border-success/50'
+                                }`}
+                            >
+                                <CheckCircle2 size={20} className="inline mr-2" />
+                                Sim
+                            </button>
+                            <button
+                                onClick={() => setConfirmado(false)}
+                                className={`flex-1 py-3 px-4 rounded-xl border-2 font-bold transition-all ${
+                                    confirmado === false
+                                        ? 'border-danger bg-danger/10 text-danger'
+                                        : 'border-border bg-surface-subtle text-muted hover:border-danger/50'
+                                }`}
+                            >
+                                <AlertTriangle size={20} className="inline mr-2" />
+                                Não
+                            </button>
+                        </div>
 
-        const novoSaldo = (sessaoAtiva.valor_final_calculado || 0) + delta;
+                        {confirmado === false && (
+                            <div className="animate-in slide-in-from-top-2 fade-in">
+                                <label className="text-sm font-bold text-muted block mb-2">
+                                    Justificativa <span className="text-danger">*</span>
+                                </label>
+                                <textarea
+                                    className="input w-full"
+                                    rows={3}
+                                    value={justificativa}
+                                    onChange={(e) => setJustificativa(e.target.value)}
+                                    placeholder="Explique o motivo da divergência..."
+                                    disabled={isProcessing}
+                                />
+                            </div>
+                        )}
 
-        await supabase
-            .from('caixa_sessoes')
-            .update({ valor_final_calculado: novoSaldo })
-            .eq('id', sessaoAtiva.id);
+                        {!temFundoCaixa && (
+                            <div className="bg-warning/10 border border-warning/30 p-3 rounded-lg">
+                                <p className="text-xs text-warning font-bold flex items-center gap-2">
+                                    <AlertTriangle size={14} />
+                                    Fundo de caixa ausente na abertura.
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                </div>
 
-        setSessaoAtiva(prev => prev ? { ...prev, valor_final_calculado: novoSaldo } : null);
-        setMovimentacoes(prev => [data, ...prev]);
-
-        return data;
-    };
-
-    const fecharCaixa = async (
-        observacoes?: string,
-        tflData?: {
-            tfl_vendas?: number;
-            tfl_premios?: number;
-            tfl_contas?: number;
-            tfl_saldo_projetado?: number;
-            tfl_comprovante_url?: string;
-        }
-    ) => {
-        if (!sessaoAtiva) throw new Error('Nenhuma sessão de caixa aberta');
-
-        // O valor declarado é o mesmo que o calculado (não há contagem manual)
-        const valorDeclarado = sessaoAtiva.valor_final_calculado;
-
-        const { data, error } = await supabase
-            .from('caixa_sessoes')
-            .update({
-                valor_final_declarado: valorDeclarado,
-                status: 'fechado', // sempre fecha como fechado (discrepância será apurada depois)
-                data_fechamento: new Date().toISOString(),
-                observacoes: observacoes,
-                ...tflData
-            })
-            .eq('id', sessaoAtiva.id)
-            .select()
-            .single();
-
-        if (error) throw error;
-
-        setSessaoAtiva(null);
-        setMovimentacoes([]);
-        return data;
-    };
-
-    useEffect(() => {
-        fetchSessaoAtiva();
-    }, [fetchSessaoAtiva]);
-
-    return {
-        sessaoAtiva,
-        movimentacoes,
-        loading,
-        abrirCaixa,
-        registrarMovimentacao,
-        fecharCaixa,
-        refresh: fetchSessaoAtiva
-    };
+                <div className="border-t border-border p-5 flex justify-end gap-3">
+                    <button className="btn btn-ghost" onClick={onClose} disabled={isProcessing}>
+                        Cancelar
+                    </button>
+                    <button
+                        className="btn btn-primary"
+                        onClick={handleConfirm}
+                        disabled={confirmado === null || isProcessing || (confirmado === false && !justificativa.trim())}
+                    >
+                        {isProcessing ? <Loader2 className="animate-spin mr-2" size={18} /> : null}
+                        {isProcessing ? 'Processando...' : 'Confirmar e Encerrar'}
+                    </button>
+                </div>
+            </div>
+        </>
+    );
 }
