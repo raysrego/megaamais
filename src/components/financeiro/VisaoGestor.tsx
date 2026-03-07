@@ -404,16 +404,7 @@ export function VisaoGestor() {
                 return;
             }
 
-            // Validação de data (não permitir vencimento no passado para lançamentos novos – opcional)
-            const hoje = new Date().toISOString().split('T')[0];
-            if (!editingTransaction && formData.vencimento < hoje) {
-                toast({
-                    message: "⚠️ A data de vencimento não pode ser anterior à hoje.",
-                    type: 'error'
-                });
-                return;
-            }
-
+          
             setProcessing(true);
 
             const catAtual = categorias.find(c => c.item === formData.item);
