@@ -19,7 +19,7 @@ export type TipoLancamento = 'pix' | 'sangria' | 'trocados' | 'deposito' | 'bole
 
 interface ModalLancamentoRapidoProps {
     tipo: TipoLancamento;
-    initialData?: any; // para edição (opcional)
+    initialData?: any; // <-- adicionado para edição
     onClose: () => void;
     onSave: (data: any) => Promise<void>;
 }
@@ -37,21 +37,21 @@ export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: Mo
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Preencher campos quando estiver editando
+    // Preencher campos se for edição
     useEffect(() => {
         if (initialData) {
-            setValor(Math.abs(initialData.valor));
+            setValor(Math.abs(initialData.valor) || 0);
             setObservacao(initialData.observacao || '');
             setMetodo(initialData.metodo || (tipo === 'pix' ? 'pix' : 'especie'));
-            if (tipo === 'pix' && initialData.classificacao_pix) {
-                setClassificacaoPix(initialData.classificacao_pix);
-            }
-            // Preenche a data de vencimento se existir
             if (initialData.data_vencimento) {
+                // converter para YYYY-MM-DD se necessário
                 const date = new Date(initialData.data_vencimento);
                 if (!isNaN(date.getTime())) {
                     setDataVencimento(date.toISOString().split('T')[0]);
                 }
+            }
+            if (tipo === 'pix' && initialData.classificacao_pix) {
+                setClassificacaoPix(initialData.classificacao_pix);
             }
         }
     }, [initialData, tipo]);
@@ -74,7 +74,8 @@ export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: Mo
         setIsSaving(true);
 
         try {
-            const dados = {
+            // Monta os dados base
+            const dados: any = {
                 tipo,
                 valor,
                 metodo,
@@ -83,7 +84,7 @@ export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: Mo
                 classificacao_pix: tipo === 'pix' ? classificacaoPix : null
             };
 
-            // Se for edição, incluir o ID (se existir)
+            // Se for edição, incluir o ID
             if (initialData?.id) {
                 dados.id = initialData.id;
             }
@@ -123,9 +124,7 @@ export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: Mo
                 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                         <div style={{ color: config.color }}>{config.icon}</div>
-                        <h2 style={{ fontSize: '1.1rem', fontWeight: 700 }}>
-                            {initialData ? 'Editar' : 'Novo'} {config.title}
-                        </h2>
+                        <h2 style={{ fontSize: '1.1rem', fontWeight: 700 }}>{config.title}</h2>
                     </div>
                     <button onClick={onClose} className="btn btn-ghost btn-sm" style={{ padding: 4 }} disabled={isSaving}><X size={20} /></button>
                 </div>
@@ -160,6 +159,7 @@ export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: Mo
                         />
                     </div>
 
+                    {/* Campo de Data de Vencimento */}
                     <div className="form-group">
                         <label style={{ color: 'var(--text-muted)', marginBottom: '0.5rem', display: 'block' }}>
                             Data de Vencimento <span style={{ fontSize: '0.7rem', opacity: 0.7 }}>(pode ser retroativa)</span>
