@@ -11,6 +11,7 @@ export interface CaixaSessao {
     terminal_id_ref: number | null;
     data_abertura: string;
     data_fechamento: string | null;
+    data_turno: string;                // ← NOVO: data do turno (YYYY-MM-DD)
     valor_inicial: number;
     valor_final_declarado: number | null;
     valor_final_calculado: number;
@@ -94,9 +95,10 @@ export function useCaixa() {
                 if (isMounted.current) setLoading(false);
                 return;
             }
+            // ← Incluímos 'data_turno' no select
             const { data, error } = await supabase
                 .from('caixa_sessoes')
-                .select('*, terminais!terminal_id_ref(codigo, descricao)')
+                .select('*, terminais!terminal_id_ref(codigo, descricao), data_turno')
                 .eq('operador_id', user.id)
                 .eq('status', 'aberto')
                 .maybeSingle();
@@ -160,15 +162,20 @@ export function useCaixa() {
         };
     }, [sessaoAtiva, supabase, fetchMovimentacoes]);
 
+    // ← Função abrirCaixa modificada para receber dataTurno
     const abrirCaixa = async (
         valorInicial: number,
         terminalCodigo?: string,
         terminalId?: number,
-        temFundoCaixa: boolean = true
+        temFundoCaixa: boolean = true,
+        dataTurno?: string                       // ← NOVO PARÂMETRO
     ) => {
-        console.log('[useCaixa] abrirCaixa chamado', { valorInicial, terminalCodigo, terminalId, temFundoCaixa });
+        console.log('[useCaixa] abrirCaixa chamado', { valorInicial, terminalCodigo, terminalId, temFundoCaixa, dataTurno });
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error('Usuário não autenticado');
+
+        // Se não for informada, usa a data atual (YYYY-MM-DD)
+        const turnoData = dataTurno || new Date().toISOString().split('T')[0];
 
         const { data, error } = await supabase
             .from('caixa_sessoes')
@@ -179,7 +186,8 @@ export function useCaixa() {
                 valor_inicial: valorInicial,
                 valor_final_calculado: valorInicial,
                 status: 'aberto',
-                tem_fundo_caixa: temFundoCaixa
+                tem_fundo_caixa: temFundoCaixa,
+                data_turno: turnoData                 // ← SALVA A DATA INFORMADA
             })
             .select()
             .single();
@@ -243,7 +251,6 @@ export function useCaixa() {
             throw new Error('Nenhuma sessão de caixa aberta');
         }
 
-        // Verifica se a sessão ainda está aberta no banco (opcional, mas útil)
         const { data: sessaoAtual, error: checkError } = await supabase
             .from('caixa_sessoes')
             .select('status')
@@ -261,9 +268,8 @@ export function useCaixa() {
         }
 
         const valorDeclarado = sessaoAtiva.valor_final_calculado;
-        const status = 'fechado'; // ou poderia ser 'discrepante' se houver lógica
+        const status = 'fechado';
 
-        // Garante que tflData seja um objeto (evita spread de undefined)
         const updateData = {
             valor_final_declarado: valorDeclarado,
             status,
@@ -274,7 +280,6 @@ export function useCaixa() {
 
         console.log('[useCaixa] Enviando update para Supabase:', updateData);
 
-        // Adiciona um timeout para evitar pendência infinita (30 segundos)
         const timeoutPromise = new Promise((_, reject) =>
             setTimeout(() => reject(new Error('Timeout na requisição ao Supabase')), 30000)
         );
