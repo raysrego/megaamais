@@ -309,7 +309,7 @@ export function VisaoOperadorCaixa() {
                                 </select>
                             </div>
 
-                            {/* NOVO CAMPO: Data de Início do Turno */}
+                            {/* Campo de Data de Início do Turno */}
                             <div className="form-group">
                                 <label className="text-[10px] font-black uppercase text-muted mb-1 block">Data de Início do Turno</label>
                                 <input
@@ -598,6 +598,7 @@ export function VisaoOperadorCaixa() {
                 <ModalMovimentacaoGeral
                     onClose={() => setShowMovimentacaoGeral(false)}
                     onSave={handleSaveEntry}
+                    dataTurnoInicial={sessaoAtiva?.data_turno} // ← passa a data do turno
                 />
             )}
 
