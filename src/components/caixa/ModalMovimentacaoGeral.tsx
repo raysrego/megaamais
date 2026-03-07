@@ -27,9 +27,10 @@ interface CategoriaOperacional {
 interface ModalMovimentacaoGeralProps {
     onClose: () => void;
     onSave: (data: any) => Promise<void>;
+    dataTurnoInicial?: string; // ← NOVO: data do turno (YYYY-MM-DD)
 }
 
-export function ModalMovimentacaoGeral({ onClose, onSave }: ModalMovimentacaoGeralProps) {
+export function ModalMovimentacaoGeral({ onClose, onSave, dataTurnoInicial }: ModalMovimentacaoGeralProps) {
     const supabase = createBrowserSupabaseClient();
     const { lojaAtual } = useLoja();
 
@@ -37,11 +38,19 @@ export function ModalMovimentacaoGeral({ onClose, onSave }: ModalMovimentacaoGer
     const [categorias, setCategorias] = useState<CategoriaOperacional[]>([]);
     const [categoriaSelecionada, setCategoriaSelecionada] = useState<number | null>(null);
     const [valor, setValor] = useState<number>(0);
-    const [data, setData] = useState<string>(new Date().toISOString().split('T')[0]); // YYYY-MM-DD
+    // ← Usa dataTurnoInicial se fornecido, senão data atual
+    const [data, setData] = useState<string>(dataTurnoInicial || new Date().toISOString().split('T')[0]);
     const [descricao, setDescricao] = useState('');
     const [loading, setLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    // Se dataTurnoInicial mudar (ex.: troca de turno), atualiza o estado
+    useEffect(() => {
+        if (dataTurnoInicial) {
+            setData(dataTurnoInicial);
+        }
+    }, [dataTurnoInicial]);
 
     useEffect(() => {
         carregarCategorias();
@@ -61,6 +70,7 @@ export function ModalMovimentacaoGeral({ onClose, onSave }: ModalMovimentacaoGer
 
             if (error) throw error;
 
+            // Se não houver categorias, tentar criar as padrão via RPC
             if (!data || data.length === 0) {
                 console.log('Criando categorias operacionais padrão...');
                 const { error: rpcError } = await supabase
@@ -71,6 +81,7 @@ export function ModalMovimentacaoGeral({ onClose, onSave }: ModalMovimentacaoGer
                 if (rpcError) {
                     console.error('Erro ao criar categorias padrão:', rpcError);
                 } else {
+                    // Tentar buscar novamente
                     const { data: novaData, error: novoError } = await supabase
                         .from('categorias_operacionais')
                         .select('id, nome, tipo, descricao, cor')
@@ -115,7 +126,7 @@ export function ModalMovimentacaoGeral({ onClose, onSave }: ModalMovimentacaoGer
             // Mapeia a categoria para um dos tipos esperados pelo backend
             let tipoMovimentacao: string;
             if (tipo === 'entrada') {
-                tipoMovimentacao = 'pix'; // ou outro padrão, conforme regras de negócio
+                tipoMovimentacao = 'pix'; // ou outro padrão
             } else {
                 // Saída
                 if (categoriaNome.includes('sangria') || categoriaNome.includes('cofre')) {
@@ -380,7 +391,7 @@ export function ModalMovimentacaoGeral({ onClose, onSave }: ModalMovimentacaoGer
                                 />
                             </div>
 
-                            {/* Data */}
+                            {/* Data - agora pré‑preenchida com a data do turno */}
                             <div className="form-group" style={{ marginBottom: '1.5rem' }}>
                                 <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
                                     Data
