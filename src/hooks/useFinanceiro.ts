@@ -125,50 +125,53 @@ export function useFinanceiro() {
         }
     }, [supabase, handleFinanceiroData]);
 
-    const salvarTransacao = async (transacao: Omit<TransacaoFinanceira, 'id' | 'status' | 'data_pagamento' | 'recorrente' | 'frequencia'> & {
-        status?: TransacaoFinanceira['status'];
-        data_pagamento?: TransacaoFinanceira['data_pagamento'];
-        recorrente?: boolean;
-        frequencia?: string | null;
-        loja_id?: string | null;
-    }) => {
-        const { data: { user } } = await supabase.auth.getUser();
+   const salvarTransacao = async (transacao: Omit<TransacaoFinanceira, 'id' | 'status' | 'data_pagamento' | 'recorrente' | 'frequencia'> & {
+    status?: TransacaoFinanceira['status'];
+    data_pagamento?: TransacaoFinanceira['data_pagamento'];
+    recorrente?: boolean;
+    frequencia?: string | null;
+    loja_id?: string | null;
+}) => {
+    // 👇 Remove qualquer campo id que possa ter vindo no objeto
+    const { id, ...dadosLimpos } = transacao as any;
 
-        const statusFinal = transacao.status || (transacao.tipo === 'receita' && transacao.metodo_pagamento === 'pix' ? 'pago' : 'pendente');
-        const dataPagamentoFinal = transacao.data_pagamento || (statusFinal === 'pago' && !transacao.data_pagamento ? new Date().toISOString() : null);
+    const { data: { user } } = await supabase.auth.getUser();
 
-        // Construir payload limpo (sem campos undefined/extras)
-        const payload: Record<string, any> = {
-            tipo: transacao.tipo,
-            descricao: transacao.descricao,
-            valor: transacao.valor,
-            item: transacao.item,
-            data_vencimento: transacao.data_vencimento,
-            recorrente: transacao.recorrente ?? false,
-            frequencia: transacao.recorrente ? transacao.frequencia : null,
-            loja_id: transacao.loja_id,
-            status: statusFinal,
-            data_pagamento: dataPagamentoFinal,
-            usuario_id: user?.id
-        };
+    const statusFinal = dadosLimpos.status || (dadosLimpos.tipo === 'receita' && dadosLimpos.metodo_pagamento === 'pix' ? 'pago' : 'pendente');
+    const dataPagamentoFinal = dadosLimpos.data_pagamento || (statusFinal === 'pago' && !dadosLimpos.data_pagamento ? new Date().toISOString() : null);
 
-        // Adicionar item_financeiro_id apenas se for um número válido
-        if (transacao.item_financeiro_id && typeof transacao.item_financeiro_id === 'number') {
-            payload.item_financeiro_id = transacao.item_financeiro_id;
-        }
+    // Construir payload limpo
+    const payload: Record<string, any> = {
+        tipo: dadosLimpos.tipo,
+        descricao: dadosLimpos.descricao,
+        valor: dadosLimpos.valor,
+        item: dadosLimpos.item,
+        data_vencimento: dadosLimpos.data_vencimento,
+        recorrente: dadosLimpos.recorrente ?? false,
+        frequencia: dadosLimpos.recorrente ? dadosLimpos.frequencia : null,
+        loja_id: dadosLimpos.loja_id,
+        status: statusFinal,
+        data_pagamento: dataPagamentoFinal,
+        usuario_id: user?.id
+    };
 
-        console.log('[FINANCEIRO] 📤 Payload de INSERT:', JSON.stringify(payload, null, 2));
+    // Adicionar item_financeiro_id apenas se for um número válido
+    if (dadosLimpos.item_financeiro_id && typeof dadosLimpos.item_financeiro_id === 'number') {
+        payload.item_financeiro_id = dadosLimpos.item_financeiro_id;
+    }
 
-        // INSERT sem timeout - deixar Supabase gerenciar
-        const { data, error } = await supabase
-            .from('financeiro_contas')
-            .insert(payload)
-            .select();
+    console.log('[FINANCEIRO] 📤 Payload de INSERT (sem id):', JSON.stringify(payload, null, 2));
 
-        if (error) {
-            console.error('[FINANCEIRO] Erro INSERT:', error);
-            throw new Error(error.message || error.details || 'Erro ao salvar.');
-        }
+    const { data, error } = await supabase
+        .from('financeiro_contas')
+        .insert(payload)
+        .select();
+
+    if (error) {
+        console.error('[FINANCEIRO] Erro INSERT:', error);
+        throw new Error(error.message || error.details || 'Erro ao salvar.');
+    }
+
 
         if (!data || data.length === 0) {
             console.warn('[FINANCEIRO] INSERT retornou 0 registros — possível bloqueio de RLS');
