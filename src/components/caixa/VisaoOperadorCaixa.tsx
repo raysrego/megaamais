@@ -113,6 +113,9 @@ export function VisaoOperadorCaixa() {
     const [terminalSelecionado, setTerminalSelecionado] = useState<string>('');
     const [terminalId, setTerminalId] = useState<number | undefined>();
     const [temFundoCaixa, setTemFundoCaixa] = useState<boolean>(true);
+    const [dataInicioTurno, setDataInicioTurno] = useState<string>(
+        new Date().toISOString().split('T')[0] // formato YYYY-MM-DD
+    );
     const [isOpening, setIsOpening] = useState(false);
     const [abaCaixa, setAbaCaixa] = useState<'tfl' | 'bolao'>('tfl');
     const [limiteExibicao, setLimiteExibicao] = useState(50);
@@ -122,6 +125,15 @@ export function VisaoOperadorCaixa() {
     // Função para salvar (criar ou editar)
     const handleSaveEntry = useCallback(async (data: any) => {
         try {
+            // Validar se a data do lançamento é exatamente a data do turno
+            if (sessaoAtiva?.data_turno && data.data_vencimento !== sessaoAtiva.data_turno) {
+                toast({
+                    message: 'Este lançamento possui data diferente do turno atual. Encerre o turno e abra um novo com a data correta para lançar este período.',
+                    type: 'warning'
+                });
+                return; // não salva
+            }
+
             if (editandoMovimentacao) {
                 const { error } = await supabase
                     .from('caixa_movimentacoes')
@@ -154,7 +166,7 @@ export function VisaoOperadorCaixa() {
             console.error('Erro ao salvar movimentação:', error);
             toast({ message: 'Erro: ' + error.message, type: 'error' });
         }
-    }, [registrarMovimentacao, editandoMovimentacao, supabase, toast, refresh]);
+    }, [registrarMovimentacao, editandoMovimentacao, supabase, toast, refresh, sessaoAtiva]);
 
     const handleDelete = useCallback(async (movimentacao: any) => {
         const confirmed = await confirm({
@@ -190,7 +202,6 @@ export function VisaoOperadorCaixa() {
         } catch (error) {
             console.error('[handleFinishCaixa] Erro ao fechar caixa:', error);
             toast({ message: 'Erro ao fechar caixa: ' + (error instanceof Error ? error.message : 'Erro desconhecido'), type: 'error' });
-            // Não fechar o modal em caso de erro para que o usuário possa tentar novamente ou ver a mensagem
         }
     };
 
@@ -201,7 +212,8 @@ export function VisaoOperadorCaixa() {
         }
         setIsOpening(true);
         try {
-            await abrirCaixa(valorInicial, terminalSelecionado, terminalId, temFundoCaixa);
+            // Passa a data de início do turno (formato YYYY-MM-DD)
+            await abrirCaixa(valorInicial, terminalSelecionado, terminalId, temFundoCaixa, dataInicioTurno);
             toast({ message: 'Caixa aberto!', type: 'success' });
         } catch (error: any) {
             toast({ message: 'Erro ao abrir caixa: ' + error.message, type: 'error' });
@@ -272,7 +284,7 @@ export function VisaoOperadorCaixa() {
                             <Unlock size={40} className="text-primary-blue-light" />
                         </div>
                         <h2 className="text-2xl font-black mb-2 uppercase">Abertura de Turno</h2>
-                        <p className="text-muted mb-8">Nenhum caixa aberto. Informe o saldo inicial para começar as operações.</p>
+                        <p className="text-muted mb-8">Nenhum caixa aberto. Informe os dados para começar as operações.</p>
                         <div className="w-full space-y-4 text-left">
                             <div className="form-group">
                                 <label className="text-[10px] font-black uppercase text-muted mb-1 block">Terminal de Operação</label>
@@ -296,6 +308,20 @@ export function VisaoOperadorCaixa() {
                                     ))}
                                 </select>
                             </div>
+
+                            {/* NOVO CAMPO: Data de Início do Turno */}
+                            <div className="form-group">
+                                <label className="text-[10px] font-black uppercase text-muted mb-1 block">Data de Início do Turno</label>
+                                <input
+                                    type="date"
+                                    className="input w-full"
+                                    value={dataInicioTurno}
+                                    onChange={(e) => setDataInicioTurno(e.target.value)}
+                                    max={new Date().toISOString().split('T')[0]} // não permitir futuro? opcional
+                                />
+                                <p className="text-[0.65rem] text-muted mt-1">Informe a data em que o turno realmente começou. Lançamentos com data diferente não serão permitidos.</p>
+                            </div>
+
                             <div className="form-group">
                                 <label className="text-[10px] font-black uppercase text-muted mb-1 block">Fundo de Troco (Saldo Inicial)</label>
                                 <MoneyInput
@@ -387,7 +413,7 @@ export function VisaoOperadorCaixa() {
                         <span className="badge success text-[0.6rem] ml-2">ABERTO</span>
                     </div>
                     <p className="text-xs text-muted">
-                        Aberto em {new Date(sessaoAtiva.data_abertura).toLocaleString('pt-BR')}
+                        Aberto em {new Date(sessaoAtiva.data_abertura).toLocaleString('pt-BR')} (Turno: {sessaoAtiva.data_turno})
                     </p>
                 </div>
             </div>
