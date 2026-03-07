@@ -37,7 +37,7 @@ export function ModalMovimentacaoGeral({ onClose, onSave }: ModalMovimentacaoGer
     const [categorias, setCategorias] = useState<CategoriaOperacional[]>([]);
     const [categoriaSelecionada, setCategoriaSelecionada] = useState<number | null>(null);
     const [valor, setValor] = useState<number>(0);
-    const [data, setData] = useState<string>(new Date().toISOString().split('T')[0]);
+    const [data, setData] = useState<string>(new Date().toISOString().split('T')[0]); // YYYY-MM-DD
     const [descricao, setDescricao] = useState('');
     const [loading, setLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
@@ -61,7 +61,6 @@ export function ModalMovimentacaoGeral({ onClose, onSave }: ModalMovimentacaoGer
 
             if (error) throw error;
 
-            // Se não houver categorias, criar as padrão
             if (!data || data.length === 0) {
                 console.log('Criando categorias operacionais padrão...');
                 const { error: rpcError } = await supabase
@@ -72,7 +71,6 @@ export function ModalMovimentacaoGeral({ onClose, onSave }: ModalMovimentacaoGer
                 if (rpcError) {
                     console.error('Erro ao criar categorias padrão:', rpcError);
                 } else {
-                    // Tentar buscar novamente
                     const { data: novaData, error: novoError } = await supabase
                         .from('categorias_operacionais')
                         .select('id, nome, tipo, descricao, cor')
@@ -98,7 +96,7 @@ export function ModalMovimentacaoGeral({ onClose, onSave }: ModalMovimentacaoGer
 
     const handleSave = async () => {
         if (!valor || valor <= 0) {
-            setError('Informe um valor valido maior que zero');
+            setError('Informe um valor válido maior que zero');
             return;
         }
 
@@ -114,17 +112,20 @@ export function ModalMovimentacaoGeral({ onClose, onSave }: ModalMovimentacaoGer
             const categoria = categorias.find(c => c.id === categoriaSelecionada);
             const categoriaNome = categoria?.nome.toLowerCase() || '';
 
-            // Determinar tipo de movimentação baseado na categoria
-           let tipoMovimentacao = tipo === 'entrada' ? 'venda' : 'pagamento'; // ou 'despesa'
-
-// Se for saída e categoria contém "sangria" ou "cofre" → sangria (dinheiro físico indo para o cofre)
-if (tipo === 'saida' && (categoriaNome.includes('sangria') || categoriaNome.includes('cofre'))) {
-    tipoMovimentacao = 'sangria';
-}
-// Se for saída e categoria contém "deposito" → deposito (ex.: depósito bancário)
-else if (tipo === 'saida' && categoriaNome.includes('deposito')) {
-    tipoMovimentacao = 'deposito';
-}
+            // Mapeia a categoria para um dos tipos esperados pelo backend
+            let tipoMovimentacao: string;
+            if (tipo === 'entrada') {
+                tipoMovimentacao = 'pix'; // ou outro padrão, conforme regras de negócio
+            } else {
+                // Saída
+                if (categoriaNome.includes('sangria') || categoriaNome.includes('cofre')) {
+                    tipoMovimentacao = 'sangria';
+                } else if (categoriaNome.includes('deposito')) {
+                    tipoMovimentacao = 'deposito';
+                } else {
+                    tipoMovimentacao = 'boleto'; // ou 'pagamento' genérico
+                }
+            }
 
             const dados = {
                 tipo: tipoMovimentacao,
@@ -132,13 +133,13 @@ else if (tipo === 'saida' && categoriaNome.includes('deposito')) {
                 metodo_pagamento: 'dinheiro',
                 descricao: descricao || categoria?.nome || '',
                 categoria_operacional_id: categoriaSelecionada,
-                data: new Date(data).toISOString()
+                data_vencimento: data // ← campo usado para validação
             };
 
             await onSave(dados);
             onClose();
         } catch (err: any) {
-            setError(err.message || 'Erro ao salvar lancamento');
+            setError(err.message || 'Erro ao salvar lançamento');
             setIsSaving(false);
         }
     };
@@ -168,7 +169,7 @@ else if (tipo === 'saida' && categoriaNome.includes('deposito')) {
                     borderBottom: '1px solid var(--border)',
                     background: 'linear-gradient(to right, rgba(59, 130, 246, 0.1), transparent)'
                 }}>
-                    <h2 style={{ fontSize: '1.1rem', fontWeight: 700 }}>Movimentacoes Gerais</h2>
+                    <h2 style={{ fontSize: '1.1rem', fontWeight: 700 }}>Movimentações Gerais</h2>
                     <button onClick={onClose} className="btn btn-ghost btn-sm" disabled={isSaving}><X size={20} /></button>
                 </div>
 
@@ -191,10 +192,10 @@ else if (tipo === 'saida' && categoriaNome.includes('deposito')) {
                         </div>
                     )}
 
-                    {/* Tipo de Movimentacao */}
+                    {/* Tipo de Movimentação */}
                     <div className="form-group" style={{ marginBottom: '1.5rem' }}>
                         <label style={{ display: 'block', marginBottom: '0.75rem', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
-                            Tipo de Movimentacao
+                            Tipo de Movimentação
                         </label>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                             <button
@@ -239,7 +240,7 @@ else if (tipo === 'saida' && categoriaNome.includes('deposito')) {
                                     cursor: isSaving ? 'not-allowed' : 'pointer'
                                 }}
                             >
-                                <TrendingDown size={18} /> Saida
+                                <TrendingDown size={18} /> Saída
                             </button>
                         </div>
                     </div>
@@ -397,23 +398,23 @@ else if (tipo === 'saida' && categoriaNome.includes('deposito')) {
                                 </div>
                             </div>
 
-                            {/* Descricao */}
+                            {/* Descrição */}
                             <div className="form-group" style={{ marginBottom: '1.5rem' }}>
                                 <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
-                                    Descricao (Opcional)
+                                    Descrição (Opcional)
                                 </label>
                                 <textarea
                                     className="input"
                                     rows={2}
                                     value={descricao}
                                     onChange={(e) => setDescricao(e.target.value)}
-                                    placeholder="Adicione detalhes sobre esta movimentacao"
+                                    placeholder="Adicione detalhes sobre esta movimentação"
                                     style={{ resize: 'none' }}
                                     disabled={isSaving}
                                 />
                             </div>
 
-                            {/* Botao Salvar */}
+                            {/* Botão Salvar */}
                             <button
                                 className="btn btn-primary"
                                 onClick={handleSave}
@@ -430,7 +431,7 @@ else if (tipo === 'saida' && categoriaNome.includes('deposito')) {
                                     </span>
                                 ) : (
                                     <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                        <Check size={20} /> Confirmar Lancamento
+                                        <Check size={20} /> Confirmar Lançamento
                                     </span>
                                 )}
                             </button>
