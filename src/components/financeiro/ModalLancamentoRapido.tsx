@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
     X,
     Smartphone,
@@ -19,14 +19,15 @@ export type TipoLancamento = 'pix' | 'sangria' | 'trocados' | 'deposito' | 'bole
 
 interface ModalLancamentoRapidoProps {
     tipo: TipoLancamento;
-    initialData?: any; // para edição
     onClose: () => void;
     onSave: (data: any) => Promise<void>;
 }
 
-export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: ModalLancamentoRapidoProps) {
+export function ModalLancamentoRapido({ tipo, onClose, onSave }: ModalLancamentoRapidoProps) {
     const [valor, setValor] = useState<number>(0);
-    const [dataVencimento, setDataVencimento] = useState<string>(''); // formato YYYY-MM-DD
+    const [dataVencimento, setDataVencimento] = useState<string>(
+        new Date().toISOString().split('T')[0] // valor inicial = hoje
+    );
     const [observacao, setObservacao] = useState('');
     const [metodo, setMetodo] = useState<string>(
         tipo === 'pix' ? 'pix' : 'especie'
@@ -34,25 +35,6 @@ export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: Mo
     const [classificacaoPix, setClassificacaoPix] = useState('CRED PIX QR COD EST');
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
-
-    // Preenche os dados quando estiver editando
-    useEffect(() => {
-        if (initialData) {
-            setValor(Math.abs(initialData.valor));
-            setObservacao(initialData.descricao || '');
-            setMetodo(initialData.metodo_pagamento || (tipo === 'pix' ? 'pix' : 'especie'));
-            if (tipo === 'pix' && initialData.classificacao_pix) {
-                setClassificacaoPix(initialData.classificacao_pix);
-            }
-            // Preenche a data de vencimento se existir (espera-se string ISO ou Date)
-            if (initialData.data_vencimento) {
-                const date = new Date(initialData.data_vencimento);
-                if (!isNaN(date.getTime())) {
-                    setDataVencimento(date.toISOString().split('T')[0]); // extrai YYYY-MM-DD
-                }
-            }
-        }
-    }, [initialData, tipo]);
 
     const config = {
         pix: { title: 'Lançamento Pix', icon: <Smartphone />, color: 'var(--success)', rgb: 'var(--success-rgb)', label: 'Valor Recebido' },
@@ -74,11 +56,10 @@ export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: Mo
         try {
             const dados = {
                 tipo,
-                valor: tipo === 'sangria' || tipo === 'deposito' ? -valor : valor, // mantém negativo para saídas
+                valor,
                 metodo,
+                data_vencimento: dataVencimento, // ← data escolhida pelo usuário
                 observacao: tipo === 'pix' ? `[${classificacaoPix}] ${observacao}`.trim() : observacao,
-                data: new Date().toISOString(), // data do lançamento (gerada automaticamente)
-                data_vencimento: dataVencimento ? new Date(dataVencimento).toISOString() : null, // data de vencimento informada
                 classificacao_pix: tipo === 'pix' ? classificacaoPix : null
             };
 
@@ -155,7 +136,7 @@ export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: Mo
                     {/* NOVO CAMPO: Data de Vencimento */}
                     <div className="form-group">
                         <label style={{ color: 'var(--text-muted)', marginBottom: '0.5rem', display: 'block' }}>
-                            Data de Vencimento <span style={{ fontSize: '0.7rem', opacity: 0.7 }}>(opcional)</span>
+                            Data de Vencimento <span style={{ fontSize: '0.7rem', opacity: 0.7 }}>(pode ser retroativa)</span>
                         </label>
                         <input
                             type="date"
@@ -295,7 +276,7 @@ export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: Mo
                                 </span>
                             ) : (
                                 <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                    <Check size={20} /> {initialData ? 'Atualizar' : 'Confirmar'} Lançamento
+                                    <Check size={20} /> Confirmar Lançamento
                                 </span>
                             )}
                         </button>
@@ -310,7 +291,7 @@ export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: Mo
 
                 <div style={{ padding: '0.75rem 1.5rem', background: 'var(--surface-subtle)', borderTop: '1px solid var(--border)', textAlign: 'center' }}>
                     <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }} className="flex items-center justify-center gap-1">
-                        <AlertCircle size={12} /> Este lançamento será registrado imediatamente no fluxo de hoje.
+                        <AlertCircle size={12} /> Você pode informar uma data retroativa se necessário.
                     </p>
                 </div>
             </div>
