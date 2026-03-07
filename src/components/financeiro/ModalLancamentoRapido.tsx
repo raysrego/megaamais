@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
     X,
     Smartphone,
@@ -19,14 +19,15 @@ export type TipoLancamento = 'pix' | 'sangria' | 'trocados' | 'deposito' | 'bole
 
 interface ModalLancamentoRapidoProps {
     tipo: TipoLancamento;
+    initialData?: any; // para edição (opcional)
     onClose: () => void;
     onSave: (data: any) => Promise<void>;
 }
 
-export function ModalLancamentoRapido({ tipo, onClose, onSave }: ModalLancamentoRapidoProps) {
+export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: ModalLancamentoRapidoProps) {
     const [valor, setValor] = useState<number>(0);
     const [dataVencimento, setDataVencimento] = useState<string>(
-        new Date().toISOString().split('T')[0] // valor inicial = hoje
+        new Date().toISOString().split('T')[0]
     );
     const [observacao, setObservacao] = useState('');
     const [metodo, setMetodo] = useState<string>(
@@ -35,6 +36,25 @@ export function ModalLancamentoRapido({ tipo, onClose, onSave }: ModalLancamento
     const [classificacaoPix, setClassificacaoPix] = useState('CRED PIX QR COD EST');
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    // Preencher campos quando estiver editando
+    useEffect(() => {
+        if (initialData) {
+            setValor(Math.abs(initialData.valor));
+            setObservacao(initialData.observacao || '');
+            setMetodo(initialData.metodo || (tipo === 'pix' ? 'pix' : 'especie'));
+            if (tipo === 'pix' && initialData.classificacao_pix) {
+                setClassificacaoPix(initialData.classificacao_pix);
+            }
+            // Preenche a data de vencimento se existir
+            if (initialData.data_vencimento) {
+                const date = new Date(initialData.data_vencimento);
+                if (!isNaN(date.getTime())) {
+                    setDataVencimento(date.toISOString().split('T')[0]);
+                }
+            }
+        }
+    }, [initialData, tipo]);
 
     const config = {
         pix: { title: 'Lançamento Pix', icon: <Smartphone />, color: 'var(--success)', rgb: 'var(--success-rgb)', label: 'Valor Recebido' },
@@ -58,10 +78,15 @@ export function ModalLancamentoRapido({ tipo, onClose, onSave }: ModalLancamento
                 tipo,
                 valor,
                 metodo,
-                data_vencimento: dataVencimento, // ← data escolhida pelo usuário
+                data_vencimento: dataVencimento,
                 observacao: tipo === 'pix' ? `[${classificacaoPix}] ${observacao}`.trim() : observacao,
                 classificacao_pix: tipo === 'pix' ? classificacaoPix : null
             };
+
+            // Se for edição, incluir o ID (se existir)
+            if (initialData?.id) {
+                dados.id = initialData.id;
+            }
 
             await onSave(dados);
             onClose();
@@ -98,7 +123,9 @@ export function ModalLancamentoRapido({ tipo, onClose, onSave }: ModalLancamento
                 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                         <div style={{ color: config.color }}>{config.icon}</div>
-                        <h2 style={{ fontSize: '1.1rem', fontWeight: 700 }}>{config.title}</h2>
+                        <h2 style={{ fontSize: '1.1rem', fontWeight: 700 }}>
+                            {initialData ? 'Editar' : 'Novo'} {config.title}
+                        </h2>
                     </div>
                     <button onClick={onClose} className="btn btn-ghost btn-sm" style={{ padding: 4 }} disabled={isSaving}><X size={20} /></button>
                 </div>
@@ -133,7 +160,6 @@ export function ModalLancamentoRapido({ tipo, onClose, onSave }: ModalLancamento
                         />
                     </div>
 
-                    {/* NOVO CAMPO: Data de Vencimento */}
                     <div className="form-group">
                         <label style={{ color: 'var(--text-muted)', marginBottom: '0.5rem', display: 'block' }}>
                             Data de Vencimento <span style={{ fontSize: '0.7rem', opacity: 0.7 }}>(pode ser retroativa)</span>
@@ -276,7 +302,7 @@ export function ModalLancamentoRapido({ tipo, onClose, onSave }: ModalLancamento
                                 </span>
                             ) : (
                                 <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                    <Check size={20} /> Confirmar Lançamento
+                                    <Check size={20} /> {initialData ? 'Atualizar' : 'Confirmar'} Lançamento
                                 </span>
                             )}
                         </button>
