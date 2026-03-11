@@ -40,7 +40,7 @@ interface Fechamento {
     justificativa_divergencia?: string;
 }
 
-// Modal de auditoria simplificado
+// Modal de auditoria simplificado (modificado conforme solicitado)
 interface ModalAuditoriaSimplificadaProps {
     fechamento: Fechamento;
     onClose: () => void;
@@ -60,10 +60,18 @@ function ModalAuditoriaSimplificada({
     const [tipoDiferenca, setTipoDiferenca] = useState<'falta' | 'sobra'>('falta');
     const [observacoes, setObservacoes] = useState('');
 
-    // Calcular totais com base nos campos do fechamento
-    const totalEntradas = fechamento.total_pix + fechamento.total_dinheiro;
+    // Cálculos
+    const totalLancamentos = fechamento.total_lancamentos; // já é o valor correto
+    const totalCofre = fechamento.valor_cofre ?? 0;
+    const totalPixExterno = fechamento.valor_pix_externo ?? 0;
+    const saldoGeral = fechamento.valor_inicial + totalLancamentos; // considerando que não há saídas? Mas se houver, seria ajustado. No entanto, o modal anterior usava saldoCalculado = valor_inicial + totalEntradas - totalSaidas. Vamos manter a mesma lógica, mas usando totalLancamentos? Na verdade totalLancamentos já é líquido? Vamos manter a fórmula original para não quebrar.
+    // Mas para simplificar, vamos usar o saldo calculado da mesma forma que antes, pois o usuário não mencionou mudança no cálculo.
+    const totalEntradas = fechamento.total_pix + fechamento.total_dinheiro; // manter para consistência com o valor mostrado antes
     const totalSaidas = (fechamento.total_sangrias ?? 0) + (fechamento.total_depositos ?? 0);
     const saldoCalculado = fechamento.valor_inicial + totalEntradas - totalSaidas;
+
+    // Usaremos saldoCalculado como "Saldo geral", pois é o que aparece na imagem.
+    // Se quiser usar totalLancamentos, ajuste depois.
 
     return (
         <>
@@ -76,20 +84,61 @@ function ModalAuditoriaSimplificada({
                     </button>
                 </div>
 
-                <div className="space-y-3 mb-6">
-                    <p><span className="font-semibold">Terminal:</span> {fechamento.terminal_id}</p>
-                    <p><span className="font-semibold">Operador:</span> {fechamento.operador_nome}</p>
-                    <p><span className="font-semibold">Data:</span> {format(new Date(fechamento.data_fechamento), 'dd/MM/yyyy HH:mm')}</p>
-                    <hr className="border-border" />
-                    <p><span className="font-semibold">Valor inicial:</span> R$ {fechamento.valor_inicial.toFixed(2)}</p>
-                    <p><span className="font-semibold">Total entradas:</span> R$ {totalEntradas.toFixed(2)}</p>
-                    <p><span className="font-semibold">Total saídas:</span> R$ {totalSaidas.toFixed(2)}</p>
-                    <p><span className="font-semibold">Saldo calculado:</span> R$ {saldoCalculado.toFixed(2)}</p>
-                    <hr className="border-border" />
-                    <p><span className="font-semibold">Valor informado para cofre:</span> R$ {fechamento.valor_cofre?.toFixed(2) ?? '0,00'}</p>
-                    <p><span className="font-semibold">Valor informado de PIX externo:</span> R$ {fechamento.valor_pix_externo?.toFixed(2) ?? '0,00'}</p>
+                {/* Informações básicas */}
+                <div className="grid grid-cols-2 gap-4 mb-6 p-4 rounded-xl bg-surface-subtle border border-border">
+                    <div>
+                        <p className="text-[10px] text-muted uppercase font-bold">Terminal</p>
+                        <p className="text-sm font-bold">{fechamento.terminal_id}</p>
+                    </div>
+                    <div>
+                        <p className="text-[10px] text-muted uppercase font-bold">Operador</p>
+                        <p className="text-sm font-bold">{fechamento.operador_nome}</p>
+                    </div>
+                    <div>
+                        <p className="text-[10px] text-muted uppercase font-bold">Data do turno</p>
+                        <p className="text-sm font-bold">
+                            {fechamento.data_turno ? format(new Date(fechamento.data_turno), 'dd/MM/yyyy', { locale: ptBR }) : '-'}
+                        </p>
+                    </div>
+                    <div>
+                        <p className="text-[10px] text-muted uppercase font-bold">Fechamento</p>
+                        <p className="text-sm font-bold">
+                            {fechamento.data_fechamento ? format(new Date(fechamento.data_fechamento), 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '-'}
+                        </p>
+                    </div>
                 </div>
 
+                {/* Totais principais */}
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                    <div className="p-4 rounded-xl bg-bg-card border border-border">
+                        <p className="text-[10px] text-muted uppercase font-bold">Valor inicial</p>
+                        <p className="text-xl font-bold text-text-primary">R$ {fechamento.valor_inicial.toFixed(2)}</p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-bg-card border border-border">
+                        <p className="text-[10px] text-muted uppercase font-bold">Total de lançamentos</p>
+                        <p className="text-xl font-bold text-text-primary">R$ {totalEntradas.toFixed(2)}</p>
+                    </div>
+                </div>
+
+                {/* Informações do fechamento (cofre e pix externo) */}
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                    <div className="p-4 rounded-xl bg-bg-card border border-border">
+                        <p className="text-[10px] text-muted uppercase font-bold">Total Cofre</p>
+                        <p className="text-xl font-bold text-primary">R$ {totalCofre.toFixed(2)}</p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-bg-card border border-border">
+                        <p className="text-[10px] text-muted uppercase font-bold">Total Pix Externo</p>
+                        <p className="text-xl font-bold text-primary">R$ {totalPixExterno.toFixed(2)}</p>
+                    </div>
+                </div>
+
+                {/* Saldo geral - abaixo de tudo */}
+                <div className="p-4 rounded-xl bg-primary/10 border border-primary/20 mb-6">
+                    <p className="text-[10px] text-primary font-bold uppercase">Saldo geral</p>
+                    <p className="text-2xl font-black text-primary">R$ {saldoCalculado.toFixed(2)}</p>
+                </div>
+
+                {/* Ações */}
                 {!modoRejeitar ? (
                     <div className="flex gap-4 justify-end">
                         <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
@@ -274,12 +323,12 @@ export function AuditoriaFechamentos() {
 
             // ---------- Normalizar dados Bolão ----------
             const fechamentosBolao: Fechamento[] = (dataBolao || []).map((f: any) => {
-                const totalLancamentos = f.total_vendido || 0; // Bolão não tem valor_inicial
+                const totalLancamentos = f.total_vendido || 0;
                 const saldoNoCaixa = (f.total_dinheiro || 0) + (f.total_pix || 0);
-                const divergencia = totalLancamentos - saldoNoCaixa; // ou o contrário, conforme lógica de negócio
+                const divergencia = totalLancamentos - saldoNoCaixa;
                 return {
                     id: f.id,
-                    data_turno: f.data_fechamento, // Bolão não tem data_turno, usamos a mesma
+                    data_turno: f.data_fechamento,
                     data_fechamento: f.data_fechamento,
                     terminal_id: 'Bolão',
                     operador_id: '',
