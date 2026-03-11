@@ -17,7 +17,7 @@ import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import { useToast } from '@/contexts/ToastContext';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { MoneyInput } from '@/components/ui/MoneyInput'; // necessário para o modal
+import { MoneyInput } from '@/components/ui/MoneyInput';
 
 interface Fechamento {
     id: string;
@@ -37,7 +37,6 @@ interface Fechamento {
     tipo: 'tfl' | 'bolao';
     justificativa?: string;
     detalhado?: any;
-    // Novos campos
     valor_cofre?: number;
     valor_pix_externo?: number;
     diferenca_apurada?: number;
@@ -66,7 +65,7 @@ function ModalAuditoriaSimplificada({
 
     // Calcular totais com base nos campos do fechamento
     const saldoInicial = fechamento.saldo_sistema ?? 0;
-    const totalEntradas = fechamento.total_pix + fechamento.total_dinheiro; // ajuste conforme necessário
+    const totalEntradas = fechamento.total_pix + fechamento.total_dinheiro;
     const totalSaidas = (fechamento.total_sangrias ?? 0) + (fechamento.total_depositos ?? 0);
     const saldoCalculado = saldoInicial + totalEntradas - totalSaidas;
 
@@ -180,20 +179,20 @@ export function AuditoriaFechamentos() {
     const fetchHistorico = useCallback(async () => {
         setLoading(true);
         try {
-            // Buscar fechamentos de TFL (caixa_sessoes)
+            // ---------- QUERY TFL (caixa_sessoes) sem aliases ----------
             let queryTFL = supabase
                 .from('caixa_sessoes')
                 .select(`
                     id,
-                    created_at as data_fechamento,
+                    created_at,
                     terminal_id,
                     operador_id,
-                    valor_final_calculado as saldo_sistema,
-                    valor_final_declarado as saldo_informado,
-                    status as status_validacao,
-                    observacoes as justificativa,
+                    valor_final_calculado,
+                    valor_final_declarado,
+                    status,
+                    observacoes,
                     total_sangrias,
-                    total_depositos_filial as total_depositos,
+                    total_depositos_filial,
                     valor_cofre,
                     valor_pix_externo,
                     diferenca_apurada,
@@ -203,13 +202,19 @@ export function AuditoriaFechamentos() {
                 .order('created_at', { ascending: false });
 
             if (filtroStatus !== 'todos') {
-                queryTFL = queryTFL.eq('status', filtroStatus);
+                // Mapeia o filtro para o status do TFL
+                let statusFilter: string;
+                if (filtroStatus === 'fechado') statusFilter = 'fechado';
+                else if (filtroStatus === 'batido') statusFilter = 'conferido'; // ou 'batido'? No TFL, status pode ser 'conferido' ou 'batido'? Ajuste conforme seu enum.
+                else if (filtroStatus === 'divergente') statusFilter = 'discrepante';
+                else statusFilter = filtroStatus;
+                queryTFL = queryTFL.eq('status', statusFilter);
             }
 
             const { data: dataTFL, error: errorTFL } = await queryTFL;
             if (errorTFL) throw errorTFL;
 
-            // Buscar fechamentos de Bolão (caixa_bolao_sessoes) – adaptar se necessário
+            // ---------- QUERY BOLÃO (caixa_bolao_sessoes) com valores de enum válidos ----------
             let queryBolao = supabase
                 .from('caixa_bolao_sessoes')
                 .select(`
@@ -217,38 +222,51 @@ export function AuditoriaFechamentos() {
                     data_fechamento,
                     total_dinheiro,
                     total_pix,
-                    total_vendido as saldo_sistema,
-                    (total_dinheiro + total_pix) as saldo_informado,
+                    total_vendido,
                     status_validacao,
-                    observacoes_gerente as justificativa
+                    observacoes_gerente
                 `)
-                .in('status_validacao', filtroStatus === 'todos'
-                    ? ['pendente', 'discrepante', 'fechado', 'batido', 'divergente']
-                    : [filtroStatus === 'fechado' ? 'pendente' : filtroStatus])
                 .order('data_fechamento', { ascending: false });
+
+            // Aplica filtro de status apenas se não for 'todos'
+            if (filtroStatus !== 'todos') {
+                // Mapeia o filtro para os valores reais do enum status_validacao_gerencial
+                // Valores comuns: 'pendente', 'aprovado', 'rejeitado', 'discrepante'
+                let statusFilter: string[] = [];
+                if (filtroStatus === 'fechado') {
+                    statusFilter = ['pendente']; // Aguardando auditoria
+                } else if (filtroStatus === 'batido') {
+                    statusFilter = ['aprovado'];
+                } else if (filtroStatus === 'divergente') {
+                    statusFilter = ['rejeitado', 'discrepante'];
+                }
+                if (statusFilter.length > 0) {
+                    queryBolao = queryBolao.in('status_validacao', statusFilter);
+                }
+            }
 
             const { data: dataBolao, error: errorBolao } = await queryBolao;
             if (errorBolao) throw errorBolao;
 
-            // Normalizar dados TFL
+            // ---------- Normalizar dados TFL ----------
             const fechamentosTFL: Fechamento[] = (dataTFL || []).map((f: any) => {
-                const diff = (f.saldo_informado || 0) - (f.saldo_sistema || 0);
+                const diff = (f.valor_final_declarado || 0) - (f.valor_final_calculado || 0);
                 return {
                     id: f.id,
-                    data_fechamento: f.data_fechamento,
+                    data_fechamento: f.created_at,
                     terminal_id: f.terminal_id || 'TFL-WEB',
                     operador_id: f.operador_id || 'Sistema',
                     operador_nome: f.operador_id ? `${f.operador_id.split('-')[0]}...` : 'Sistema',
-                    saldo_sistema: f.saldo_sistema || 0,
-                    saldo_informado: f.saldo_informado || 0,
+                    saldo_sistema: f.valor_final_calculado || 0,
+                    saldo_informado: f.valor_final_declarado || 0,
                     divergencia: diff,
-                    total_pix: 0,
-                    total_dinheiro: f.saldo_informado || 0,
+                    total_pix: 0, // Ajuste se necessário
+                    total_dinheiro: f.valor_final_declarado || 0,
                     total_sangrias: f.total_sangrias || 0,
-                    total_depositos: f.total_depositos || 0,
-                    status_validacao: f.status_validacao,
+                    total_depositos: f.total_depositos_filial || 0,
+                    status_validacao: f.status, // Pode ser 'fechado', 'conferido', 'discrepante', etc.
                     tipo: 'tfl',
-                    justificativa: f.justificativa,
+                    justificativa: f.observacoes,
                     valor_cofre: f.valor_cofre,
                     valor_pix_externo: f.valor_pix_externo,
                     diferenca_apurada: f.diferenca_apurada,
@@ -256,29 +274,31 @@ export function AuditoriaFechamentos() {
                 };
             });
 
-            // Normalizar dados Bolão (simplificado)
+            // ---------- Normalizar dados Bolão ----------
             const fechamentosBolao: Fechamento[] = (dataBolao || []).map((f: any) => ({
                 id: f.id,
                 data_fechamento: f.data_fechamento,
                 terminal_id: 'Bolão',
                 operador_id: '',
                 operador_nome: 'Sistema Bolão',
-                saldo_sistema: f.saldo_sistema || 0,
-                saldo_informado: f.saldo_informado || 0,
-                divergencia: (f.saldo_sistema || 0) - (f.saldo_informado || 0),
+                saldo_sistema: f.total_vendido || 0,
+                saldo_informado: (f.total_dinheiro || 0) + (f.total_pix || 0),
+                divergencia: (f.total_vendido || 0) - ((f.total_dinheiro || 0) + (f.total_pix || 0)),
                 total_pix: f.total_pix || 0,
                 total_dinheiro: f.total_dinheiro || 0,
                 total_sangrias: 0,
                 total_depositos: 0,
                 status_validacao: f.status_validacao || 'pendente',
                 tipo: 'bolao',
-                justificativa: f.justificativa
+                justificativa: f.observacoes_gerente
             }));
 
             setFechamentos([...fechamentosTFL, ...fechamentosBolao]);
         } catch (err: any) {
             console.error('Erro ao carregar histórico:', err);
-            toast({ message: 'Erro ao carregar fechamentos: ' + err.message, type: 'error' });
+            // Exibe detalhes do erro para depuração
+            const errorMsg = err?.message || err?.error_description || err?.details || 'Erro desconhecido';
+            toast({ message: 'Erro ao carregar fechamentos: ' + errorMsg, type: 'error' });
         } finally {
             setLoading(false);
         }
@@ -307,7 +327,10 @@ export function AuditoriaFechamentos() {
             fechado: 'AGUARDANDO AUDITORIA',
             batido: 'APROVADO',
             divergente: 'REPROVADO',
-            pendente: 'PENDENTE'
+            pendente: 'PENDENTE',
+            discrepante: 'DIVERGENTE',
+            aprovado: 'APROVADO',
+            rejeitado: 'REJEITADO'
         };
 
         return (
@@ -425,15 +448,15 @@ export function AuditoriaFechamentos() {
                         </div>
 
                         <div className="flex items-center gap-4 mb-6 p-4 rounded-xl bg-surface-subtle border border-border">
-                            <div className={`w-12 h-12 rounded-full flex items-center justify-center ${selectedFechamento.status_validacao === 'batido'
+                            <div className={`w-12 h-12 rounded-full flex items-center justify-center ${selectedFechamento.status_validacao === 'batido' || selectedFechamento.status_validacao === 'aprovado'
                                 ? 'bg-success/10 text-success'
-                                : selectedFechamento.status_validacao === 'fechado'
+                                : selectedFechamento.status_validacao === 'fechado' || selectedFechamento.status_validacao === 'pendente'
                                     ? 'bg-warning/10 text-warning'
                                     : 'bg-danger/10 text-danger'
                                 }`}>
-                                {selectedFechamento.status_validacao === 'batido'
+                                {selectedFechamento.status_validacao === 'batido' || selectedFechamento.status_validacao === 'aprovado'
                                     ? <CheckCircle2 size={24} />
-                                    : selectedFechamento.status_validacao === 'fechado'
+                                    : selectedFechamento.status_validacao === 'fechado' || selectedFechamento.status_validacao === 'pendente'
                                         ? <ShieldCheck size={24} />
                                         : <AlertTriangle size={24} />}
                             </div>
@@ -529,7 +552,7 @@ export function AuditoriaFechamentos() {
                         const { error } = await supabase
                             .from(tabela)
                             .update({
-                                [statusField]: 'batido',
+                                [statusField]: selectedFechamento.tipo === 'tfl' ? 'conferido' : 'aprovado',
                                 observacoes_gerente: obs,
                                 data_validacao: new Date().toISOString()
                             })
@@ -550,7 +573,7 @@ export function AuditoriaFechamentos() {
                         const { error } = await supabase
                             .from(tabela)
                             .update({
-                                [statusField]: 'divergente',
+                                [statusField]: selectedFechamento.tipo === 'tfl' ? 'discrepante' : 'rejeitado',
                                 observacoes_gerente: justificativa,
                                 diferenca_apurada: diferenca || 0,
                                 data_validacao: new Date().toISOString()
