@@ -10,7 +10,7 @@ import {
     ArrowDownCircle,
     DollarSign
 } from 'lucide-react';
-import { MoneyInput } from '../ui/MoneyInput'; // ajuste o path conforme necessário
+import { MoneyInput } from '@/components/ui/MoneyInput';
 import { CaixaSessao } from '@/hooks/useCaixa';
 
 interface TransacaoBase {
@@ -27,7 +27,7 @@ interface ModalFechamentoCaixaProps {
         tflData?: any;
         valorCofre?: number;
         valorPixExterno?: number;
-    }) => Promise<void>; // Importante: deve retornar Promise
+    }) => Promise<void>;
 }
 
 export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: ModalFechamentoCaixaProps) {
@@ -64,7 +64,7 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
     const temFundoCaixa = sessao?.tem_fundo_caixa ?? true;
 
     const handleConfirm = async () => {
-        console.log('[Modal] handleConfirm iniciado', { confirmado, justificativa, valorCofre, valorPixExterno });
+        console.log('[Modal] handleConfirm iniciado', { confirmado, justificativa });
 
         if (confirmado === null) {
             console.warn('[Modal] confirmado é null, abortando');
@@ -77,27 +77,23 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
         }
 
         setIsProcessing(true);
-        console.log('[Modal] isProcessing = true');
 
         const observacoes = !confirmado
             ? `Divergência informada: ${justificativa}`
             : '';
 
         try {
-            console.log('[Modal] Chamando onFinish com', { observacoes, tflData: {}, valorCofre, valorPixExterno });
             await onFinish({
                 observacoes: observacoes || undefined,
                 tflData: {},
                 valorCofre,
                 valorPixExterno
             });
-            console.log('[Modal] onFinish resolved com sucesso');
             setIsSuccess(true);
         } catch (error) {
             console.error('[Modal] Erro no onFinish:', error);
             alert('Erro ao fechar caixa. Tente novamente.');
         } finally {
-            console.log('[Modal] finally: set isProcessing false');
             setIsProcessing(false);
         }
     };
@@ -130,7 +126,7 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
                 </div>
 
                 <div className="p-5 max-h-[80vh] overflow-y-auto custom-scrollbar">
-                    {/* Resumo */}
+                    {/* Resumo do Turno */}
                     <div className="bg-surface-subtle p-4 rounded-xl border border-border mb-6">
                         <p className="text-xs font-bold mb-3">Resumo do Turno</p>
                         <div className="space-y-2 text-sm">
