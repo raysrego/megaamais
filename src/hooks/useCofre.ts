@@ -35,43 +35,33 @@ export function useCofre() {
         setLoading(true);
         setError(null);
         try {
-            // Buscar Saldo Atual - usa maybeSingle para evitar erro se não houver registro
+            // 1. Saldo atual via view
             const { data: saldoData, error: saldoError } = await supabase
                 .from('cofre_saldo_atual')
                 .select('saldo')
                 .maybeSingle();
 
             if (saldoError) {
-                // Se o erro for de relação não existente (view não criada), exibe mensagem amigável
-                if (saldoError.message?.includes('relation') || saldoError.code === '42P01') {
-                    console.warn('View cofre_saldo_atual não encontrada. Execute a migration para criá-la.');
-                    setError('Configuração do cofre incompleta. Contacte o administrador.');
-                } else {
-                    console.warn('Erro ao buscar saldo:', saldoError);
-                }
+                console.warn('View cofre_saldo_atual pode não existir:', saldoError);
                 setSaldo(0);
             } else {
                 setSaldo(saldoData?.saldo ?? 0);
             }
 
-            // Buscar Pendências
+            // 2. Pendências via view
             const { data: pendenciasData, error: pendenciasError } = await supabase
                 .from('cofre_sangrias_pendentes')
                 .select('*')
                 .order('data_hora', { ascending: false });
 
             if (pendenciasError) {
-                if (pendenciasError.message?.includes('relation') || pendenciasError.code === '42P01') {
-                    console.warn('View cofre_sangrias_pendentes não encontrada.');
-                } else {
-                    console.warn('Erro ao buscar pendências:', pendenciasError);
-                }
+                console.warn('View cofre_sangrias_pendentes pode não existir:', pendenciasError);
                 setPendencias([]);
             } else {
                 setPendencias(pendenciasData || []);
             }
 
-            // Buscar Histórico Recente
+            // 3. Histórico recente
             const { data: movData, error: movError } = await supabase
                 .from('cofre_movimentacoes')
                 .select('*')
@@ -97,7 +87,6 @@ export function useCofre() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error('Usuário não autenticado');
 
-        // Buscar dados da sangria original
         const { data: sangriaOriginal, error: erroBusca } = await supabase
             .from('caixa_movimentacoes')
             .select('valor, descricao')
@@ -110,7 +99,7 @@ export function useCofre() {
             .from('cofre_movimentacoes')
             .insert({
                 tipo: 'entrada_sangria',
-                valor: Math.abs(sangriaOriginal.valor), // valor positivo
+                valor: Math.abs(sangriaOriginal.valor),
                 operador_id: user.id,
                 origem_sangria_id: sangriaId,
                 observacoes: `Conferência: ${sangriaOriginal.descricao || 'Sem observações'}`
@@ -128,7 +117,6 @@ export function useCofre() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error('Usuário não autenticado');
 
-        // Validar saldo suficiente (usa o saldo atual, que pode estar desatualizado, mas é uma verificação inicial)
         if (valor > saldo) {
             throw new Error('Saldo insuficiente no cofre para este depósito');
         }
@@ -155,19 +143,15 @@ export function useCofre() {
     useEffect(() => {
         fetchDados();
 
-        // Realtime Subscription
         const channel = supabase
             .channel('cofre-updates')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'cofre_movimentacoes' }, () => {
-                fetchDados();
-            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'cofre_movimentacoes' }, () => fetchDados())
             .subscribe();
 
         return () => {
             supabase.removeChannel(channel);
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [fetchDados, supabase]);
 
     return {
         saldo,
