@@ -2,10 +2,11 @@
 
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
+import { CaixaSessao, CaixaMovimentacao } from './useCaixa';
 import { useLoja } from '@/contexts/LojaContext';
 
-// Interface para as movimentações com os dados relacionados
-interface MovimentacaoRecente {
+// Tipos refinados
+export interface MovimentacaoRecente {
     id: number;
     tipo: string;
     valor: number;
@@ -13,23 +14,18 @@ interface MovimentacaoRecente {
     created_at: string;
     caixa_sessoes: {
         terminal_id: string;
-        operador_id: string;
-        terminais: {
-            loja_id: string;
-        };
     };
 }
 
-// Interface para as sessões ativas (usando os dados do banco)
-interface SessaoAtiva {
-    id: number;
-    terminal_id: string;
-    valor_inicial: number;
-    valor_final_calculado: number;
-    // outros campos se necessário, mas vamos usar apenas esses
+interface SessaoAtiva extends CaixaSessao {
+    terminais?: {
+        codigo: string;
+        descricao: string;
+        loja_id: string;
+    };
 }
 
-interface Stats {
+interface StatsGestor {
     saldoConsolidado: number;
     saldoFisico: number;
     saldoDigital: number;
@@ -43,7 +39,7 @@ export function useGestorCaixa() {
     const { lojaAtual } = useLoja();
     const [sessoesAtivas, setSessoesAtivas] = useState<SessaoAtiva[]>([]);
     const [movimentacoesRecentas, setMovimentacoesRecentes] = useState<MovimentacaoRecente[]>([]);
-    const [stats, setStats] = useState<Stats>({
+    const [stats, setStats] = useState<StatsGestor>({
         saldoConsolidado: 0,
         saldoFisico: 0,
         saldoDigital: 0,
@@ -65,34 +61,21 @@ export function useGestorCaixa() {
                 // 1. Buscar sessões abertas
                 supabase
                     .from('caixa_sessoes')
-                    .select('id, terminal_id, valor_inicial, valor_final_calculado')
+                    .select('*, terminais!terminal_id_ref!inner(codigo, descricao, loja_id)')
                     .eq('status', 'aberto')
-                    .eq('loja_id', lojaAtual.id),
+                    .eq('terminais.loja_id', lojaAtual.id),
 
-                // 2. Buscar movimentações de hoje com join para terminal
+                // 2. Buscar movimentações de hoje
                 (async () => {
                     const hoje = new Date();
                     hoje.setHours(0, 0, 0, 0);
-                    return supabase
+                    const { data, error } = await supabase
                         .from('caixa_movimentacoes')
-                        .select(`
-                            id,
-                            tipo,
-                            valor,
-                            descricao,
-                            created_at,
-                            caixa_sessoes!inner (
-                                terminal_id,
-                                operador_id,
-                                terminais!terminal_id_ref!inner (
-                                    loja_id
-                                )
-                            )
-                        `)
+                        .select('id, tipo, valor, descricao, created_at, caixa_sessoes!inner(terminal_id)')
                         .gte('created_at', hoje.toISOString())
                         .eq('caixa_sessoes.terminais.loja_id', lojaAtual.id)
-                        .order('created_at', { ascending: false })
-                        .limit(50);
+                        .order('created_at', { ascending: false });
+                    return { data, error };
                 })()
             ]);
 
@@ -100,12 +83,24 @@ export function useGestorCaixa() {
             if (movsResult.error) throw movsResult.error;
 
             const sessoes = sessoesResult.data || [];
-            const movs = movsResult.data || [];
+            const movsRaw = movsResult.data || [];
+
+            // Mapear movimentações para o formato esperado (caixa_sessoes como objeto, não array)
+            const movs: MovimentacaoRecente[] = movsRaw.map((mov: any) => ({
+                id: mov.id,
+                tipo: mov.tipo,
+                valor: mov.valor,
+                descricao: mov.descricao,
+                created_at: mov.created_at,
+                caixa_sessoes: {
+                    terminal_id: mov.caixa_sessoes.terminal_id
+                }
+            }));
 
             setSessoesAtivas(sessoes);
-            setMovimentacoesRecentes(movs as MovimentacaoRecente[]); // Type assertion, mas já está correto
+            setMovimentacoesRecentes(movs);
 
-            // Calcular estatísticas
+            // 3. Calcular Estatísticas
             const digitalEntradas = movs
                 .filter(m => m.tipo === 'pix' && m.valor > 0)
                 .reduce((acc, m) => acc + m.valor, 0);
@@ -130,15 +125,13 @@ export function useGestorCaixa() {
                 .filter(m => m.tipo === 'sangria')
                 .reduce((acc, m) => acc + Math.abs(m.valor), 0);
 
-            const volumeEntradas = fisicoEntradas + digitalEntradas;
-
             setStats({
                 saldoConsolidado: saldoTotal,
                 saldoFisico,
                 saldoDigital,
                 totalSangriasHoje,
                 terminaisAtivos: sessoes.length,
-                volumeEntradas
+                volumeEntradas: fisicoEntradas + digitalEntradas
             });
 
         } catch (error) {
