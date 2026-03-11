@@ -10,16 +10,14 @@ import {
     ShieldCheck,
     Loader2,
     XCircle,
-    UploadCloud,
-    FileSearch,
     User,
-    ArrowRight,
     X
 } from 'lucide-react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import { useToast } from '@/contexts/ToastContext';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { MoneyInput } from '@/components/ui/MoneyInput'; // necessário para o modal
 
 interface Fechamento {
     id: string;
@@ -39,29 +37,135 @@ interface Fechamento {
     tipo: 'tfl' | 'bolao';
     justificativa?: string;
     detalhado?: any;
+    // Novos campos
+    valor_cofre?: number;
+    valor_pix_externo?: number;
+    diferenca_apurada?: number;
+    justificativa_divergencia?: string;
 }
 
-interface ExtratoPixItem {
-    id: string;
-    data: string;
-    descricao: string;
-    valor: number;
-    classificacao: string;
-    conciliado?: boolean;
+// Modal de auditoria simplificado
+interface ModalAuditoriaSimplificadaProps {
+    fechamento: Fechamento;
+    onClose: () => void;
+    onAprovar: (observacoes: string) => void;
+    onRejeitar: (dados: { justificativa: string; diferenca?: number }) => void;
 }
 
-interface Divergencia {
-    tipo: 'SISTEMA' | 'EXTRATO';
-    desc: string;
-    valor: number;
-}
+function ModalAuditoriaSimplificada({
+    fechamento,
+    onClose,
+    onAprovar,
+    onRejeitar
+}: ModalAuditoriaSimplificadaProps) {
+    const [modoRejeitar, setModoRejeitar] = useState(false);
+    const [justificativa, setJustificativa] = useState('');
+    const [diferenca, setDiferenca] = useState<number | undefined>();
+    const [tipoDiferenca, setTipoDiferenca] = useState<'falta' | 'sobra'>('falta');
+    const [observacoes, setObservacoes] = useState('');
 
-const CLASSIFICACOES_VALIDAS_PIX = [
-    'CRED PIX QR COD EST',
-    'PIX RECEBIDO',
-    'PIX RECEBIDO DADOS DA CONTA',
-    'CRED PIX CHAVE'
-];
+    // Calcular totais com base nos campos do fechamento
+    const saldoInicial = fechamento.saldo_sistema ?? 0;
+    const totalEntradas = fechamento.total_pix + fechamento.total_dinheiro; // ajuste conforme necessário
+    const totalSaidas = (fechamento.total_sangrias ?? 0) + (fechamento.total_depositos ?? 0);
+    const saldoCalculado = saldoInicial + totalEntradas - totalSaidas;
+
+    return (
+        <>
+            <div className="fixed inset-0 bg-black/80 z-9998" onClick={onClose} />
+            <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] max-w-2xl bg-bg-card border border-border rounded-2xl z-9999 p-6">
+                <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-xl font-bold">Auditoria de Fechamento</h2>
+                    <button onClick={onClose} className="btn btn-ghost btn-sm">
+                        <X size={18} />
+                    </button>
+                </div>
+
+                <div className="space-y-3 mb-6">
+                    <p><span className="font-semibold">Terminal:</span> {fechamento.terminal_id}</p>
+                    <p><span className="font-semibold">Operador:</span> {fechamento.operador_nome}</p>
+                    <p><span className="font-semibold">Data:</span> {format(new Date(fechamento.data_fechamento), 'dd/MM/yyyy HH:mm')}</p>
+                    <hr className="border-border" />
+                    <p><span className="font-semibold">Valor inicial:</span> R$ {saldoInicial.toFixed(2)}</p>
+                    <p><span className="font-semibold">Total entradas:</span> R$ {totalEntradas.toFixed(2)}</p>
+                    <p><span className="font-semibold">Total saídas:</span> R$ {totalSaidas.toFixed(2)}</p>
+                    <p><span className="font-semibold">Saldo calculado:</span> R$ {saldoCalculado.toFixed(2)}</p>
+                    <hr className="border-border" />
+                    <p><span className="font-semibold">Valor informado para cofre:</span> R$ {fechamento.valor_cofre?.toFixed(2) ?? '0,00'}</p>
+                    <p><span className="font-semibold">Valor informado de PIX externo:</span> R$ {fechamento.valor_pix_externo?.toFixed(2) ?? '0,00'}</p>
+                </div>
+
+                {!modoRejeitar ? (
+                    <div className="flex gap-4 justify-end">
+                        <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+                        <button
+                            className="btn bg-danger/10 text-danger hover:bg-danger/20"
+                            onClick={() => setModoRejeitar(true)}
+                        >
+                            Rejeitar
+                        </button>
+                        <button
+                            className="btn btn-success"
+                            onClick={() => onAprovar(observacoes)}
+                        >
+                            Aprovar
+                        </button>
+                    </div>
+                ) : (
+                    <div className="space-y-4">
+                        <div className="form-group">
+                            <label className="text-sm font-bold">Justificativa da rejeição</label>
+                            <textarea
+                                className="input w-full"
+                                rows={3}
+                                value={justificativa}
+                                onChange={(e) => setJustificativa(e.target.value)}
+                                placeholder="Descreva o motivo da rejeição"
+                            />
+                        </div>
+
+                        <div className="form-group">
+                            <label className="text-sm font-bold">Diferença apurada (opcional)</label>
+                            <div className="flex gap-2 items-center">
+                                <select
+                                    className="input w-24"
+                                    value={tipoDiferenca}
+                                    onChange={(e) => setTipoDiferenca(e.target.value as any)}
+                                >
+                                    <option value="falta">Falta</option>
+                                    <option value="sobra">Sobra</option>
+                                </select>
+                                <MoneyInput
+                                    value={diferenca || 0}
+                                    onValueChange={(val) => setDiferenca(val)}
+                                    placeholder="0,00"
+                                    className="flex-1"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="flex gap-4 justify-end">
+                            <button className="btn btn-ghost" onClick={() => setModoRejeitar(false)}>
+                                Voltar
+                            </button>
+                            <button
+                                className="btn btn-danger"
+                                onClick={() => {
+                                    const valorDiferenca = diferenca
+                                        ? (tipoDiferenca === 'falta' ? -diferenca : diferenca)
+                                        : undefined;
+                                    onRejeitar({ justificativa, diferenca: valorDiferenca });
+                                }}
+                            >
+                                Confirmar Rejeição
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </>
+    );
+}
 
 export function AuditoriaFechamentos() {
     const supabase = createBrowserSupabaseClient();
@@ -73,14 +177,6 @@ export function AuditoriaFechamentos() {
     const [showValidationModal, setShowValidationModal] = useState(false);
     const [filtroStatus, setFiltroStatus] = useState<'todos' | 'fechado' | 'divergente' | 'batido'>('todos');
 
-    // Estados do Modal de Validação
-    const [step, setStep] = useState(1); // 1: Info + Upload, 2: Resultado
-    const [file, setFile] = useState<File | null>(null);
-    const [isAnalyzing, setIsAnalyzing] = useState(false);
-    const [extratoParsed, setExtratoParsed] = useState<ExtratoPixItem[]>([]);
-    const [divergencias, setDivergencias] = useState<Divergencia[]>([]);
-    const [observacoes, setObservacoes] = useState('');
-
     const fetchHistorico = useCallback(async () => {
         setLoading(true);
         try {
@@ -89,12 +185,19 @@ export function AuditoriaFechamentos() {
                 .from('caixa_sessoes')
                 .select(`
                     id,
-                    created_at,
+                    created_at as data_fechamento,
                     terminal_id,
                     operador_id,
-                    valor_final_calculado,
-                    valor_final_declarado,
-                    status
+                    valor_final_calculado as saldo_sistema,
+                    valor_final_declarado as saldo_informado,
+                    status as status_validacao,
+                    observacoes as justificativa,
+                    total_sangrias,
+                    total_depositos_filial as total_depositos,
+                    valor_cofre,
+                    valor_pix_externo,
+                    diferenca_apurada,
+                    justificativa_divergencia
                 `)
                 .neq('status', 'aberto')
                 .order('created_at', { ascending: false });
@@ -106,7 +209,7 @@ export function AuditoriaFechamentos() {
             const { data: dataTFL, error: errorTFL } = await queryTFL;
             if (errorTFL) throw errorTFL;
 
-            // Buscar fechamentos de Bolão
+            // Buscar fechamentos de Bolão (caixa_bolao_sessoes) – adaptar se necessário
             let queryBolao = supabase
                 .from('caixa_bolao_sessoes')
                 .select(`
@@ -114,8 +217,10 @@ export function AuditoriaFechamentos() {
                     data_fechamento,
                     total_dinheiro,
                     total_pix,
-                    total_vendido,
-                    status_validacao
+                    total_vendido as saldo_sistema,
+                    (total_dinheiro + total_pix) as saldo_informado,
+                    status_validacao,
+                    observacoes_gerente as justificativa
                 `)
                 .in('status_validacao', filtroStatus === 'todos'
                     ? ['pendente', 'discrepante', 'fechado', 'batido', 'divergente']
@@ -127,41 +232,47 @@ export function AuditoriaFechamentos() {
 
             // Normalizar dados TFL
             const fechamentosTFL: Fechamento[] = (dataTFL || []).map((f: any) => {
-                const diff = (f.valor_final_declarado || 0) - (f.valor_final_calculado || 0);
+                const diff = (f.saldo_informado || 0) - (f.saldo_sistema || 0);
                 return {
                     id: f.id,
-                    data_fechamento: f.created_at,
+                    data_fechamento: f.data_fechamento,
                     terminal_id: f.terminal_id || 'TFL-WEB',
                     operador_id: f.operador_id || 'Sistema',
                     operador_nome: f.operador_id ? `${f.operador_id.split('-')[0]}...` : 'Sistema',
-                    saldo_sistema: f.valor_final_calculado || 0,
-                    saldo_informado: f.valor_final_declarado || 0,
+                    saldo_sistema: f.saldo_sistema || 0,
+                    saldo_informado: f.saldo_informado || 0,
                     divergencia: diff,
                     total_pix: 0,
-                    total_dinheiro: f.valor_final_declarado || 0,
-                    total_sangrias: 0,
-                    total_depositos: 0,
-                    status_validacao: f.status,
-                    tipo: 'tfl'
+                    total_dinheiro: f.saldo_informado || 0,
+                    total_sangrias: f.total_sangrias || 0,
+                    total_depositos: f.total_depositos || 0,
+                    status_validacao: f.status_validacao,
+                    tipo: 'tfl',
+                    justificativa: f.justificativa,
+                    valor_cofre: f.valor_cofre,
+                    valor_pix_externo: f.valor_pix_externo,
+                    diferenca_apurada: f.diferenca_apurada,
+                    justificativa_divergencia: f.justificativa_divergencia
                 };
             });
 
-            // Normalizar dados Bolão
+            // Normalizar dados Bolão (simplificado)
             const fechamentosBolao: Fechamento[] = (dataBolao || []).map((f: any) => ({
                 id: f.id,
                 data_fechamento: f.data_fechamento,
                 terminal_id: 'Bolão',
                 operador_id: '',
                 operador_nome: 'Sistema Bolão',
-                saldo_sistema: f.total_vendido || 0,
-                saldo_informado: (f.total_dinheiro || 0) + (f.total_pix || 0),
-                divergencia: (f.total_vendido || 0) - ((f.total_dinheiro || 0) + (f.total_pix || 0)),
+                saldo_sistema: f.saldo_sistema || 0,
+                saldo_informado: f.saldo_informado || 0,
+                divergencia: (f.saldo_sistema || 0) - (f.saldo_informado || 0),
                 total_pix: f.total_pix || 0,
                 total_dinheiro: f.total_dinheiro || 0,
                 total_sangrias: 0,
                 total_depositos: 0,
                 status_validacao: f.status_validacao || 'pendente',
-                tipo: 'bolao'
+                tipo: 'bolao',
+                justificativa: f.justificativa
             }));
 
             setFechamentos([...fechamentosTFL, ...fechamentosBolao]);
@@ -177,228 +288,8 @@ export function AuditoriaFechamentos() {
         fetchHistorico();
     }, [fetchHistorico]);
 
-    const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-        const uploadedFile = event.target.files?.[0];
-        if (uploadedFile) setFile(uploadedFile);
-    };
-
-    const handleDrop = (e: React.DragEvent) => {
-        e.preventDefault();
-        const droppedFile = e.dataTransfer.files[0];
-        if (droppedFile) setFile(droppedFile);
-    };
-
-    const parseExtratoCSV = (fileContent: string): ExtratoPixItem[] => {
-        const lines = fileContent.split('\n');
-        const parsed: ExtratoPixItem[] = [];
-
-        // Assume formato: DATA;DESCRICAO;VALOR;CLASSIFICACAO
-        for (let i = 1; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (!line) continue;
-
-            const [data, descricao, valorStr, classificacao] = line.split(';');
-            if (!data || !valorStr) continue;
-
-            const valor = parseFloat(valorStr.replace(',', '.').replace(/[^\d.-]/g, ''));
-            if (isNaN(valor)) continue;
-
-            parsed.push({
-                id: `e${i}`,
-                data: data.trim(),
-                descricao: descricao?.trim() || '',
-                valor,
-                classificacao: classificacao?.trim() || ''
-            });
-        }
-
-        return parsed;
-    };
-
-    const analyzeExtract = async () => {
-        if (!file || !selectedFechamento) return;
-
-        setIsAnalyzing(true);
-        try {
-            // 1. Validar tipo de arquivo
-            if (file.name.toLowerCase().endsWith('.pdf')) {
-                toast({
-                    message: 'PDFs ainda não são suportados. Por favor, exporte seu extrato como CSV.',
-                    type: 'error'
-                });
-                setIsAnalyzing(false);
-                return;
-            }
-
-            // 2. Ler arquivo CSV
-            const fileContent = await file.text();
-            const extratoItems = parseExtratoCSV(fileContent);
-
-            // 3. Validar se conseguiu parsear algum item
-            if (extratoItems.length === 0) {
-                toast({
-                    message: 'Nenhum item foi encontrado no extrato. Verifique se o arquivo está no formato correto (CSV com separador ponto-e-vírgula).',
-                    type: 'error'
-                });
-                setIsAnalyzing(false);
-                return;
-            }
-
-            // 4. Buscar movimentações PIX reais desta sessão
-            let movimentacoes: any[] = [];
-
-            if (selectedFechamento.tipo === 'tfl') {
-                const { data, error } = await supabase
-                    .from('caixa_movimentacoes')
-                    .select('*')
-                    .eq('sessao_id', selectedFechamento.id)
-                    .eq('tipo', 'pix');
-
-                if (error) throw error;
-                movimentacoes = data || [];
-            } else {
-                // Para Bolão, usar total_pix informado
-                if (selectedFechamento.total_pix > 0) {
-                    movimentacoes = [{
-                        valor: selectedFechamento.total_pix,
-                        descricao: 'PIX Total Bolão',
-                        classificacao_pix: 'PIX RECEBIDO'
-                    }];
-                }
-            }
-
-            // 5. Filtrar apenas PIX válidos do extrato
-            const pixValidos = extratoItems.filter(item =>
-                CLASSIFICACOES_VALIDAS_PIX.some(classif =>
-                    item.classificacao.toUpperCase().includes(classif)
-                )
-            );
-
-            // 6. Validar se encontrou PIX válidos
-            if (pixValidos.length === 0 && movimentacoes.length > 0) {
-                toast({
-                    message: `Atenção: Nenhuma transação PIX válida encontrada no extrato, mas há ${movimentacoes.length} PIX no sistema!`,
-                    type: 'warning'
-                });
-            }
-
-            // 7. Algoritmo de Batimento (Valor + Classificação)
-            const novasDivergencias: Divergencia[] = [];
-            const extratoConciliado = pixValidos.map(item => {
-                const match = movimentacoes.find((mov: any) =>
-                    Math.abs(mov.valor - item.valor) < 0.01 &&
-                    (!mov.classificacao_pix || item.classificacao.includes(mov.classificacao_pix))
-                );
-
-                if (!match) {
-                    novasDivergencias.push({
-                        tipo: 'EXTRATO',
-                        desc: `Item não encontrado no caixa: ${item.descricao}`,
-                        valor: item.valor
-                    });
-                }
-
-                return { ...item, conciliado: !!match };
-            });
-
-            // 8. Verificar itens no caixa que não estão no extrato
-            movimentacoes.forEach((mov: any) => {
-                const match = pixValidos.find(item =>
-                    Math.abs(item.valor - mov.valor) < 0.01
-                );
-                if (!match) {
-                    novasDivergencias.push({
-                        tipo: 'SISTEMA',
-                        desc: `Lançamento sem correspondente no banco: ${mov.descricao || 'PIX'}`,
-                        valor: mov.valor
-                    });
-                }
-            });
-
-            setExtratoParsed(extratoConciliado);
-            setDivergencias(novasDivergencias);
-            setStep(2);
-
-            // 9. Feedback inteligente
-            if (pixValidos.length === 0 && movimentacoes.length === 0) {
-                toast({
-                    message: 'Nenhuma transação PIX encontrada no extrato nem no sistema. Validação concluída.',
-                    type: 'info'
-                });
-            } else if (novasDivergencias.length === 0) {
-                toast({
-                    message: `✅ Conciliação perfeita! ${pixValidos.length} PIX batidos com sucesso.`,
-                    type: 'success'
-                });
-            } else {
-                toast({
-                    message: `⚠️ ${novasDivergencias.length} divergência(s) detectada(s) de ${pixValidos.length + movimentacoes.length} itens analisados`,
-                    type: 'warning'
-                });
-            }
-        } catch (error: any) {
-            console.error('Erro na auditoria:', error);
-            toast({ message: 'Falha ao processar conciliação: ' + error.message, type: 'error' });
-        } finally {
-            setIsAnalyzing(false);
-        }
-    };
-
-    const handleAprovar = async () => {
-        if (!selectedFechamento) return;
-
-        const tabela = selectedFechamento.tipo === 'tfl' ? 'caixa_sessoes' : 'caixa_bolao_sessoes';
-        const statusField = selectedFechamento.tipo === 'tfl' ? 'status' : 'status_validacao';
-
-        const { error } = await supabase
-            .from(tabela)
-            .update({
-                [statusField]: 'batido',
-                observacoes: observacoes,
-                data_validacao: new Date().toISOString()
-            })
-            .eq('id', selectedFechamento.id);
-
-        if (error) {
-            toast({ message: 'Erro ao aprovar: ' + error.message, type: 'error' });
-        } else {
-            toast({ message: `Sessão ${selectedFechamento.terminal_id} validada com sucesso!`, type: 'success' });
-            handleCloseModal();
-            fetchHistorico();
-        }
-    };
-
-    const handleRejeitar = async () => {
-        if (!selectedFechamento) return;
-
-        const tabela = selectedFechamento.tipo === 'tfl' ? 'caixa_sessoes' : 'caixa_bolao_sessoes';
-        const statusField = selectedFechamento.tipo === 'tfl' ? 'status' : 'status_validacao';
-
-        const { error } = await supabase
-            .from(tabela)
-            .update({
-                [statusField]: 'divergente',
-                observacoes: observacoes || 'Divergência confirmada via extrato',
-                data_validacao: new Date().toISOString()
-            })
-            .eq('id', selectedFechamento.id);
-
-        if (error) {
-            toast({ message: 'Erro ao rejeitar: ' + error.message, type: 'error' });
-        } else {
-            toast({ message: 'Fechamento reprovado. Operador será notificado.', type: 'warning' });
-            handleCloseModal();
-            fetchHistorico();
-        }
-    };
-
     const handleCloseModal = () => {
         setShowValidationModal(false);
-        setStep(1);
-        setFile(null);
-        setExtratoParsed([]);
-        setDivergencias([]);
-        setObservacoes('');
     };
 
     const getStatusBadge = (status: string) => {
@@ -567,18 +458,23 @@ export function AuditoriaFechamentos() {
                             </div>
                         </div>
 
-                        {selectedFechamento.tipo === 'bolao' && (
+                        {/* Exibir novos campos, se existirem */}
+                        {(selectedFechamento.valor_cofre || selectedFechamento.valor_pix_externo) && (
                             <div className="border-t border-border pt-3 mb-4">
-                                <div className="text-[10px] text-muted font-bold uppercase mb-2">Composição</div>
+                                <div className="text-[10px] text-muted font-bold uppercase mb-2">Informações do Fechamento</div>
                                 <div className="space-y-2">
-                                    <div className="flex justify-between text-xs">
-                                        <span className="text-muted">PIX</span>
-                                        <span className="font-bold">R$ {selectedFechamento.total_pix.toLocaleString('pt-BR')}</span>
-                                    </div>
-                                    <div className="flex justify-between text-xs">
-                                        <span className="text-muted">Dinheiro</span>
-                                        <span className="font-bold">R$ {selectedFechamento.total_dinheiro.toLocaleString('pt-BR')}</span>
-                                    </div>
+                                    {selectedFechamento.valor_cofre !== undefined && selectedFechamento.valor_cofre > 0 && (
+                                        <div className="flex justify-between text-xs">
+                                            <span className="text-muted">Valor no cofre</span>
+                                            <span className="font-bold">R$ {selectedFechamento.valor_cofre.toLocaleString('pt-BR')}</span>
+                                        </div>
+                                    )}
+                                    {selectedFechamento.valor_pix_externo !== undefined && selectedFechamento.valor_pix_externo > 0 && (
+                                        <div className="flex justify-between text-xs">
+                                            <span className="text-muted">PIX externo</span>
+                                            <span className="font-bold">R$ {selectedFechamento.valor_pix_externo.toLocaleString('pt-BR')}</span>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -602,7 +498,7 @@ export function AuditoriaFechamentos() {
                             </div>
                         )}
 
-                        {/* Mostrar botão de auditoria para fechamentos pendentes ou com divergência */}
+                        {/* Botão de auditoria */}
                         {['fechado', 'divergente', 'pendente', 'discrepante'].includes(selectedFechamento.status_validacao) && (
                             <div className="mt-auto">
                                 <button
@@ -614,261 +510,62 @@ export function AuditoriaFechamentos() {
                                         ? 'Revalidar Fechamento'
                                         : 'Auditar Agora'}
                                 </button>
-                                <p className="text-xs text-center text-muted mt-2">Confrontar com Extrato Bancário</p>
+                                <p className="text-xs text-center text-muted mt-2">Valide os valores informados</p>
                             </div>
                         )}
                     </div>
                 )}
             </div>
 
-            {/* Modal de Validação */}
+            {/* Modal de Auditoria Simplificada */}
             {showValidationModal && selectedFechamento && (
-                <>
-                    <div onClick={handleCloseModal} className="fixed inset-0 bg-black/80 z-9998" />
-                    <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] max-w-4xl max-h-[85vh] bg-bg-card border border-border rounded-2xl z-9999 flex flex-col overflow-hidden">
-                        {/* Header */}
-                        <div className="flex items-center justify-between p-5 border-b border-border">
-                            <div className="flex items-center gap-3">
-                                <ShieldCheck size={20} className="text-primary" />
-                                <h2 className="text-lg font-bold">Validação de Turno - {selectedFechamento.terminal_id}</h2>
-                            </div>
-                            <button onClick={handleCloseModal} className="btn btn-ghost btn-sm">
-                                <X size={18} />
-                            </button>
-                        </div>
+                <ModalAuditoriaSimplificada
+                    fechamento={selectedFechamento}
+                    onClose={handleCloseModal}
+                    onAprovar={async (obs) => {
+                        const tabela = selectedFechamento.tipo === 'tfl' ? 'caixa_sessoes' : 'caixa_bolao_sessoes';
+                        const statusField = selectedFechamento.tipo === 'tfl' ? 'status' : 'status_validacao';
 
-                        {/* Body */}
-                        <div className="flex-1 overflow-y-auto p-6 bg-bg-dark">
-                            {step === 1 ? (
-                                <div className="grid grid-cols-2 gap-6 animate-in fade-in">
-                                    {/* Info do Fechamento */}
-                                    <div className="bg-surface-subtle p-6 rounded-2xl border border-border">
-                                        <div className="text-xs font-bold uppercase text-muted mb-4 flex items-center gap-2">
-                                            <User size={14} className="text-primary" /> Dados do Fechamento
-                                        </div>
+                        const { error } = await supabase
+                            .from(tabela)
+                            .update({
+                                [statusField]: 'batido',
+                                observacoes_gerente: obs,
+                                data_validacao: new Date().toISOString()
+                            })
+                            .eq('id', selectedFechamento.id);
 
-                                        <div className="space-y-3">
-                                            <div className="flex justify-between">
-                                                <span className="text-muted text-sm">Operador</span>
-                                                <span className="font-semibold">{selectedFechamento.operador_nome}</span>
-                                            </div>
-                                            <div className="flex justify-between pt-3 border-t border-border">
-                                                <span className="text-muted text-sm">Saldo Declarado</span>
-                                                <span className="font-bold text-lg">R$ {selectedFechamento.saldo_informado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                                            </div>
-                                            <div className={`flex justify-between pt-3 border-t border-border ${selectedFechamento.divergencia < 0 ? 'text-danger' : 'text-success'
-                                                }`}>
-                                                <span className="font-bold text-sm">Diferença</span>
-                                                <span className="font-black text-xl">
-                                                    {selectedFechamento.divergencia > 0 ? '+' : ''} R$ {selectedFechamento.divergencia.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                </span>
-                                            </div>
-                                        </div>
+                        if (error) {
+                            toast({ message: 'Erro ao aprovar: ' + error.message, type: 'error' });
+                        } else {
+                            toast({ message: `Sessão ${selectedFechamento.terminal_id} validada com sucesso!`, type: 'success' });
+                            handleCloseModal();
+                            fetchHistorico();
+                        }
+                    }}
+                    onRejeitar={async ({ justificativa, diferenca }) => {
+                        const tabela = selectedFechamento.tipo === 'tfl' ? 'caixa_sessoes' : 'caixa_bolao_sessoes';
+                        const statusField = selectedFechamento.tipo === 'tfl' ? 'status' : 'status_validacao';
 
-                                        {selectedFechamento.justificativa && (
-                                            <div className="mt-6 p-4 bg-yellow-500/5 border border-yellow-500/20 rounded-xl">
-                                                <div className="text-[10px] font-bold uppercase text-yellow-500 mb-2 flex items-center gap-1">
-                                                    <AlertTriangle size={12} /> Justificativa do Operador
-                                                </div>
-                                                <div className="text-sm italic text-muted">"{selectedFechamento.justificativa}"</div>
-                                            </div>
-                                        )}
-                                    </div>
+                        const { error } = await supabase
+                            .from(tabela)
+                            .update({
+                                [statusField]: 'divergente',
+                                observacoes_gerente: justificativa,
+                                diferenca_apurada: diferenca || 0,
+                                data_validacao: new Date().toISOString()
+                            })
+                            .eq('id', selectedFechamento.id);
 
-                                    {/* Upload de Extrato */}
-                                    <div className="flex flex-col gap-4">
-                                        <div
-                                            onDragOver={(e) => e.preventDefault()}
-                                            onDrop={handleDrop}
-                                            onClick={() => !file && document.getElementById('extract-upload')?.click()}
-                                            className={`flex-1 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center p-8 cursor-pointer transition-all ${file ? 'bg-primary/5 border-primary' : 'bg-bg-card-hover border-border hover:border-primary/50'
-                                                }`}
-                                        >
-                                            <input
-                                                id="extract-upload"
-                                                type="file"
-                                                accept=".csv,.ofx,.pdf"
-                                                className="hidden"
-                                                onChange={handleFileUpload}
-                                            />
-
-                                            {!file ? (
-                                                <>
-                                                    <div className="w-14 h-14 rounded-2xl bg-bg-card flex items-center justify-center mb-4">
-                                                        <UploadCloud size={28} className="text-muted" />
-                                                    </div>
-                                                    <div className="text-base font-bold text-center">Importar Extrato Bancário</div>
-                                                    <div className="text-xs text-muted mt-2 uppercase font-semibold">.CSV, .OFX ou .PDF</div>
-                                                </>
-                                            ) : (
-                                                <div className="text-center">
-                                                    <div className="w-16 h-16 rounded-2xl bg-success/15 flex items-center justify-center mb-4 mx-auto">
-                                                        <CheckCircle2 size={32} className="text-success" />
-                                                    </div>
-                                                    <div className="text-sm font-bold mb-2 max-w-[200px] truncate">{file.name}</div>
-                                                    <button
-                                                        onClick={(e) => { e.stopPropagation(); setFile(null); }}
-                                                        className="text-xs text-danger hover:underline"
-                                                    >
-                                                        Alterar Arquivo
-                                                    </button>
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {/* Avisos Importantes */}
-                                        <div className="space-y-2">
-                                            <div className="flex items-center gap-2 p-3 bg-primary/5 border border-primary/20 rounded-lg">
-                                                <ShieldCheck size={14} className="text-primary shrink-0" />
-                                                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">
-                                                    Conciliação automática de PIX ativada
-                                                </span>
-                                            </div>
-                                            <div className="flex items-start gap-2 p-3 bg-orange-500/5 border border-orange-500/20 rounded-lg">
-                                                <AlertTriangle size={14} className="text-orange-500 shrink-0 mt-0.5" />
-                                                <div className="text-[10px] text-muted">
-                                                    <span className="font-bold text-orange-500 block mb-1">FORMATO OBRIGATÓRIO: CSV</span>
-                                                    Arquivos PDF não são suportados. Exporte seu extrato bancário em formato CSV com separador ponto-e-vírgula (;)
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            ) : (
-                                <div className="animate-in slide-in-from-right">
-                                    {/* Resultado da Auditoria */}
-                                    <div className={`flex items-center gap-5 p-6 rounded-2xl border mb-8 ${divergencias.length === 0
-                                        ? 'bg-success/8 border-success/20'
-                                        : 'bg-danger/8 border-danger/20'
-                                        }`}>
-                                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${divergencias.length === 0 ? 'bg-success text-white' : 'bg-danger text-white'
-                                            }`}>
-                                            {divergencias.length === 0 ? <CheckCircle2 size={32} /> : <AlertTriangle size={32} />}
-                                        </div>
-                                        <div>
-                                            <div className="text-xl font-black mb-1">
-                                                {divergencias.length === 0 ? 'Auditoria Concluída com Sucesso' : 'Discrepância Detectada'}
-                                            </div>
-                                            <div className="text-sm text-muted">
-                                                {divergencias.length === 0
-                                                    ? 'O fechamento está em plena conformidade com o extrato.'
-                                                    : `${divergencias.length} divergência(s) encontrada(s) que requer(em) tomada de decisão.`}
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {divergencias.length > 0 && (
-                                        <div className="mb-8">
-                                            <div className="text-xs font-bold uppercase text-danger mb-4 flex items-center gap-2">
-                                                <AlertTriangle size={14} /> Inconsistências Detectadas
-                                            </div>
-                                            <div className="space-y-3">
-                                                {divergencias.map((div, i) => (
-                                                    <div key={i} className="flex justify-between items-center p-4 bg-danger/5 border border-danger/10 rounded-xl">
-                                                        <div>
-                                                            <div className={`text-[10px] font-black mb-1 ${div.tipo === 'SISTEMA' ? 'text-primary' : 'text-orange-500'
-                                                                }`}>
-                                                                {div.tipo}
-                                                            </div>
-                                                            <div className="text-sm font-semibold">{div.desc}</div>
-                                                        </div>
-                                                        <span className="text-base font-black text-danger">
-                                                            R$ {div.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                        </span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Tabela do Extrato */}
-                                    <div>
-                                        <div className="text-xs font-bold uppercase text-muted mb-4 flex items-center gap-2">
-                                            <FileSearch size={14} /> Itens do Extrato Processados
-                                        </div>
-                                        <div className="table-container bg-bg-dark rounded-xl border border-border">
-                                            <table>
-                                                <thead>
-                                                    <tr>
-                                                        <th>Classificação</th>
-                                                        <th>Descrição</th>
-                                                        <th className="text-right">Valor</th>
-                                                        <th className="text-center">Batimento</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {extratoParsed.map((item, i) => (
-                                                        <tr key={i}>
-                                                            <td className="text-[10px] font-bold">{item.classificacao}</td>
-                                                            <td className="text-xs">{item.descricao}</td>
-                                                            <td className="text-right font-bold text-xs">
-                                                                R$ {item.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                            </td>
-                                                            <td className="text-center">
-                                                                {item.conciliado ? (
-                                                                    <CheckCircle2 size={16} className="text-success mx-auto" />
-                                                                ) : (
-                                                                    <XCircle size={16} className="text-danger mx-auto" />
-                                                                )}
-                                                            </td>
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    </div>
-
-                                    {/* Campo de Observações */}
-                                    <div className="mt-8">
-                                        <label className="text-xs font-bold uppercase tracking-wider text-muted mb-2 block">
-                                            Observações do Gerente
-                                        </label>
-                                        <textarea
-                                            value={observacoes}
-                                            onChange={(e) => setObservacoes(e.target.value)}
-                                            className="input w-full h-24 resize-none"
-                                            placeholder="Adicione suas observações sobre esta validação..."
-                                        />
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Footer */}
-                        <div className="flex justify-end gap-4 p-5 border-t border-border bg-bg-card">
-                            {step === 1 ? (
-                                <>
-                                    <button onClick={handleCloseModal} className="btn btn-ghost">
-                                        Cancelar
-                                    </button>
-                                    <button
-                                        disabled={!file || isAnalyzing}
-                                        onClick={analyzeExtract}
-                                        className="btn btn-primary flex items-center gap-2"
-                                    >
-                                        {isAnalyzing ? 'Processando Auditoria...' : 'Iniciar Conciliação'}
-                                        {!isAnalyzing && <ArrowRight size={16} />}
-                                    </button>
-                                </>
-                            ) : (
-                                <>
-                                    <button onClick={handleCloseModal} className="btn btn-ghost">
-                                        Cancelar
-                                    </button>
-                                    <button
-                                        onClick={handleRejeitar}
-                                        className="btn bg-danger/10 text-danger hover:bg-danger/20 border-danger/20"
-                                    >
-                                        <XCircle size={16} /> Reprovar & Gerar Débito
-                                    </button>
-                                    <button onClick={handleAprovar} className="btn btn-success">
-                                        <CheckCircle2 size={16} /> Aprovar Auditoria
-                                    </button>
-                                </>
-                            )}
-                        </div>
-                    </div>
-                </>
+                        if (error) {
+                            toast({ message: 'Erro ao rejeitar: ' + error.message, type: 'error' });
+                        } else {
+                            toast({ message: 'Fechamento reprovado.', type: 'warning' });
+                            handleCloseModal();
+                            fetchHistorico();
+                        }
+                    }}
+                />
             )}
         </div>
     );
