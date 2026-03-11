@@ -21,22 +21,22 @@ import { MoneyInput } from '@/components/ui/MoneyInput';
 
 interface Fechamento {
     id: string;
+    data_turno: string;               // nova
     data_fechamento: string;
     terminal_id: string;
     operador_id: string;
     operador_nome?: string;
-    saldo_sistema: number;
-    saldo_informado: number;
-    divergencia: number;
+    valor_inicial: number;             // novo
+    total_lancamentos: number;          // valor_final_calculado - valor_inicial
+    saldo_no_caixa: number;             // valor_final_declarado
+    divergencia: number;                 // diferença (saldo_no_caixa - (total_lancamentos + valor_inicial)?)
     total_pix: number;
     total_dinheiro: number;
-    total_cartao?: number;
     total_sangrias: number;
     total_depositos: number;
-    status_validacao: 'pendente' | 'aprovado' | 'discrepante' | 'rejeitado' | 'fechado' | 'batido' | 'divergente';
+    status_validacao: string;
     tipo: 'tfl' | 'bolao';
     justificativa?: string;
-    detalhado?: any;
     valor_cofre?: number;
     valor_pix_externo?: number;
     diferenca_apurada?: number;
@@ -181,25 +181,27 @@ export function AuditoriaFechamentos() {
         try {
             // ---------- QUERY TFL (caixa_sessoes) sem aliases ----------
             let queryTFL = supabase
-                .from('caixa_sessoes')
-                .select(`
-                    id,
-                    created_at,
-                    terminal_id,
-                    operador_id,
-                    valor_final_calculado,
-                    valor_final_declarado,
-                    status,
-                    observacoes,
-                    total_sangrias,
-                    total_depositos_filial,
-                    valor_cofre,
-                    valor_pix_externo,
-                    diferenca_apurada,
-                    justificativa_divergencia
-                `)
-                .neq('status', 'aberto')
-                .order('created_at', { ascending: false });
+    .from('caixa_sessoes')
+    .select(`
+        id,
+        data_turno,
+        data_fechamento,
+        terminal_id,
+        operador_id,
+        valor_inicial,
+        valor_final_calculado,
+        valor_final_declarado,
+        status,
+        observacoes,
+        total_sangrias,
+        total_depositos_filial,
+        valor_cofre,
+        valor_pix_externo,
+        diferenca_apurada,
+        justificativa_divergencia
+    `)
+    .neq('status', 'aberto')
+    .order('created_at', { ascending: false });
 
             if (filtroStatus !== 'todos') {
                 // Mapeia o filtro para o status do TFL
@@ -249,30 +251,35 @@ export function AuditoriaFechamentos() {
             if (errorBolao) throw errorBolao;
 
             // ---------- Normalizar dados TFL ----------
-            const fechamentosTFL: Fechamento[] = (dataTFL || []).map((f: any) => {
-                const diff = (f.valor_final_declarado || 0) - (f.valor_final_calculado || 0);
-                return {
-                    id: f.id,
-                    data_fechamento: f.created_at,
-                    terminal_id: f.terminal_id || 'TFL-WEB',
-                    operador_id: f.operador_id || 'Sistema',
-                    operador_nome: f.operador_id ? `${f.operador_id.split('-')[0]}...` : 'Sistema',
-                    saldo_sistema: f.valor_final_calculado || 0,
-                    saldo_informado: f.valor_final_declarado || 0,
-                    divergencia: diff,
-                    total_pix: 0, // Ajuste se necessário
-                    total_dinheiro: f.valor_final_declarado || 0,
-                    total_sangrias: f.total_sangrias || 0,
-                    total_depositos: f.total_depositos_filial || 0,
-                    status_validacao: f.status, // Pode ser 'fechado', 'conferido', 'discrepante', etc.
-                    tipo: 'tfl',
-                    justificativa: f.observacoes,
-                    valor_cofre: f.valor_cofre,
-                    valor_pix_externo: f.valor_pix_externo,
-                    diferenca_apurada: f.diferenca_apurada,
-                    justificativa_divergencia: f.justificativa_divergencia
-                };
-            });
+           const fechamentosTFL: Fechamento[] = (dataTFL || []).map((f: any) => {
+    const totalLancamentos = (f.valor_final_calculado || 0) - (f.valor_inicial || 0);
+    const saldoNoCaixa = f.valor_final_declarado || 0;
+    // Divergência original: saldoNoCaixa - (totalLancamentos + valor_inicial)
+    const divergencia = saldoNoCaixa - (totalLancamentos + (f.valor_inicial || 0));
+    return {
+        id: f.id,
+        data_turno: f.data_turno,
+        data_fechamento: f.data_fechamento,
+        terminal_id: f.terminal_id || 'TFL-WEB',
+        operador_id: f.operador_id || 'Sistema',
+        operador_nome: f.operador_id ? `${f.operador_id.split('-')[0]}...` : 'Sistema',
+        valor_inicial: f.valor_inicial || 0,
+        total_lancamentos: totalLancamentos,
+        saldo_no_caixa: saldoNoCaixa,
+        divergencia: divergencia,
+        total_pix: 0, // se não houver campo, manter 0
+        total_dinheiro: saldoNoCaixa,
+        total_sangrias: f.total_sangrias || 0,
+        total_depositos: f.total_depositos_filial || 0,
+        status_validacao: f.status,
+        tipo: 'tfl',
+        justificativa: f.observacoes,
+        valor_cofre: f.valor_cofre,
+        valor_pix_externo: f.valor_pix_externo,
+        diferenca_apurada: f.diferenca_apurada,
+        justificativa_divergencia: f.justificativa_divergencia
+    };
+});
 
             // ---------- Normalizar dados Bolão ----------
             const fechamentosBolao: Fechamento[] = (dataBolao || []).map((f: any) => ({
@@ -388,32 +395,26 @@ export function AuditoriaFechamentos() {
                     ) : (
                         <div className="table-container pt-0">
                             <table>
-                                <thead>
-                                    <tr>
-                                        <th>Data / Hora</th>
-                                        <th>Terminal</th>
-                                        <th>Operador</th>
-                                        <th>Status</th>
-                                        <th className="text-right">Diferença</th>
-                                        <th style={{ width: '50px' }}></th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {fechamentos.map((f) => (
-                                        <tr
-                                            key={f.id}
-                                            onClick={() => setSelectedFechamento(f)}
-                                            className={`cursor-pointer hover:bg-bg-card-hover transition-colors ${selectedFechamento?.id === f.id ? 'bg-primary/5 border-l-4 border-primary' : ''
-                                                }`}
-                                        >
-                                            <td className="text-xs">
-                                                <div className="font-medium text-text-primary">
-                                                    {format(new Date(f.data_fechamento), 'dd/MM/yyyy', { locale: ptBR })}
-                                                </div>
-                                                <div className="text-[10px] text-muted">
-                                                    {format(new Date(f.data_fechamento), 'HH:mm', { locale: ptBR })}
-                                                </div>
-                                            </td>
+                               <thead>
+    <tr>
+        <th>Data Turno</th>
+        <th>Data Fechamento</th>
+        <th>Terminal</th>
+        <th>Operador</th>
+        <th>Status</th>
+        <th className="text-right">Diferença</th>
+        <th style={{ width: '50px' }}></th>
+    </tr>
+</thead>
+<tbody>
+    {fechamentos.map((f) => (
+        <tr key={f.id} ...>
+            <td className="text-xs">
+                {format(new Date(f.data_turno), 'dd/MM/yyyy', { locale: ptBR })}
+            </td>
+            <td className="text-xs">
+                {f.data_fechamento ? format(new Date(f.data_fechamento), 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '-'}
+            </td>
                                             <td>
                                                 <span className={`px-2 py-1 rounded-lg text-xs font-black ${f.tipo === 'tfl' ? 'bg-blue-500/10 text-blue-400' : 'bg-purple-500/10 text-purple-400'
                                                     }`}>
@@ -466,20 +467,20 @@ export function AuditoriaFechamentos() {
                             </div>
                         </div>
 
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
-                            <div className="p-3 rounded-lg bg-bg-card border border-border">
-                                <div className="text-[10px] text-muted uppercase font-bold mb-1">Saldo Sistema</div>
-                                <div className="text-lg font-bold text-text-primary">
-                                    R$ {selectedFechamento.saldo_sistema.toLocaleString('pt-BR')}
-                                </div>
-                            </div>
-                            <div className="p-3 rounded-lg bg-bg-card border border-border">
-                                <div className="text-[10px] text-muted uppercase font-bold mb-1">Saldo Informado</div>
-                                <div className="text-lg font-bold text-text-primary">
-                                    R$ {selectedFechamento.saldo_informado.toLocaleString('pt-BR')}
-                                </div>
-                            </div>
-                        </div>
+                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+    <div className="p-3 rounded-lg bg-bg-card border border-border">
+        <div className="text-[10px] text-muted uppercase font-bold mb-1">Total de Lançamentos</div>
+        <div className="text-lg font-bold text-text-primary">
+            R$ {selectedFechamento.total_lancamentos.toLocaleString('pt-BR')}
+        </div>
+    </div>
+    <div className="p-3 rounded-lg bg-bg-card border border-border">
+        <div className="text-[10px] text-muted uppercase font-bold mb-1">Saldo no caixa</div>
+        <div className="text-lg font-bold text-text-primary">
+            R$ {selectedFechamento.saldo_no_caixa.toLocaleString('pt-BR')}
+        </div>
+    </div>
+</div>
 
                         {/* Exibir novos campos, se existirem */}
                         {(selectedFechamento.valor_cofre || selectedFechamento.valor_pix_externo) && (
@@ -492,15 +493,14 @@ export function AuditoriaFechamentos() {
                                             <span className="font-bold">R$ {selectedFechamento.valor_cofre.toLocaleString('pt-BR')}</span>
                                         </div>
                                     )}
-                                    {selectedFechamento.valor_pix_externo !== undefined && selectedFechamento.valor_pix_externo > 0 && (
-                                        <div className="flex justify-between text-xs">
-                                            <span className="text-muted">PIX externo</span>
-                                            <span className="font-bold">R$ {selectedFechamento.valor_pix_externo.toLocaleString('pt-BR')}</span>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        )}
+                                   {selectedFechamento.valor_pix_externo !== undefined && (
+    <div className="flex justify-between text-xs mt-2 pt-2 border-t border-border">
+        <span className="text-muted">Total do caixa (lançamentos + PIX externo)</span>
+        <span className="font-bold">
+            R$ {(selectedFechamento.total_lancamentos + (selectedFechamento.valor_pix_externo || 0)).toLocaleString('pt-BR')}
+        </span>
+    </div>
+)}
 
                         {selectedFechamento.justificativa && (
                             <div className="mb-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
