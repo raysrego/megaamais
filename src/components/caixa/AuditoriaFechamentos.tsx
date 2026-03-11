@@ -134,9 +134,11 @@ function ModalAuditoriaSimplificada({
 
                 {/* Saldo geral - abaixo de tudo */}
                 <div className="p-4 rounded-xl bg-primary/10 border border-primary/20 mb-6">
-                    <p className="text-[10px] text-primary font-bold uppercase">Saldo geral</p>
-                    <p className="text-2xl font-black text-primary">R$ {saldoCalculado.toFixed(2)}</p>
-                </div>
+    <p className="text-[10px] text-primary font-bold uppercase">Saldo geral</p>
+    <p className="text-2xl font-black text-primary">
+        R$ {((fechamento.valor_final_calculado || 0) + (fechamento.valor_pix_externo || 0)).toFixed(2)}
+    </p>
+</div>
 
                 {/* Ações */}
                 {!modoRejeitar ? (
