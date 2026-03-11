@@ -191,7 +191,7 @@ export function VisaoOperadorCaixa() {
     }, [supabase, toast, confirm, refresh]);
 
     // Função de fechamento com logs detalhados
-   const handleFinishCaixa = async (result: {
+  const handleFinishCaixa = async (result: {
     observacoes?: string;
     tflData?: any;
     valorCofre?: number;
@@ -199,14 +199,12 @@ export function VisaoOperadorCaixa() {
 }) => {
     console.log('[handleFinishCaixa] Recebido resultado do modal:', result);
     try {
-        console.log('[handleFinishCaixa] Chamando fecharCaixa...');
         await fecharCaixa(
             result.observacoes,
             result.tflData,
             result.valorCofre,
             result.valorPixExterno
         );
-        console.log('[handleFinishCaixa] fecharCaixa executado com sucesso');
         setShowFechamento(false);
         toast({ message: 'Caixa fechado com sucesso!', type: 'success' });
     } catch (error) {
