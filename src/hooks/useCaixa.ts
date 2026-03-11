@@ -218,7 +218,7 @@ export function useCaixa() {
 
         let delta = mov.valor;
         if (mov.tipo === 'trocados') {
-            delta = 0;
+            delta = 0; // trocados não altera saldo
         }
 
         const novoSaldo = (sessaoAtiva.valor_final_calculado || 0) + delta;
@@ -270,10 +270,10 @@ export function useCaixa() {
             throw new Error('Sessão já foi fechada por outro processo');
         }
 
-        // Se houver valor de cofre, registrar a sangria primeiro
+        // Registrar sangria para o valor do cofre
         if (valorCofre && valorCofre > 0) {
             try {
-                console.log('[useCaixa] Registrando sangria para cofre:', valorCofre);
+                console.log('[useCaixa] Registrando sangria de R$', valorCofre);
                 await registrarMovimentacao({
                     tipo: 'sangria',
                     valor: -Math.abs(valorCofre), // negativo: saída do caixa
