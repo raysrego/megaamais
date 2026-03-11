@@ -61,12 +61,12 @@ export function VisaoGestorCaixa() {
     return (
         <div className="visao-gestor-caixa">
             <div className="animate-in fade-in slide-in-from-left-4">
-                {/* NOVA: Auditoria de Fechamentos Integrada */}
+                {/* Auditoria de Fechamentos Integrada */}
                 <div className="mb-10">
                     <AuditoriaFechamentos />
                 </div>
 
-                {/* KPIs Estratégicos Reais */}
+                {/* KPIs Estratégicos */}
                 <div className="kpi-grid mt-6">
                     <div className="kpi-card" style={{ borderTop: '4px solid var(--primary-blue-light)' }}>
                         <div className="kpi-header">
@@ -106,9 +106,8 @@ export function VisaoGestorCaixa() {
                     </div>
                 </div>
 
-                {/* Seção Central: Picos e Feed em Grid 50/50 */}
+                {/* Seção Central: Picos e Feed */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginTop: '2rem' }}>
-                    {/* Dashboard de Picos (Ainda Mock pois depende de histórico longo) */}
                     <div className="card flex flex-col">
                         <div className="flex items-center justify-between mb-6">
                             <h3 className="text-lg font-bold flex items-center gap-2">
@@ -136,7 +135,6 @@ export function VisaoGestorCaixa() {
                         </div>
                     </div>
 
-                    {/* Feed de Transações em Tempo Real (Real) */}
                     <div className="card flex flex-col">
                         <div className="flex items-center justify-between mb-4">
                             <h3 className="text-lg font-bold flex items-center gap-2">
@@ -164,12 +162,12 @@ export function VisaoGestorCaixa() {
                                             <div className="flex items-center justify-between gap-2">
                                                 <div className="text-xs font-bold text-text-primary truncate">{mov.descricao || 'Lançamento sem descrição'}</div>
                                                 <div className={`text-xs font-black ${['sangria', 'pagamento', 'deposito', 'boleto', 'estorno'].includes(mov.tipo) ? 'text-danger' : 'text-success'}`}>
-                                                    R$ {mov.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    R$ {Math.abs(mov.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                 </div>
                                             </div>
                                             <div className="flex items-center justify-between mt-1">
                                                 <div className="text-[9px] text-muted font-bold opacity-70 uppercase tracking-tighter">
-                                                    {mov.caixa_sessoes?.terminal_id} • Operador
+                                                    {mov.caixa_sessoes.terminal_id} • Operador
                                                 </div>
                                                 <div className="text-[9px] text-muted opacity-60">
                                                     {new Date(mov.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
@@ -183,7 +181,7 @@ export function VisaoGestorCaixa() {
                     </div>
                 </div>
 
-                {/* Bottom Section: Status dos Terminais (Horizontal e Simplificado) */}
+                {/* Bottom Section: Status dos Terminais */}
                 <div className="mt-6">
                     <div className="flex items-center gap-2 mb-4 px-2">
                         <ShieldCheck size={18} className="text-muted" />
@@ -211,12 +209,12 @@ export function VisaoGestorCaixa() {
                                 }}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                                         <span style={{ fontSize: '0.7rem', fontWeight: 900, color: 'var(--text-primary)', opacity: 0.9 }}>{t.terminal_id}</span>
-                                        <div style={{
-                                            background: '#22c55e'
-                                        }} />
+                                        <div style={{ background: '#22c55e' }} />
                                     </div>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                        <div style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>R$ {t.valor_final_calculado.toLocaleString('pt-BR')}</div>
+                                        <div style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                            R$ {t.valor_final_calculado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </div>
                                         <div style={{
                                             fontSize: '0.65rem',
                                             fontWeight: 900,
