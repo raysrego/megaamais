@@ -5,12 +5,9 @@ import {
     ChevronRight,
     CheckCircle2,
     AlertTriangle,
-    FileText,
     RefreshCw,
     ShieldCheck,
     Loader2,
-    XCircle,
-    User,
     X
 } from 'lucide-react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
@@ -21,15 +18,15 @@ import { MoneyInput } from '@/components/ui/MoneyInput';
 
 interface Fechamento {
     id: string;
-    data_turno: string;               // nova
+    data_turno: string;
     data_fechamento: string;
     terminal_id: string;
     operador_id: string;
     operador_nome?: string;
-    valor_inicial: number;             // novo
-    total_lancamentos: number;          // valor_final_calculado - valor_inicial
-    saldo_no_caixa: number;             // valor_final_declarado
-    divergencia: number;                 // diferença (saldo_no_caixa - (total_lancamentos + valor_inicial)?)
+    valor_inicial: number;
+    total_lancamentos: number;      // valor_final_calculado - valor_inicial
+    saldo_no_caixa: number;          // valor_final_declarado
+    divergencia: number;              // saldo_no_caixa - (total_lancamentos + valor_inicial)
     total_pix: number;
     total_dinheiro: number;
     total_sangrias: number;
@@ -64,10 +61,9 @@ function ModalAuditoriaSimplificada({
     const [observacoes, setObservacoes] = useState('');
 
     // Calcular totais com base nos campos do fechamento
-    const saldoInicial = fechamento.saldo_sistema ?? 0;
     const totalEntradas = fechamento.total_pix + fechamento.total_dinheiro;
     const totalSaidas = (fechamento.total_sangrias ?? 0) + (fechamento.total_depositos ?? 0);
-    const saldoCalculado = saldoInicial + totalEntradas - totalSaidas;
+    const saldoCalculado = fechamento.valor_inicial + totalEntradas - totalSaidas;
 
     return (
         <>
@@ -85,7 +81,7 @@ function ModalAuditoriaSimplificada({
                     <p><span className="font-semibold">Operador:</span> {fechamento.operador_nome}</p>
                     <p><span className="font-semibold">Data:</span> {format(new Date(fechamento.data_fechamento), 'dd/MM/yyyy HH:mm')}</p>
                     <hr className="border-border" />
-                    <p><span className="font-semibold">Valor inicial:</span> R$ {saldoInicial.toFixed(2)}</p>
+                    <p><span className="font-semibold">Valor inicial:</span> R$ {fechamento.valor_inicial.toFixed(2)}</p>
                     <p><span className="font-semibold">Total entradas:</span> R$ {totalEntradas.toFixed(2)}</p>
                     <p><span className="font-semibold">Total saídas:</span> R$ {totalSaidas.toFixed(2)}</p>
                     <p><span className="font-semibold">Saldo calculado:</span> R$ {saldoCalculado.toFixed(2)}</p>
@@ -179,35 +175,34 @@ export function AuditoriaFechamentos() {
     const fetchHistorico = useCallback(async () => {
         setLoading(true);
         try {
-            // ---------- QUERY TFL (caixa_sessoes) sem aliases ----------
+            // ---------- QUERY TFL (caixa_sessoes) ----------
             let queryTFL = supabase
-    .from('caixa_sessoes')
-    .select(`
-        id,
-        data_turno,
-        data_fechamento,
-        terminal_id,
-        operador_id,
-        valor_inicial,
-        valor_final_calculado,
-        valor_final_declarado,
-        status,
-        observacoes,
-        total_sangrias,
-        total_depositos_filial,
-        valor_cofre,
-        valor_pix_externo,
-        diferenca_apurada,
-        justificativa_divergencia
-    `)
-    .neq('status', 'aberto')
-    .order('created_at', { ascending: false });
+                .from('caixa_sessoes')
+                .select(`
+                    id,
+                    data_turno,
+                    data_fechamento,
+                    terminal_id,
+                    operador_id,
+                    valor_inicial,
+                    valor_final_calculado,
+                    valor_final_declarado,
+                    status,
+                    observacoes,
+                    total_sangrias,
+                    total_depositos_filial,
+                    valor_cofre,
+                    valor_pix_externo,
+                    diferenca_apurada,
+                    justificativa_divergencia
+                `)
+                .neq('status', 'aberto')
+                .order('created_at', { ascending: false });
 
             if (filtroStatus !== 'todos') {
-                // Mapeia o filtro para o status do TFL
                 let statusFilter: string;
                 if (filtroStatus === 'fechado') statusFilter = 'fechado';
-                else if (filtroStatus === 'batido') statusFilter = 'conferido'; // ou 'batido'? No TFL, status pode ser 'conferido' ou 'batido'? Ajuste conforme seu enum.
+                else if (filtroStatus === 'batido') statusFilter = 'conferido';
                 else if (filtroStatus === 'divergente') statusFilter = 'discrepante';
                 else statusFilter = filtroStatus;
                 queryTFL = queryTFL.eq('status', statusFilter);
@@ -216,7 +211,7 @@ export function AuditoriaFechamentos() {
             const { data: dataTFL, error: errorTFL } = await queryTFL;
             if (errorTFL) throw errorTFL;
 
-            // ---------- QUERY BOLÃO (caixa_bolao_sessoes) com valores de enum válidos ----------
+            // ---------- QUERY BOLÃO (caixa_bolao_sessoes) ----------
             let queryBolao = supabase
                 .from('caixa_bolao_sessoes')
                 .select(`
@@ -230,13 +225,10 @@ export function AuditoriaFechamentos() {
                 `)
                 .order('data_fechamento', { ascending: false });
 
-            // Aplica filtro de status apenas se não for 'todos'
             if (filtroStatus !== 'todos') {
-                // Mapeia o filtro para os valores reais do enum status_validacao_gerencial
-                // Valores comuns: 'pendente', 'aprovado', 'rejeitado', 'discrepante'
                 let statusFilter: string[] = [];
                 if (filtroStatus === 'fechado') {
-                    statusFilter = ['pendente']; // Aguardando auditoria
+                    statusFilter = ['pendente'];
                 } else if (filtroStatus === 'batido') {
                     statusFilter = ['aprovado'];
                 } else if (filtroStatus === 'divergente') {
@@ -251,59 +243,68 @@ export function AuditoriaFechamentos() {
             if (errorBolao) throw errorBolao;
 
             // ---------- Normalizar dados TFL ----------
-           const fechamentosTFL: Fechamento[] = (dataTFL || []).map((f: any) => {
-    const totalLancamentos = (f.valor_final_calculado || 0) - (f.valor_inicial || 0);
-    const saldoNoCaixa = f.valor_final_declarado || 0;
-    // Divergência original: saldoNoCaixa - (totalLancamentos + valor_inicial)
-    const divergencia = saldoNoCaixa - (totalLancamentos + (f.valor_inicial || 0));
-    return {
-        id: f.id,
-        data_turno: f.data_turno,
-        data_fechamento: f.data_fechamento,
-        terminal_id: f.terminal_id || 'TFL-WEB',
-        operador_id: f.operador_id || 'Sistema',
-        operador_nome: f.operador_id ? `${f.operador_id.split('-')[0]}...` : 'Sistema',
-        valor_inicial: f.valor_inicial || 0,
-        total_lancamentos: totalLancamentos,
-        saldo_no_caixa: saldoNoCaixa,
-        divergencia: divergencia,
-        total_pix: 0, // se não houver campo, manter 0
-        total_dinheiro: saldoNoCaixa,
-        total_sangrias: f.total_sangrias || 0,
-        total_depositos: f.total_depositos_filial || 0,
-        status_validacao: f.status,
-        tipo: 'tfl',
-        justificativa: f.observacoes,
-        valor_cofre: f.valor_cofre,
-        valor_pix_externo: f.valor_pix_externo,
-        diferenca_apurada: f.diferenca_apurada,
-        justificativa_divergencia: f.justificativa_divergencia
-    };
-});
+            const fechamentosTFL: Fechamento[] = (dataTFL || []).map((f: any) => {
+                const totalLancamentos = (f.valor_final_calculado || 0) - (f.valor_inicial || 0);
+                const saldoNoCaixa = f.valor_final_declarado || 0;
+                const divergencia = saldoNoCaixa - (totalLancamentos + (f.valor_inicial || 0));
+                return {
+                    id: f.id,
+                    data_turno: f.data_turno,
+                    data_fechamento: f.data_fechamento,
+                    terminal_id: f.terminal_id || 'TFL-WEB',
+                    operador_id: f.operador_id || 'Sistema',
+                    operador_nome: f.operador_id ? `${f.operador_id.split('-')[0]}...` : 'Sistema',
+                    valor_inicial: f.valor_inicial || 0,
+                    total_lancamentos: totalLancamentos,
+                    saldo_no_caixa: saldoNoCaixa,
+                    divergencia: divergencia,
+                    total_pix: 0,
+                    total_dinheiro: saldoNoCaixa,
+                    total_sangrias: f.total_sangrias || 0,
+                    total_depositos: f.total_depositos_filial || 0,
+                    status_validacao: f.status,
+                    tipo: 'tfl',
+                    justificativa: f.observacoes,
+                    valor_cofre: f.valor_cofre,
+                    valor_pix_externo: f.valor_pix_externo,
+                    diferenca_apurada: f.diferenca_apurada,
+                    justificativa_divergencia: f.justificativa_divergencia
+                };
+            });
 
             // ---------- Normalizar dados Bolão ----------
-            const fechamentosBolao: Fechamento[] = (dataBolao || []).map((f: any) => ({
-                id: f.id,
-                data_fechamento: f.data_fechamento,
-                terminal_id: 'Bolão',
-                operador_id: '',
-                operador_nome: 'Sistema Bolão',
-                saldo_sistema: f.total_vendido || 0,
-                saldo_informado: (f.total_dinheiro || 0) + (f.total_pix || 0),
-                divergencia: (f.total_vendido || 0) - ((f.total_dinheiro || 0) + (f.total_pix || 0)),
-                total_pix: f.total_pix || 0,
-                total_dinheiro: f.total_dinheiro || 0,
-                total_sangrias: 0,
-                total_depositos: 0,
-                status_validacao: f.status_validacao || 'pendente',
-                tipo: 'bolao',
-                justificativa: f.observacoes_gerente
-            }));
+            const fechamentosBolao: Fechamento[] = (dataBolao || []).map((f: any) => {
+                const totalLancamentos = f.total_vendido || 0; // Bolão não tem valor_inicial
+                const saldoNoCaixa = (f.total_dinheiro || 0) + (f.total_pix || 0);
+                const divergencia = totalLancamentos - saldoNoCaixa; // ou o contrário, conforme lógica de negócio
+                return {
+                    id: f.id,
+                    data_turno: f.data_fechamento, // Bolão não tem data_turno, usamos a mesma
+                    data_fechamento: f.data_fechamento,
+                    terminal_id: 'Bolão',
+                    operador_id: '',
+                    operador_nome: 'Sistema Bolão',
+                    valor_inicial: 0,
+                    total_lancamentos: totalLancamentos,
+                    saldo_no_caixa: saldoNoCaixa,
+                    divergencia: divergencia,
+                    total_pix: f.total_pix || 0,
+                    total_dinheiro: f.total_dinheiro || 0,
+                    total_sangrias: 0,
+                    total_depositos: 0,
+                    status_validacao: f.status_validacao || 'pendente',
+                    tipo: 'bolao',
+                    justificativa: f.observacoes_gerente,
+                    valor_cofre: undefined,
+                    valor_pix_externo: undefined,
+                    diferenca_apurada: undefined,
+                    justificativa_divergencia: undefined
+                };
+            });
 
             setFechamentos([...fechamentosTFL, ...fechamentosBolao]);
         } catch (err: any) {
             console.error('Erro ao carregar histórico:', err);
-            // Exibe detalhes do erro para depuração
             const errorMsg = err?.message || err?.error_description || err?.details || 'Erro desconhecido';
             toast({ message: 'Erro ao carregar fechamentos: ' + errorMsg, type: 'error' });
         } finally {
@@ -395,52 +396,52 @@ export function AuditoriaFechamentos() {
                     ) : (
                         <div className="table-container pt-0">
                             <table>
-                              <thead>
-    <tr>
-        <th>Data Turno</th>
-        <th>Data Fechamento</th>
-        <th>Terminal</th>
-        <th>Operador</th>
-        <th>Status</th>
-        <th className="text-right">Diferença</th>
-        <th style={{ width: '50px' }}></th>
-    </tr>
-</thead>
-<tbody>
-    {fechamentos.map((f) => (
-        <tr
-            key={f.id}
-            onClick={() => setSelectedFechamento(f)}
-            className={`cursor-pointer hover:bg-bg-card-hover transition-colors ${
-                selectedFechamento?.id === f.id ? 'bg-primary/5 border-l-4 border-primary' : ''
-            }`}
-        >
-            <td className="text-xs">
-                {f.data_turno ? format(new Date(f.data_turno), 'dd/MM/yyyy', { locale: ptBR }) : '-'}
-            </td>
-            <td className="text-xs">
-                {f.data_fechamento ? format(new Date(f.data_fechamento), 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '-'}
-            </td>
-            <td>
-                <span className={`px-2 py-1 rounded-lg text-xs font-black ${
-                    f.tipo === 'tfl' ? 'bg-blue-500/10 text-blue-400' : 'bg-purple-500/10 text-purple-400'
-                }`}>
-                    {f.terminal_id}
-                </span>
-            </td>
-            <td className="text-xs opacity-60">{f.operador_nome}</td>
-            <td>{getStatusBadge(f.status_validacao)}</td>
-            <td className={`font-bold text-right ${
-                Math.abs(f.divergencia) < 0.01 ? 'text-success' : 'text-danger'
-            }`}>
-                R$ {f.divergencia.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-            </td>
-            <td className="text-right">
-                <ChevronRight size={16} className="text-muted" />
-            </td>
-        </tr>
-    ))}
-</tbody>
+                                <thead>
+                                    <tr>
+                                        <th>Data Turno</th>
+                                        <th>Data Fechamento</th>
+                                        <th>Terminal</th>
+                                        <th>Operador</th>
+                                        <th>Status</th>
+                                        <th className="text-right">Diferença</th>
+                                        <th style={{ width: '50px' }}></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {fechamentos.map((f) => (
+                                        <tr
+                                            key={f.id}
+                                            onClick={() => setSelectedFechamento(f)}
+                                            className={`cursor-pointer hover:bg-bg-card-hover transition-colors ${
+                                                selectedFechamento?.id === f.id ? 'bg-primary/5 border-l-4 border-primary' : ''
+                                            }`}
+                                        >
+                                            <td className="text-xs">
+                                                {f.data_turno ? format(new Date(f.data_turno), 'dd/MM/yyyy', { locale: ptBR }) : '-'}
+                                            </td>
+                                            <td className="text-xs">
+                                                {f.data_fechamento ? format(new Date(f.data_fechamento), 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '-'}
+                                            </td>
+                                            <td>
+                                                <span className={`px-2 py-1 rounded-lg text-xs font-black ${
+                                                    f.tipo === 'tfl' ? 'bg-blue-500/10 text-blue-400' : 'bg-purple-500/10 text-purple-400'
+                                                }`}>
+                                                    {f.terminal_id}
+                                                </span>
+                                            </td>
+                                            <td className="text-xs opacity-60">{f.operador_nome}</td>
+                                            <td>{getStatusBadge(f.status_validacao)}</td>
+                                            <td className={`font-bold text-right ${
+                                                Math.abs(f.divergencia) < 0.01 ? 'text-success' : 'text-danger'
+                                            }`}>
+                                                R$ {f.divergencia.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </td>
+                                            <td className="text-right">
+                                                <ChevronRight size={16} className="text-muted" />
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
                             </table>
                         </div>
                     )}
@@ -457,12 +458,13 @@ export function AuditoriaFechamentos() {
                         </div>
 
                         <div className="flex items-center gap-4 mb-6 p-4 rounded-xl bg-surface-subtle border border-border">
-                            <div className={`w-12 h-12 rounded-full flex items-center justify-center ${selectedFechamento.status_validacao === 'batido' || selectedFechamento.status_validacao === 'aprovado'
-                                ? 'bg-success/10 text-success'
-                                : selectedFechamento.status_validacao === 'fechado' || selectedFechamento.status_validacao === 'pendente'
-                                    ? 'bg-warning/10 text-warning'
-                                    : 'bg-danger/10 text-danger'
-                                }`}>
+                            <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
+                                selectedFechamento.status_validacao === 'batido' || selectedFechamento.status_validacao === 'aprovado'
+                                    ? 'bg-success/10 text-success'
+                                    : selectedFechamento.status_validacao === 'fechado' || selectedFechamento.status_validacao === 'pendente'
+                                        ? 'bg-warning/10 text-warning'
+                                        : 'bg-danger/10 text-danger'
+                            }`}>
                                 {selectedFechamento.status_validacao === 'batido' || selectedFechamento.status_validacao === 'aprovado'
                                     ? <CheckCircle2 size={24} />
                                     : selectedFechamento.status_validacao === 'fechado' || selectedFechamento.status_validacao === 'pendente'
@@ -475,22 +477,22 @@ export function AuditoriaFechamentos() {
                             </div>
                         </div>
 
-                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
-    <div className="p-3 rounded-lg bg-bg-card border border-border">
-        <div className="text-[10px] text-muted uppercase font-bold mb-1">Total de Lançamentos</div>
-        <div className="text-lg font-bold text-text-primary">
-            R$ {selectedFechamento.total_lancamentos.toLocaleString('pt-BR')}
-        </div>
-    </div>
-    <div className="p-3 rounded-lg bg-bg-card border border-border">
-        <div className="text-[10px] text-muted uppercase font-bold mb-1">Saldo no caixa</div>
-        <div className="text-lg font-bold text-text-primary">
-            R$ {selectedFechamento.saldo_no_caixa.toLocaleString('pt-BR')}
-        </div>
-    </div>
-</div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+                            <div className="p-3 rounded-lg bg-bg-card border border-border">
+                                <div className="text-[10px] text-muted uppercase font-bold mb-1">Total de Lançamentos</div>
+                                <div className="text-lg font-bold text-text-primary">
+                                    R$ {selectedFechamento.total_lancamentos.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </div>
+                            </div>
+                            <div className="p-3 rounded-lg bg-bg-card border border-border">
+                                <div className="text-[10px] text-muted uppercase font-bold mb-1">Saldo no caixa</div>
+                                <div className="text-lg font-bold text-text-primary">
+                                    R$ {selectedFechamento.saldo_no_caixa.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </div>
+                            </div>
+                        </div>
 
-                        {/* Exibir novos campos, se existirem */}
+                        {/* Informações do Fechamento (cofre, pix externo, etc.) */}
                         {(selectedFechamento.valor_cofre || selectedFechamento.valor_pix_externo) && (
                             <div className="border-t border-border pt-3 mb-4">
                                 <div className="text-[10px] text-muted font-bold uppercase mb-2">Informações do Fechamento</div>
@@ -498,17 +500,25 @@ export function AuditoriaFechamentos() {
                                     {selectedFechamento.valor_cofre !== undefined && selectedFechamento.valor_cofre > 0 && (
                                         <div className="flex justify-between text-xs">
                                             <span className="text-muted">Valor no cofre</span>
-                                            <span className="font-bold">R$ {selectedFechamento.valor_cofre.toLocaleString('pt-BR')}</span>
+                                            <span className="font-bold">R$ {selectedFechamento.valor_cofre.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                                         </div>
                                     )}
-                                   {selectedFechamento.valor_pix_externo !== undefined && (
-    <div className="flex justify-between text-xs mt-2 pt-2 border-t border-border">
-        <span className="text-muted">Total do caixa (lançamentos + PIX externo)</span>
-        <span className="font-bold">
-            R$ {(selectedFechamento.total_lancamentos + (selectedFechamento.valor_pix_externo || 0)).toLocaleString('pt-BR')}
-        </span>
-    </div>
-)}
+                                    {selectedFechamento.valor_pix_externo !== undefined && selectedFechamento.valor_pix_externo > 0 && (
+                                        <div className="flex justify-between text-xs">
+                                            <span className="text-muted">PIX externo</span>
+                                            <span className="font-bold">R$ {selectedFechamento.valor_pix_externo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                        </div>
+                                    )}
+                                    {/* Total do caixa (lançamentos + PIX externo) */}
+                                    <div className="flex justify-between text-xs pt-2 border-t border-border">
+                                        <span className="text-muted font-bold">Total do caixa</span>
+                                        <span className="font-bold">
+                                            R$ {(selectedFechamento.total_lancamentos + (selectedFechamento.valor_pix_externo || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
 
                         {selectedFechamento.justificativa && (
                             <div className="mb-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
@@ -556,11 +566,12 @@ export function AuditoriaFechamentos() {
                     onAprovar={async (obs) => {
                         const tabela = selectedFechamento.tipo === 'tfl' ? 'caixa_sessoes' : 'caixa_bolao_sessoes';
                         const statusField = selectedFechamento.tipo === 'tfl' ? 'status' : 'status_validacao';
+                        const novoStatus = selectedFechamento.tipo === 'tfl' ? 'conferido' : 'aprovado';
 
                         const { error } = await supabase
                             .from(tabela)
                             .update({
-                                [statusField]: selectedFechamento.tipo === 'tfl' ? 'conferido' : 'aprovado',
+                                [statusField]: novoStatus,
                                 observacoes_gerente: obs,
                                 data_validacao: new Date().toISOString()
                             })
@@ -577,11 +588,12 @@ export function AuditoriaFechamentos() {
                     onRejeitar={async ({ justificativa, diferenca }) => {
                         const tabela = selectedFechamento.tipo === 'tfl' ? 'caixa_sessoes' : 'caixa_bolao_sessoes';
                         const statusField = selectedFechamento.tipo === 'tfl' ? 'status' : 'status_validacao';
+                        const novoStatus = selectedFechamento.tipo === 'tfl' ? 'discrepante' : 'rejeitado';
 
                         const { error } = await supabase
                             .from(tabela)
                             .update({
-                                [statusField]: selectedFechamento.tipo === 'tfl' ? 'discrepante' : 'rejeitado',
+                                [statusField]: novoStatus,
                                 observacoes_gerente: justificativa,
                                 diferenca_apurada: diferenca || 0,
                                 data_validacao: new Date().toISOString()
