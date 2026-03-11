@@ -191,19 +191,29 @@ export function VisaoOperadorCaixa() {
     }, [supabase, toast, confirm, refresh]);
 
     // Função de fechamento com logs detalhados
-    const handleFinishCaixa = async (result: { observacoes?: string; tflData?: any }) => {
-        console.log('[handleFinishCaixa] Recebido resultado do modal:', result);
-        try {
-            console.log('[handleFinishCaixa] Chamando fecharCaixa...');
-            await fecharCaixa(result.observacoes, result.tflData);
-            console.log('[handleFinishCaixa] fecharCaixa executado com sucesso');
-            setShowFechamento(false);
-            toast({ message: 'Caixa fechado com sucesso!', type: 'success' });
-        } catch (error) {
-            console.error('[handleFinishCaixa] Erro ao fechar caixa:', error);
-            toast({ message: 'Erro ao fechar caixa: ' + (error instanceof Error ? error.message : 'Erro desconhecido'), type: 'error' });
-        }
-    };
+    const handleFinishCaixa = async (result: {
+    observacoes?: string;
+    tflData?: any;
+    valorCofre?: number;
+    valorPixExterno?: number;
+}) => {
+    console.log('[handleFinishCaixa] Recebido resultado do modal:', result);
+    try {
+        console.log('[handleFinishCaixa] Chamando fecharCaixa...');
+        await fecharCaixa(
+            result.observacoes,
+            result.tflData,
+            result.valorCofre,
+            result.valorPixExterno
+        );
+        console.log('[handleFinishCaixa] fecharCaixa executado com sucesso');
+        setShowFechamento(false);
+        toast({ message: 'Caixa fechado com sucesso!', type: 'success' });
+    } catch (error) {
+        console.error('[handleFinishCaixa] Erro ao fechar caixa:', error);
+        toast({ message: 'Erro ao fechar caixa: ' + (error instanceof Error ? error.message : 'Erro desconhecido'), type: 'error' });
+    }
+};
 
     const handleAbrirCaixa = async () => {
         if (!terminalSelecionado) {
@@ -616,13 +626,13 @@ export function VisaoOperadorCaixa() {
             )}
 
             {showFechamento && (
-                <ModalFechamentoCaixa
-                    sessao={sessaoAtiva}
-                    transacoes={movimentacoes}
-                    onClose={() => setShowFechamento(false)}
-                    onFinish={handleFinishCaixa}
-                />
-            )}
+    <ModalFechamentoCaixa
+        sessao={sessaoAtiva}
+        transacoes={movimentacoes}
+        onClose={() => setShowFechamento(false)}
+        onFinish={handleFinishCaixa}
+    />
+)}
         </div>
     );
 }
