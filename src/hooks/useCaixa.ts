@@ -11,7 +11,7 @@ export interface CaixaSessao {
     terminal_id_ref: number | null;
     data_abertura: string;
     data_fechamento: string | null;
-    data_turno: string;                // ← NOVO: data do turno (YYYY-MM-DD)
+    data_turno: string;
     valor_inicial: number;
     valor_final_declarado: number | null;
     valor_final_calculado: number;
@@ -27,6 +27,11 @@ export interface CaixaSessao {
     validado_por_id?: string;
     data_validacao?: string;
     observacoes_gerente?: string;
+    // NOVOS CAMPOS
+    valor_cofre?: number;
+    valor_pix_externo?: number;
+    diferenca_apurada?: number;
+    justificativa_divergencia?: string;
 }
 
 export interface CaixaMovimentacao {
@@ -95,7 +100,6 @@ export function useCaixa() {
                 if (isMounted.current) setLoading(false);
                 return;
             }
-            // ← Incluímos 'data_turno' no select
             const { data, error } = await supabase
                 .from('caixa_sessoes')
                 .select('*, terminais!terminal_id_ref(codigo, descricao), data_turno')
@@ -120,7 +124,6 @@ export function useCaixa() {
         }
     }, [supabase, fetchMovimentacoes]);
 
-    // Configurar Realtime quando a sessão ativa mudar
     useEffect(() => {
         if (!sessaoAtiva) {
             if (realtimeChannel.current) {
@@ -162,19 +165,17 @@ export function useCaixa() {
         };
     }, [sessaoAtiva, supabase, fetchMovimentacoes]);
 
-    // ← Função abrirCaixa modificada para receber dataTurno
     const abrirCaixa = async (
         valorInicial: number,
         terminalCodigo?: string,
         terminalId?: number,
         temFundoCaixa: boolean = true,
-        dataTurno?: string                       // ← NOVO PARÂMETRO
+        dataTurno?: string
     ) => {
         console.log('[useCaixa] abrirCaixa chamado', { valorInicial, terminalCodigo, terminalId, temFundoCaixa, dataTurno });
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error('Usuário não autenticado');
 
-        // Se não for informada, usa a data atual (YYYY-MM-DD)
         const turnoData = dataTurno || new Date().toISOString().split('T')[0];
 
         const { data, error } = await supabase
@@ -187,7 +188,7 @@ export function useCaixa() {
                 valor_final_calculado: valorInicial,
                 status: 'aberto',
                 tem_fundo_caixa: temFundoCaixa,
-                data_turno: turnoData                 // ← SALVA A DATA INFORMADA
+                data_turno: turnoData
             })
             .select()
             .single();
@@ -234,6 +235,7 @@ export function useCaixa() {
         return data;
     };
 
+    // Função fecharCaixa modificada para aceitar novos parâmetros
     const fecharCaixa = async (
         observacoes?: string,
         tflData?: {
@@ -242,12 +244,13 @@ export function useCaixa() {
             tfl_contas?: number;
             tfl_saldo_projetado?: number;
             tfl_comprovante_url?: string;
-        }
+        },
+        valorCofre?: number,
+        valorPixExterno?: number
     ) => {
-        console.log('[useCaixa] fecharCaixa iniciado', { observacoes, tflData });
+        console.log('[useCaixa] fecharCaixa iniciado', { observacoes, tflData, valorCofre, valorPixExterno });
 
         if (!sessaoAtiva) {
-            console.error('[useCaixa] Erro: sessão ativa é nula');
             throw new Error('Nenhuma sessão de caixa aberta');
         }
 
@@ -257,13 +260,8 @@ export function useCaixa() {
             .eq('id', sessaoAtiva.id)
             .single();
 
-        if (checkError) {
-            console.error('[useCaixa] Erro ao verificar status da sessão:', checkError);
-            throw checkError;
-        }
-
+        if (checkError) throw checkError;
         if (sessaoAtual.status !== 'aberto') {
-            console.error('[useCaixa] Sessão já não está mais aberta');
             throw new Error('Sessão já foi fechada por outro processo');
         }
 
@@ -275,35 +273,28 @@ export function useCaixa() {
             status,
             data_fechamento: new Date().toISOString(),
             observacoes: observacoes,
-            ...(tflData || {})
+            ...(tflData || {}),
+            valor_cofre: valorCofre || 0,
+            valor_pix_externo: valorPixExterno || 0
         };
 
         console.log('[useCaixa] Enviando update para Supabase:', updateData);
 
-        const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Timeout na requisição ao Supabase')), 30000)
-        );
-
-        const updatePromise = supabase
+        const { data, error } = await supabase
             .from('caixa_sessoes')
             .update(updateData)
             .eq('id', sessaoAtiva.id)
             .select()
             .single();
 
-        const result = await Promise.race([updatePromise, timeoutPromise]) as any;
+        if (error) throw error;
 
-        if (result.error) {
-            console.error('[useCaixa] Erro no update do Supabase:', result.error);
-            throw result.error;
-        }
-
-        console.log('[useCaixa] Sessão fechada com sucesso, dados retornados:', result.data);
+        console.log('[useCaixa] Sessão fechada com sucesso, dados retornados:', data);
 
         setSessaoAtiva(null);
         setMovimentacoes([]);
 
-        return result.data;
+        return data;
     };
 
     useEffect(() => {
