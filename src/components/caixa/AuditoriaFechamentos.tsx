@@ -60,18 +60,13 @@ function ModalAuditoriaSimplificada({
     const [tipoDiferenca, setTipoDiferenca] = useState<'falta' | 'sobra'>('falta');
     const [observacoes, setObservacoes] = useState('');
 
-    // Cálculos
-    const totalLancamentos = fechamento.total_lancamentos; // já é o valor correto
-    const totalCofre = fechamento.valor_cofre ?? 0;
-    const totalPixExterno = fechamento.valor_pix_externo ?? 0;
-    const saldoGeral = fechamento.valor_inicial + totalLancamentos; // considerando que não há saídas? Mas se houver, seria ajustado. No entanto, o modal anterior usava saldoCalculado = valor_inicial + totalEntradas - totalSaidas. Vamos manter a mesma lógica, mas usando totalLancamentos? Na verdade totalLancamentos já é líquido? Vamos manter a fórmula original para não quebrar.
-    // Mas para simplificar, vamos usar o saldo calculado da mesma forma que antes, pois o usuário não mencionou mudança no cálculo.
-    const totalEntradas = fechamento.total_pix + fechamento.total_dinheiro; // manter para consistência com o valor mostrado antes
-    const totalSaidas = (fechamento.total_sangrias ?? 0) + (fechamento.total_depositos ?? 0);
-    const saldoCalculado = fechamento.valor_inicial + totalEntradas - totalSaidas;
-
-    // Usaremos saldoCalculado como "Saldo geral", pois é o que aparece na imagem.
-    // Se quiser usar totalLancamentos, ajuste depois.
+    // Cálculos baseados na interface Fechamento
+    const valorInicial = fechamento.valor_inicial;
+    const totalLancamentos = fechamento.total_lancamentos; // já é valor_final_calculado - valor_inicial
+    const valorFinalCalculado = valorInicial + totalLancamentos;
+    const totalCofre = fechamento.valor_cofre || 0;
+    const totalPixExterno = fechamento.valor_pix_externo || 0;
+    const saldoGeral = valorFinalCalculado + totalPixExterno;
 
     return (
         <>
@@ -84,7 +79,7 @@ function ModalAuditoriaSimplificada({
                     </button>
                 </div>
 
-                {/* Informações básicas */}
+                {/* Informações básicas em grid */}
                 <div className="grid grid-cols-2 gap-4 mb-6 p-4 rounded-xl bg-surface-subtle border border-border">
                     <div>
                         <p className="text-[10px] text-muted uppercase font-bold">Terminal</p>
@@ -112,15 +107,15 @@ function ModalAuditoriaSimplificada({
                 <div className="grid grid-cols-2 gap-4 mb-6">
                     <div className="p-4 rounded-xl bg-bg-card border border-border">
                         <p className="text-[10px] text-muted uppercase font-bold">Valor inicial</p>
-                        <p className="text-xl font-bold text-text-primary">R$ {fechamento.valor_inicial.toFixed(2)}</p>
+                        <p className="text-xl font-bold text-text-primary">R$ {valorInicial.toFixed(2)}</p>
                     </div>
                     <div className="p-4 rounded-xl bg-bg-card border border-border">
                         <p className="text-[10px] text-muted uppercase font-bold">Total de lançamentos</p>
-                        <p className="text-xl font-bold text-text-primary">R$ {totalEntradas.toFixed(2)}</p>
+                        <p className="text-xl font-bold text-text-primary">R$ {totalLancamentos.toFixed(2)}</p>
                     </div>
                 </div>
 
-                {/* Informações do fechamento (cofre e pix externo) */}
+                {/* Informações do cofre e pix externo */}
                 <div className="grid grid-cols-2 gap-4 mb-6">
                     <div className="p-4 rounded-xl bg-bg-card border border-border">
                         <p className="text-[10px] text-muted uppercase font-bold">Total Cofre</p>
@@ -132,15 +127,15 @@ function ModalAuditoriaSimplificada({
                     </div>
                 </div>
 
-                {/* Saldo geral - abaixo de tudo */}
+                {/* Saldo geral (final calculado + pix externo) */}
                 <div className="p-4 rounded-xl bg-primary/10 border border-primary/20 mb-6">
-    <p className="text-[10px] text-primary font-bold uppercase">Saldo geral</p>
-    <p className="text-2xl font-black text-primary">
-        R$ {((fechamento.valor_final_calculado || 0) + (fechamento.valor_pix_externo || 0)).toFixed(2)}
-    </p>
-</div>
+                    <p className="text-[10px] text-primary font-bold uppercase">Saldo geral</p>
+                    <p className="text-2xl font-black text-primary">
+                        R$ {saldoGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </p>
+                </div>
 
-                {/* Ações */}
+                {/* Ações (aprovar/rejeitar) */}
                 {!modoRejeitar ? (
                     <div className="flex gap-4 justify-end">
                         <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
