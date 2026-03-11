@@ -27,7 +27,7 @@ export interface CaixaSessao {
     validado_por_id?: string;
     data_validacao?: string;
     observacoes_gerente?: string;
-    // NOVOS CAMPOS
+    // Novos campos
     valor_cofre?: number;
     valor_pix_externo?: number;
     diferenca_apurada?: number;
@@ -124,6 +124,7 @@ export function useCaixa() {
         }
     }, [supabase, fetchMovimentacoes]);
 
+    // Configurar Realtime
     useEffect(() => {
         if (!sessaoAtiva) {
             if (realtimeChannel.current) {
@@ -218,11 +219,10 @@ export function useCaixa() {
 
         let delta = mov.valor;
         if (mov.tipo === 'trocados') {
-            delta = 0; // trocados não altera saldo
+            delta = 0;
         }
 
         const novoSaldo = (sessaoAtiva.valor_final_calculado || 0) + delta;
-        console.log('[useCaixa] Atualizando saldo calculado para', novoSaldo);
 
         await supabase
             .from('caixa_sessoes')
@@ -235,7 +235,6 @@ export function useCaixa() {
         return data;
     };
 
-    // Função fecharCaixa modificada para aceitar novos parâmetros
     const fecharCaixa = async (
         observacoes?: string,
         tflData?: {
@@ -289,7 +288,7 @@ export function useCaixa() {
 
         if (error) throw error;
 
-        console.log('[useCaixa] Sessão fechada com sucesso, dados retornados:', data);
+        console.log('[useCaixa] Sessão fechada com sucesso:', data);
 
         setSessaoAtiva(null);
         setMovimentacoes([]);
