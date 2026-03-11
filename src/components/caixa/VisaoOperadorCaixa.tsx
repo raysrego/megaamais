@@ -191,7 +191,7 @@ export function VisaoOperadorCaixa() {
     }, [supabase, toast, confirm, refresh]);
 
     // Função de fechamento com logs detalhados
-    const handleFinishCaixa = async (result: {
+   const handleFinishCaixa = async (result: {
     observacoes?: string;
     tflData?: any;
     valorCofre?: number;
