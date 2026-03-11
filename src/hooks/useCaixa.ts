@@ -27,7 +27,6 @@ export interface CaixaSessao {
     validado_por_id?: string;
     data_validacao?: string;
     observacoes_gerente?: string;
-    // Novos campos
     valor_cofre?: number;
     valor_pix_externo?: number;
     diferenca_apurada?: number;
@@ -124,7 +123,7 @@ export function useCaixa() {
         }
     }, [supabase, fetchMovimentacoes]);
 
-    // Configurar Realtime
+    // Configurar Realtime quando a sessão ativa mudar
     useEffect(() => {
         if (!sessaoAtiva) {
             if (realtimeChannel.current) {
@@ -223,6 +222,7 @@ export function useCaixa() {
         }
 
         const novoSaldo = (sessaoAtiva.valor_final_calculado || 0) + delta;
+        console.log('[useCaixa] Atualizando saldo calculado para', novoSaldo);
 
         await supabase
             .from('caixa_sessoes')
@@ -250,6 +250,7 @@ export function useCaixa() {
         console.log('[useCaixa] fecharCaixa iniciado', { observacoes, tflData, valorCofre, valorPixExterno });
 
         if (!sessaoAtiva) {
+            console.error('[useCaixa] Erro: sessão ativa é nula');
             throw new Error('Nenhuma sessão de caixa aberta');
         }
 
@@ -259,9 +260,34 @@ export function useCaixa() {
             .eq('id', sessaoAtiva.id)
             .single();
 
-        if (checkError) throw checkError;
+        if (checkError) {
+            console.error('[useCaixa] Erro ao verificar status da sessão:', checkError);
+            throw checkError;
+        }
+
         if (sessaoAtual.status !== 'aberto') {
+            console.error('[useCaixa] Sessão já não está mais aberta');
             throw new Error('Sessão já foi fechada por outro processo');
+        }
+
+        // Se houver valor de cofre, registrar a sangria primeiro
+        if (valorCofre && valorCofre > 0) {
+            try {
+                console.log('[useCaixa] Registrando sangria para cofre:', valorCofre);
+                await registrarMovimentacao({
+                    tipo: 'sangria',
+                    valor: -Math.abs(valorCofre), // negativo: saída do caixa
+                    descricao: 'Sangria para cofre',
+                    metodo_pagamento: 'dinheiro',
+                    referencia_id: null,
+                    classificacao_pix: null,
+                    categoria_operacional_id: null
+                });
+                console.log('[useCaixa] Sangria registrada com sucesso');
+            } catch (error) {
+                console.error('[useCaixa] Erro ao registrar sangria:', error);
+                throw new Error('Falha ao registrar sangria: ' + (error as Error).message);
+            }
         }
 
         const valorDeclarado = sessaoAtiva.valor_final_calculado;
@@ -279,21 +305,30 @@ export function useCaixa() {
 
         console.log('[useCaixa] Enviando update para Supabase:', updateData);
 
-        const { data, error } = await supabase
+        const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Timeout na requisição ao Supabase')), 30000)
+        );
+
+        const updatePromise = supabase
             .from('caixa_sessoes')
             .update(updateData)
             .eq('id', sessaoAtiva.id)
             .select()
             .single();
 
-        if (error) throw error;
+        const result = await Promise.race([updatePromise, timeoutPromise]) as any;
 
-        console.log('[useCaixa] Sessão fechada com sucesso:', data);
+        if (result.error) {
+            console.error('[useCaixa] Erro no update do Supabase:', result.error);
+            throw result.error;
+        }
+
+        console.log('[useCaixa] Sessão fechada com sucesso, dados retornados:', result.data);
 
         setSessaoAtiva(null);
         setMovimentacoes([]);
 
-        return data;
+        return result.data;
     };
 
     useEffect(() => {
