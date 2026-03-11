@@ -2,16 +2,41 @@
 
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
-import { CaixaSessao, CaixaMovimentacao } from './useCaixa';
-
 import { useLoja } from '@/contexts/LojaContext';
+
+export interface SessaoAtiva {
+    id: number;
+    terminal_id: string;
+    valor_final_calculado: number;
+    valor_inicial: number;
+}
+
+export interface MovimentacaoRecente {
+    id: number;
+    tipo: string;
+    valor: number;
+    descricao: string | null;
+    created_at: string;
+    caixa_sessoes: {
+        terminal_id: string;
+    };
+}
+
+export interface StatsGestor {
+    saldoConsolidado: number;
+    saldoFisico: number;
+    saldoDigital: number;
+    totalSangriasHoje: number;
+    terminaisAtivos: number;
+    volumeEntradas: number;
+}
 
 export function useGestorCaixa() {
     const supabase = useMemo(() => createBrowserSupabaseClient(), []);
     const { lojaAtual } = useLoja();
-    const [sessoesAtivas, setSessoesAtivas] = useState<CaixaSessao[]>([]);
-    const [movimentacoesRecentas, setMovimentacoesRecentes] = useState<any[]>([]);
-    const [stats, setStats] = useState({
+    const [sessoesAtivas, setSessoesAtivas] = useState<SessaoAtiva[]>([]);
+    const [movimentacoesRecentas, setMovimentacoesRecentes] = useState<MovimentacaoRecente[]>([]);
+    const [stats, setStats] = useState<StatsGestor>({
         saldoConsolidado: 0,
         saldoFisico: 0,
         saldoDigital: 0,
@@ -28,26 +53,34 @@ export function useGestorCaixa() {
         }
         setLoading(true);
         try {
-            // Executa as queries em paralelo para maior performance
+            const hoje = new Date();
+            hoje.setHours(0, 0, 0, 0);
+            const hojeISO = hoje.toISOString();
+
+            // Executa as queries em paralelo
             const [sessoesResult, movsResult] = await Promise.all([
-                // 1. Buscar sessões abertas
+                // 1. Sessões abertas
                 supabase
                     .from('caixa_sessoes')
-                    .select('*, terminais!terminal_id_ref!inner(codigo, descricao, loja_id)')
+                    .select('id, terminal_id, valor_inicial, valor_final_calculado')
                     .eq('status', 'aberto')
-                    .eq('terminais.loja_id', lojaAtual.id),
+                    .eq('loja_id', lojaAtual.id),
 
-                // 2. Buscar movimentações de hoje
-                (async () => {
-                    const hoje = new Date();
-                    hoje.setHours(0, 0, 0, 0);
-                    return supabase
-                        .from('caixa_movimentacoes')
-                        .select('*, caixa_sessoes!inner(terminal_id, operador_id, terminais!terminal_id_ref!inner(loja_id))')
-                        .gte('created_at', hoje.toISOString())
-                        .eq('caixa_sessoes.terminais.loja_id', lojaAtual.id)
-                        .order('created_at', { ascending: false });
-                })()
+                // 2. Movimentações de hoje
+                supabase
+                    .from('caixa_movimentacoes')
+                    .select(`
+                        id,
+                        tipo,
+                        valor,
+                        descricao,
+                        created_at,
+                        caixa_sessoes!inner ( terminal_id )
+                    `)
+                    .gte('created_at', hojeISO)
+                    .eq('caixa_sessoes.loja_id', lojaAtual.id)
+                    .order('created_at', { ascending: false })
+                    .limit(50)
             ]);
 
             if (sessoesResult.error) throw sessoesResult.error;
@@ -60,29 +93,43 @@ export function useGestorCaixa() {
             setMovimentacoesRecentes(movs);
 
             // 3. Calcular Estatísticas
-            const todasMovs = movs;
+            const digitalEntradas = movs
+                .filter(m => m.tipo === 'pix' && m.valor > 0)
+                .reduce((acc, m) => acc + m.valor, 0);
 
-            const digitalEntradas = todasMovs.filter(m => ['pix'].includes(m.tipo)).reduce((acc: number, m: any) => acc + m.valor, 0);
-            const digitalSaidas = todasMovs.filter(m => ['pagamento', 'deposito', 'boleto'].includes(m.tipo) && m.metodo_pagamento !== 'dinheiro').reduce((acc: number, m: any) => acc + m.valor, 0);
+            const digitalSaidas = movs
+                .filter(m => ['pagamento', 'deposito', 'boleto'].includes(m.tipo) && m.valor < 0)
+                .reduce((acc, m) => acc + Math.abs(m.valor), 0);
 
-            const fisicoEntradas = todasMovs.filter(m => ['venda', 'suprimento'].includes(m.tipo)).reduce((acc: number, m: any) => acc + m.valor, 0);
-            const fisicoSaidas = todasMovs.filter(m => ['sangria', 'estorno'].includes(m.tipo)).reduce((acc: number, m: any) => acc + m.valor, 0);
+            const fisicoEntradas = movs
+                .filter(m => ['venda', 'suprimento'].includes(m.tipo) && m.valor > 0)
+                .reduce((acc, m) => acc + m.valor, 0);
+
+            const fisicoSaidas = movs
+                .filter(m => ['sangria', 'estorno'].includes(m.tipo) && m.valor < 0)
+                .reduce((acc, m) => acc + Math.abs(m.valor), 0);
 
             const saldoDigital = digitalEntradas - digitalSaidas;
             const saldoFisico = fisicoEntradas - fisicoSaidas + sessoes.reduce((acc, s) => acc + s.valor_inicial, 0);
-            const saldoTotal = sessoes.reduce((acc: number, s: CaixaSessao) => acc + s.valor_final_calculado, 0);
+            const saldoConsolidado = sessoes.reduce((acc, s) => acc + s.valor_final_calculado, 0);
+
+            const totalSangriasHoje = movs
+                .filter(m => m.tipo === 'sangria')
+                .reduce((acc, m) => acc + Math.abs(m.valor), 0);
+
+            const volumeEntradas = fisicoEntradas + digitalEntradas;
 
             setStats({
-                saldoConsolidado: saldoTotal,
-                saldoFisico: saldoFisico,
-                saldoDigital: saldoDigital,
-                totalSangriasHoje: todasMovs.filter(m => m.tipo === 'sangria').reduce((acc: number, m: any) => acc + m.valor, 0),
+                saldoConsolidado,
+                saldoFisico,
+                saldoDigital,
+                totalSangriasHoje,
                 terminaisAtivos: sessoes.length,
-                volumeEntradas: fisicoEntradas + digitalEntradas
+                volumeEntradas
             });
 
         } catch (error) {
-            console.error('Erro ao buscar dados do gestor:', error);
+            console.error('[useGestorCaixa] Erro ao buscar dados:', error);
         } finally {
             setLoading(false);
         }
@@ -91,9 +138,9 @@ export function useGestorCaixa() {
     useEffect(() => {
         fetchData();
 
-        // Subscription para tempo real
+        // Realtime subscription
         const channel = supabase
-            .channel('caixa_changes')
+            .channel('gestor-caixa-updates')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'caixa_movimentacoes' }, () => fetchData())
             .on('postgres_changes', { event: '*', schema: 'public', table: 'caixa_sessoes' }, () => fetchData())
             .subscribe();
@@ -101,8 +148,7 @@ export function useGestorCaixa() {
         return () => {
             supabase.removeChannel(channel);
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [lojaAtual]);
+    }, [fetchData, supabase]);
 
     return {
         sessoesAtivas,
