@@ -395,7 +395,7 @@ export function AuditoriaFechamentos() {
                     ) : (
                         <div className="table-container pt-0">
                             <table>
-                               <thead>
+                              <thead>
     <tr>
         <th>Data Turno</th>
         <th>Data Fechamento</th>
@@ -408,31 +408,39 @@ export function AuditoriaFechamentos() {
 </thead>
 <tbody>
     {fechamentos.map((f) => (
-        <tr key={f.id} ...>
+        <tr
+            key={f.id}
+            onClick={() => setSelectedFechamento(f)}
+            className={`cursor-pointer hover:bg-bg-card-hover transition-colors ${
+                selectedFechamento?.id === f.id ? 'bg-primary/5 border-l-4 border-primary' : ''
+            }`}
+        >
             <td className="text-xs">
-                {format(new Date(f.data_turno), 'dd/MM/yyyy', { locale: ptBR })}
+                {f.data_turno ? format(new Date(f.data_turno), 'dd/MM/yyyy', { locale: ptBR }) : '-'}
             </td>
             <td className="text-xs">
                 {f.data_fechamento ? format(new Date(f.data_fechamento), 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '-'}
             </td>
-                                            <td>
-                                                <span className={`px-2 py-1 rounded-lg text-xs font-black ${f.tipo === 'tfl' ? 'bg-blue-500/10 text-blue-400' : 'bg-purple-500/10 text-purple-400'
-                                                    }`}>
-                                                    {f.terminal_id}
-                                                </span>
-                                            </td>
-                                            <td className="text-xs opacity-60">{f.operador_nome}</td>
-                                            <td>{getStatusBadge(f.status_validacao)}</td>
-                                            <td className={`font-bold text-right ${Math.abs(f.divergencia) < 0.01 ? 'text-success' : 'text-danger'
-                                                }`}>
-                                                R$ {f.divergencia.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                            </td>
-                                            <td className="text-right">
-                                                <ChevronRight size={16} className="text-muted" />
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
+            <td>
+                <span className={`px-2 py-1 rounded-lg text-xs font-black ${
+                    f.tipo === 'tfl' ? 'bg-blue-500/10 text-blue-400' : 'bg-purple-500/10 text-purple-400'
+                }`}>
+                    {f.terminal_id}
+                </span>
+            </td>
+            <td className="text-xs opacity-60">{f.operador_nome}</td>
+            <td>{getStatusBadge(f.status_validacao)}</td>
+            <td className={`font-bold text-right ${
+                Math.abs(f.divergencia) < 0.01 ? 'text-success' : 'text-danger'
+            }`}>
+                R$ {f.divergencia.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            </td>
+            <td className="text-right">
+                <ChevronRight size={16} className="text-muted" />
+            </td>
+        </tr>
+    ))}
+</tbody>
                             </table>
                         </div>
                     )}
