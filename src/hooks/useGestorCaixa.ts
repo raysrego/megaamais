@@ -2,10 +2,9 @@
 
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
-import { CaixaSessao, CaixaMovimentacao } from './useCaixa';
+import { CaixaSessao } from './useCaixa';
 import { useLoja } from '@/contexts/LojaContext';
 
-// Tipos refinados
 export interface MovimentacaoRecente {
     id: number;
     tipo: string;
@@ -56,27 +55,39 @@ export function useGestorCaixa() {
         }
         setLoading(true);
         try {
+            const hoje = new Date();
+            hoje.setHours(0, 0, 0, 0);
+            const hojeISO = hoje.toISOString();
+
             // Executa as queries em paralelo
             const [sessoesResult, movsResult] = await Promise.all([
-                // 1. Buscar sessões abertas
+                // 1. Buscar sessões abertas com join em terminais
                 supabase
                     .from('caixa_sessoes')
-                    .select('*, terminais!terminal_id_ref!inner(codigo, descricao, loja_id)')
+                    .select(`
+                        *,
+                        terminais!caixa_sessoes_terminal_id_ref_fkey (codigo, descricao, loja_id)
+                    `)
                     .eq('status', 'aberto')
                     .eq('terminais.loja_id', lojaAtual.id),
 
-                // 2. Buscar movimentações de hoje
-                (async () => {
-                    const hoje = new Date();
-                    hoje.setHours(0, 0, 0, 0);
-                    const { data, error } = await supabase
-                        .from('caixa_movimentacoes')
-                        .select('id, tipo, valor, descricao, created_at, caixa_sessoes!inner(terminal_id)')
-                        .gte('created_at', hoje.toISOString())
-                        .eq('caixa_sessoes.terminais.loja_id', lojaAtual.id)
-                        .order('created_at', { ascending: false });
-                    return { data, error };
-                })()
+                // 2. Buscar movimentações de hoje com join em caixa_sessoes e terminais
+                supabase
+                    .from('caixa_movimentacoes')
+                    .select(`
+                        id,
+                        tipo,
+                        valor,
+                        descricao,
+                        created_at,
+                        caixa_sessoes!inner (
+                            terminal_id,
+                            terminais!caixa_sessoes_terminal_id_ref_fkey (loja_id)
+                        )
+                    `)
+                    .gte('created_at', hojeISO)
+                    .eq('caixa_sessoes.terminais.loja_id', lojaAtual.id)
+                    .order('created_at', { ascending: false })
             ]);
 
             if (sessoesResult.error) throw sessoesResult.error;
@@ -85,7 +96,7 @@ export function useGestorCaixa() {
             const sessoes = sessoesResult.data || [];
             const movsRaw = movsResult.data || [];
 
-            // Mapear movimentações para o formato esperado (caixa_sessoes como objeto, não array)
+            // Mapear movimentações para o formato esperado
             const movs: MovimentacaoRecente[] = movsRaw.map((mov: any) => ({
                 id: mov.id,
                 tipo: mov.tipo,
@@ -93,7 +104,7 @@ export function useGestorCaixa() {
                 descricao: mov.descricao,
                 created_at: mov.created_at,
                 caixa_sessoes: {
-                    terminal_id: mov.caixa_sessoes.terminal_id
+                    terminal_id: mov.caixa_sessoes?.terminal_id || 'N/A'
                 }
             }));
 
