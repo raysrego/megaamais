@@ -10,6 +10,7 @@ import {
     ArrowDownCircle,
     DollarSign
 } from 'lucide-react';
+import { MoneyInput } from '../ui/MoneyInput'; // ajuste o path conforme necessário
 import { CaixaSessao } from '@/hooks/useCaixa';
 
 interface TransacaoBase {
@@ -24,6 +25,8 @@ interface ModalFechamentoCaixaProps {
     onFinish: (result: {
         observacoes?: string;
         tflData?: any;
+        valorCofre?: number;
+        valorPixExterno?: number;
     }) => Promise<void>; // Importante: deve retornar Promise
 }
 
@@ -32,6 +35,8 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
     const [justificativa, setJustificativa] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
     const [isSuccess, setIsSuccess] = useState(false);
+    const [valorCofre, setValorCofre] = useState(0);
+    const [valorPixExterno, setValorPixExterno] = useState(0);
 
     const totalCreditos = useMemo(() => {
         return transacoes
@@ -59,7 +64,7 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
     const temFundoCaixa = sessao?.tem_fundo_caixa ?? true;
 
     const handleConfirm = async () => {
-        console.log('[Modal] handleConfirm iniciado', { confirmado, justificativa });
+        console.log('[Modal] handleConfirm iniciado', { confirmado, justificativa, valorCofre, valorPixExterno });
 
         if (confirmado === null) {
             console.warn('[Modal] confirmado é null, abortando');
@@ -79,10 +84,12 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
             : '';
 
         try {
-            console.log('[Modal] Chamando onFinish com', { observacoes, tflData: {} });
+            console.log('[Modal] Chamando onFinish com', { observacoes, tflData: {}, valorCofre, valorPixExterno });
             await onFinish({
                 observacoes: observacoes || undefined,
-                tflData: {}
+                tflData: {},
+                valorCofre,
+                valorPixExterno
             });
             console.log('[Modal] onFinish resolved com sucesso');
             setIsSuccess(true);
@@ -152,6 +159,35 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
                                 <span className={saldoEsperado >= 0 ? 'text-success' : 'text-danger'}>
                                     R$ {saldoEsperado.toFixed(2)}
                                 </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* NOVOS CAMPOS: valor cofre e pix externo */}
+                    <div className="bg-surface-subtle p-4 rounded-xl border border-border mb-6">
+                        <p className="text-xs font-bold mb-3">Informações Adicionais (opcional)</p>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-xs font-medium text-muted mb-1 block">
+                                    Valor colocado no cofre
+                                </label>
+                                <MoneyInput
+                                    value={valorCofre}
+                                    onValueChange={setValorCofre}
+                                    placeholder="0,00"
+                                    disabled={isProcessing}
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs font-medium text-muted mb-1 block">
+                                    Valor de PIX de jogos externos
+                                </label>
+                                <MoneyInput
+                                    value={valorPixExterno}
+                                    onValueChange={setValorPixExterno}
+                                    placeholder="0,00"
+                                    disabled={isProcessing}
+                                />
                             </div>
                         </div>
                     </div>
