@@ -31,7 +31,7 @@ export interface ResumoFinanceiro {
 }
 
 export function useFinanceiro() {
-    const supabase = createBrowserSupabaseClient();
+    const supabase = useMemo(() => createBrowserSupabaseClient(), []);
     const [transacoes, setTransacoes] = useState<TransacaoFinanceira[]>([]);
     const [resumo, setResumo] = useState<ResumoFinanceiro | null>(null);
     const [loading, setLoading] = useState(true);
