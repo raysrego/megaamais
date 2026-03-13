@@ -37,6 +37,7 @@ import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmContext';
 
 type Aba = 'receitas' | 'despesas' | 'fechamento';
+type StatusTransacao = 'pendente' | 'pago';
 
 interface ExclusaoState {
     emProgresso: boolean;
@@ -62,6 +63,10 @@ export function VisaoGestor() {
     const { toast } = useToast();
     const confirm = useConfirm();
 
+    // Controle de montagem e abortamento de requisições
+    const mounted = useRef(true);
+    const abortControllerRef = useRef<AbortController | null>(null);
+
     // Estado para controle de exclusão
     const [exclusaoState, setExclusaoState] = useState<ExclusaoState>({
         emProgresso: false,
@@ -69,7 +74,7 @@ export function VisaoGestor() {
         erro: null
     });
 
-    // Filtros
+    // Filtros globais
     const [ano, setAno] = useState(new Date().getFullYear());
     const [anosDisponiveis, setAnosDisponiveis] = useState<number[]>([new Date().getFullYear()]);
     const [mesSelecionado, setMesSelecionado] = useState(new Date().getMonth() + 1);
@@ -99,55 +104,77 @@ export function VisaoGestor() {
         modalidade: 'VARIAVEL' as 'FIXO_MENSAL' | 'FIXO_VARIAVEL' | 'VARIAVEL'
     });
 
-    // Função segura para buscar transações (sem AbortController, apenas com tratamento de erro)
+    // Função segura para buscar transações com AbortController
     const buscarTransacoesSeguro = useCallback(async (
         anoParam: number,
         mesParam: number,
-        lojaId: string | null
+        lojaId: string | null,
+        signal?: AbortSignal
     ) => {
         try {
-            await fetchTransacoes(anoParam, mesParam, lojaId);
-            setDataUltimaAtualizacao(new Date());
+            await fetchTransacoes(anoParam, mesParam, lojaId, signal);
+            if (mounted.current) {
+                setDataUltimaAtualizacao(new Date());
+            }
         } catch (error: any) {
+            if (error.name === 'AbortError') {
+                console.log('[FINANCEIRO] Requisição abortada');
+                return;
+            }
             console.error('[FINANCEIRO] Erro ao buscar transações:', error);
-            toast({
-                message: 'Erro ao carregar dados: ' + getErrorMessage(error),
-                type: 'error'
-            });
+            if (mounted.current) {
+                toast({
+                    message: 'Erro ao carregar dados: ' + getErrorMessage(error),
+                    type: 'error'
+                });
+            }
         }
     }, [fetchTransacoes, toast]);
 
-    // Efeito para buscar dados iniciais com proteção contra desmontagem
+    // Efeito para buscar dados iniciais com proteção contra desmontagem e abortamento
     useEffect(() => {
-        let isMounted = true;
+        mounted.current = true;
+        abortControllerRef.current = new AbortController();
 
         const carregarDados = async () => {
-            await buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null);
-            if (isMounted) {
-                // Qualquer ação pós-carregamento (se necessário)
-            }
+            await buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null, abortControllerRef.current?.signal);
         };
 
         carregarDados();
-        fetchItens(lojaAtual?.id || null);
 
-        fetchAnosDisponiveis(lojaAtual?.id || null).then(anos => {
-            if (isMounted && anos.length > 0) {
+        // Buscar itens e anos disponíveis
+        const fetchItensPromise = fetchItens(lojaAtual?.id || null).catch(error => {
+            if (mounted.current) {
+                console.error('[FINANCEIRO] Erro ao buscar itens:', error);
+                toast({ message: 'Erro ao carregar categorias', type: 'error' });
+            }
+        });
+
+        const fetchAnosPromise = fetchAnosDisponiveis(lojaAtual?.id || null).then(anos => {
+            if (mounted.current && anos.length > 0) {
                 setAnosDisponiveis(anos);
             }
         }).catch(error => {
-            console.error('[FINANCEIRO] Erro ao buscar anos disponíveis:', error);
+            if (mounted.current) {
+                console.error('[FINANCEIRO] Erro ao buscar anos disponíveis:', error);
+                toast({ message: 'Erro ao carregar anos', type: 'error' });
+            }
         });
 
         return () => {
-            isMounted = false;
+            mounted.current = false;
+            abortControllerRef.current?.abort();
         };
-    }, [ano, lojaAtual?.id, mesSelecionado, visualizacaoAnual, buscarTransacoesSeguro, fetchItens, fetchAnosDisponiveis]);
+    }, [ano, lojaAtual?.id, mesSelecionado, visualizacaoAnual, buscarTransacoesSeguro, fetchItens, fetchAnosDisponiveis, toast]);
 
     // Função para refresh seguro
     const handleRefresh = useCallback(async () => {
-        await buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null);
-        toast({ message: 'Dados atualizados!', type: 'success' });
+        abortControllerRef.current?.abort();
+        abortControllerRef.current = new AbortController();
+        await buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null, abortControllerRef.current.signal);
+        if (mounted.current) {
+            toast({ message: 'Dados atualizados!', type: 'success' });
+        }
     }, [ano, mesSelecionado, visualizacaoAnual, lojaAtual?.id, buscarTransacoesSeguro, toast]);
 
     // Auto-preenchimento inteligente ao mudar o item
@@ -234,48 +261,50 @@ export function VisaoGestor() {
         };
     }, [transacoesDoPeriodo]);
 
-    // Preparar dados para o Gráfico – usando estrutura aninhada por loja
+    // Preparar dados para o Gráfico – otimizado (um único loop)
     const chartData = useMemo(() => {
-        return Array.from({ length: 12 }, (_, i) => {
+        // Inicializa array de 12 meses
+        const monthsData = Array.from({ length: 12 }, (_, i) => {
             const monthNum = i + 1;
-            const monthName = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'][i];
-
-            const monthTransacoes = transacoes.filter(t => {
-                if (!t.data_vencimento) return false;
-                const parts = t.data_vencimento.split('-');
-                if (parts.length < 2) return false;
-                const m = parseInt(parts[1]);
-                const isType = abaAtiva === 'receitas' ? t.tipo === 'receita' : t.tipo === 'despesa';
-                return m === monthNum && isType;
-            });
-
-            const basePoint: any = {
-                month: monthName,
+            return {
+                month: ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'][i],
                 fullLabel: new Date(ano, i, 1).toLocaleString('pt-BR', { month: 'long' }),
-                value: monthTransacoes.reduce((acc, curr) => acc + (curr.valor || 0), 0)
+                value: 0,
+                lojas: {} as Record<string, number>
             };
-
-            // Se estiver em modo "todas as filiais", adiciona totais por loja em objeto aninhado
-            if (!lojaAtual) {
-                const lojasTotais: Record<string, number> = {};
-                lojasDisponiveis.forEach(loja => {
-                    const totalLoja = monthTransacoes
-                        .filter(t => t.loja_id === loja.id)
-                        .reduce((acc, curr) => acc + (curr.valor || 0), 0);
-                    lojasTotais[loja.id] = totalLoja;
-                });
-                basePoint.lojas = lojasTotais;
-            }
-
-            return basePoint;
         });
-    }, [transacoes, ano, abaAtiva, lojaAtual, lojasDisponiveis]);
+
+        // Popula com os dados das transações
+        transacoes.forEach(t => {
+            if (!t.data_vencimento) return;
+            const parts = t.data_vencimento.split('-');
+            if (parts.length < 2) return;
+            const tAno = parseInt(parts[0]);
+            if (tAno !== ano) return;
+            const tMes = parseInt(parts[1]) - 1; // 0-based
+            if (tMes < 0 || tMes > 11) return;
+
+            const isType = abaAtiva === 'receitas' ? t.tipo === 'receita' : t.tipo === 'despesa';
+            if (!isType) return;
+
+            monthsData[tMes].value += t.valor || 0;
+
+            if (!lojaAtual) {
+                const lojaId = t.loja_id;
+                if (lojaId) {
+                    monthsData[tMes].lojas[lojaId] = (monthsData[tMes].lojas[lojaId] || 0) + (t.valor || 0);
+                }
+            }
+        });
+
+        return monthsData;
+    }, [transacoes, ano, abaAtiva, lojaAtual]);
 
     // Adapta as séries para o gráfico usando o novo formato
     const chartSeries = !lojaAtual ? lojasDisponiveis.map((loja, idx) => {
         const colors = ['#3B82F6', '#F59E0B', '#8B5CF6', '#EC4899', '#10B981'];
         return {
-            key: loja.id, // Usamos o ID diretamente, pois acessaremos via lojas[loja.id]
+            key: loja.id,
             label: loja.nome_fantasia,
             color: colors[idx % colors.length]
         };
@@ -319,7 +348,6 @@ export function VisaoGestor() {
     };
 
     const handleDeleteClick = async (t: TransacaoFinanceira) => {
-        // Prevenir múltiplas exclusões simultâneas
         if (exclusaoState.emProgresso) {
             toast({
                 message: 'Uma exclusão já está em andamento. Aguarde...',
@@ -351,8 +379,7 @@ export function VisaoGestor() {
                 type: 'success'
             });
 
-            // Atualizar a lista após exclusão
-            await buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null);
+            await buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null, abortControllerRef.current?.signal);
 
         } catch (error: any) {
             console.error('[FINANCEIRO] Erro ao excluir:', error);
@@ -379,7 +406,6 @@ export function VisaoGestor() {
 
     const handleSave = async () => {
         try {
-            // Validações
             if (!formData.loja_id) {
                 toast({
                     message: "⚠️ Por favor, selecione a Filial para este lançamento.",
@@ -404,7 +430,6 @@ export function VisaoGestor() {
                 return;
             }
 
-          
             setProcessing(true);
 
             const catAtual = categorias.find(c => c.item === formData.item);
@@ -424,7 +449,7 @@ export function VisaoGestor() {
                 frequencia: freqFinal,
                 loja_id: formData.loja_id,
                 item_financeiro_id: catAtual?.id || null,
-                status: (editingTransaction?.status || 'pendente') as any,
+                status: (editingTransaction?.status || 'pendente') as StatusTransacao,
                 data_pagamento: editingTransaction?.data_pagamento || null
             };
 
@@ -439,10 +464,9 @@ export function VisaoGestor() {
             setShowModal(false);
             setEditingTransaction(null);
 
-            // Atualizar dados após salvar
             await Promise.all([
                 fetchItens(lojaAtual?.id || null).catch(err => console.error('[FINANCEIRO] Erro ao atualizar itens:', err)),
-                buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null)
+                buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null, abortControllerRef.current?.signal)
             ]);
 
         } catch (error: any) {
@@ -470,7 +494,7 @@ export function VisaoGestor() {
             toast({ message: 'Baixa realizada com sucesso!', type: 'success' });
             setModalBaixaOpen(false);
             setTransacaoParaBaixa(null);
-            await buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null);
+            await buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null, abortControllerRef.current?.signal);
         } catch (error: any) {
             console.error('[FINANCEIRO] Erro ao dar baixa:', error);
             toast({
@@ -482,6 +506,69 @@ export function VisaoGestor() {
 
     const handlePrint = () => {
         window.print();
+    };
+
+    const handlePrintDRE = () => {
+        // Abre uma nova janela com apenas o conteúdo do DRE para impressão
+        const printWindow = window.open('', '_blank');
+        if (!printWindow) {
+            toast({ message: 'Permita pop-ups para imprimir', type: 'error' });
+            return;
+        }
+
+        const estilo = `
+            <style>
+                body { font-family: Arial, sans-serif; padding: 20px; }
+                h1 { font-size: 20px; margin-bottom: 10px; }
+                h2 { font-size: 16px; margin-top: 20px; border-bottom: 1px solid #ccc; }
+                table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+                th, td { padding: 8px; text-align: left; border: 1px solid #ddd; }
+                th { background-color: #f2f2f2; }
+                .valor { text-align: right; }
+                .total { font-weight: bold; background-color: #e8e8e8; }
+                .lucro { color: green; }
+                .prejuizo { color: red; }
+            </style>
+        `;
+
+        const periodo = visualizacaoAnual ? `Ano ${ano}` : `${new Date(ano, mesSelecionado-1, 1).toLocaleString('pt-BR', { month: 'long' })}/${ano}`;
+
+        const html = `
+            <html>
+                <head><title>DRE - ${periodo}</title>${estilo}</head>
+                <body>
+                    <h1>Demonstração de Resultados - ${periodo}</h1>
+                    <h2>Entradas</h2>
+                    <table>
+                        <thead><tr><th>Categoria</th><th class="valor">Valor (R$)</th></tr></thead>
+                        <tbody>
+                            ${resumoCalculado.detalheReceitas.map(c => `<tr><td>${c.item}</td><td class="valor">${c.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td></tr>`).join('')}
+                            <tr class="total"><td>Total de Entradas</td><td class="valor">${resumoCalculado.receitas.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h2>Saídas</h2>
+                    <table>
+                        <thead><tr><th>Categoria</th><th class="valor">Valor (R$)</th></tr></thead>
+                        <tbody>
+                            ${resumoCalculado.detalheDespesas.map(c => `<tr><td>${c.item}</td><td class="valor">${c.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td></tr>`).join('')}
+                            <tr class="total"><td>Total de Saídas</td><td class="valor">${resumoCalculado.despesas.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h2>Resultado Líquido</h2>
+                    <table>
+                        <tr><td>Total de Entradas</td><td class="valor">${resumoCalculado.receitas.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td></tr>
+                        <tr><td>Total de Saídas</td><td class="valor">${resumoCalculado.despesas.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td></tr>
+                        <tr class="total ${lucroLiquidoReal >= 0 ? 'lucro' : 'prejuizo'}"><td>Resultado</td><td class="valor">${lucroLiquidoReal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td></tr>
+                    </table>
+                </body>
+            </html>
+        `;
+
+        printWindow.document.write(html);
+        printWindow.document.close();
+        printWindow.print();
     };
 
     const handleExport = () => {
@@ -559,9 +646,9 @@ export function VisaoGestor() {
                                 const selected = lojasDisponiveis.find(l => l.id === val);
                                 if (selected) setLojaAtual(selected);
                             }
-                            // Resetar seleção de mês ao trocar de loja
                             setMesSelecionado(new Date().getMonth() + 1);
                         }}
+                        aria-label="Selecionar filial"
                     >
                         <option value="">Todas as Filiais</option>
                         {lojasDisponiveis.map(loja => (
@@ -610,18 +697,21 @@ export function VisaoGestor() {
                 <button
                     className={`btn ${abaAtiva === 'receitas' ? 'btn-primary' : 'btn-ghost'}`}
                     onClick={() => setAbaAtiva('receitas')}
+                    aria-label="Receitas"
                 >
                     <TrendingUp size={16} /> Receitas
                 </button>
                 <button
                     className={`btn ${abaAtiva === 'despesas' ? 'btn-primary' : 'btn-ghost'}`}
                     onClick={() => setAbaAtiva('despesas')}
+                    aria-label="Despesas"
                 >
                     <TrendingDown size={16} /> Despesas
                 </button>
                 <button
                     className={`btn ${abaAtiva === 'fechamento' ? 'btn-primary' : 'btn-ghost'}`}
                     onClick={() => setAbaAtiva('fechamento')}
+                    aria-label="Fechamento DRE"
                 >
                     <BarChart3 size={16} /> Fechamento (DRE)
                 </button>
@@ -642,7 +732,7 @@ export function VisaoGestor() {
                             </p>
                         )}
                     </div>
-                    {abaAtiva !== 'fechamento' && (
+                    {abaAtiva !== 'fechamento' ? (
                         <div className="flex gap-3 items-center">
                             {/* Botão Refresh */}
                             <button
@@ -650,6 +740,7 @@ export function VisaoGestor() {
                                 onClick={handleRefresh}
                                 title="Atualizar dados"
                                 disabled={loading}
+                                aria-label="Atualizar"
                             >
                                 <RefreshCcw size={16} className={loading ? 'animate-spin' : ''} />
                             </button>
@@ -665,6 +756,9 @@ export function VisaoGestor() {
                                     }`}
                                     onClick={() => setVisualizacaoAnual(!visualizacaoAnual)}
                                     title={visualizacaoAnual ? 'Clique para ver mês atual' : 'Clique para ver ano completo'}
+                                    role="switch"
+                                    aria-checked={visualizacaoAnual}
+                                    aria-label="Alternar visualização anual"
                                 >
                                     <div
                                         className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all duration-300 shadow-lg ${
@@ -683,6 +777,7 @@ export function VisaoGestor() {
                                 onChange={e => setAno(parseInt(e.target.value))}
                                 title="Selecionar ano"
                                 disabled={loading}
+                                aria-label="Selecionar ano"
                             >
                                 {[...new Set([new Date().getFullYear(), ano, ...anosDisponiveis])]
                                     .sort((a, b) => b - a)
@@ -700,6 +795,7 @@ export function VisaoGestor() {
                                 onClick={handleExport}
                                 title="Exportar CSV"
                                 disabled={filteredList.length === 0}
+                                aria-label="Exportar CSV"
                             >
                                 <FileText size={16} />
                             </button>
@@ -707,6 +803,7 @@ export function VisaoGestor() {
                                 className="btn btn-sm btn-ghost text-muted hover:text-white"
                                 onClick={handlePrint}
                                 title="Imprimir / Salvar PDF"
+                                aria-label="Imprimir"
                             >
                                 <Printer size={16} />
                             </button>
@@ -719,6 +816,7 @@ export function VisaoGestor() {
                                 onClick={() => setShowReplicarModal(true)}
                                 title="Copiar Despesas do Mês Anterior"
                                 disabled={loading}
+                                aria-label="Replicar mês anterior"
                             >
                                 <Copy size={14} /> Replicar Mês
                             </button>
@@ -727,8 +825,62 @@ export function VisaoGestor() {
                                 className="btn btn-sm btn-accent"
                                 onClick={() => handleOpenModalNew(abaAtiva === 'receitas' ? 'receita' : 'despesa')}
                                 disabled={loading}
+                                aria-label="Novo lançamento"
                             >
                                 <Plus size={14} /> Novo Lançamento
+                            </button>
+                        </div>
+                    ) : (
+                        // Controles específicos do DRE (filtro de período + impressão DRE)
+                        <div className="flex gap-3 items-center">
+                            <select
+                                className="input input-sm font-bold text-xs px-3 py-1"
+                                value={ano}
+                                onChange={e => setAno(parseInt(e.target.value))}
+                                aria-label="Ano"
+                            >
+                                {[...new Set([new Date().getFullYear(), ano, ...anosDisponiveis])]
+                                    .sort((a, b) => b - a)
+                                    .map(anoVal => (
+                                        <option key={anoVal} value={anoVal}>{anoVal}</option>
+                                    ))
+                                }
+                            </select>
+
+                            <select
+                                className="input input-sm font-bold text-xs px-3 py-1"
+                                value={mesSelecionado}
+                                onChange={e => setMesSelecionado(parseInt(e.target.value))}
+                                disabled={visualizacaoAnual}
+                                aria-label="Mês"
+                            >
+                                {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                                    <option key={m} value={m}>
+                                        {new Date(ano, m-1, 1).toLocaleString('pt-BR', { month: 'long' })}
+                                    </option>
+                                ))}
+                            </select>
+
+                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5">
+                                <span className="text-xs">Ano Completo:</span>
+                                <div
+                                    className={`relative w-10 h-5 rounded-full cursor-pointer transition-all ${
+                                        visualizacaoAnual ? 'bg-blue-500' : 'bg-white/20'
+                                    }`}
+                                    onClick={() => setVisualizacaoAnual(!visualizacaoAnual)}
+                                    role="switch"
+                                    aria-checked={visualizacaoAnual}
+                                >
+                                    <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${visualizacaoAnual ? 'left-5' : 'left-0.5'}`} />
+                                </div>
+                            </div>
+
+                            <button
+                                className="btn btn-sm btn-primary"
+                                onClick={handlePrintDRE}
+                                aria-label="Imprimir DRE"
+                            >
+                                <Printer size={16} /> Imprimir DRE
                             </button>
                         </div>
                     )}
@@ -958,6 +1110,7 @@ export function VisaoGestor() {
                                                             onClick={() => handleBaixaClick(t)}
                                                             title="Dar Baixa"
                                                             disabled={deletando}
+                                                            aria-label="Dar baixa"
                                                         >
                                                             <CheckCircle2 size={14} />
                                                         </button>
@@ -967,6 +1120,7 @@ export function VisaoGestor() {
                                                         onClick={() => handleEditClick(t)}
                                                         title="Editar"
                                                         disabled={deletando}
+                                                        aria-label="Editar"
                                                     >
                                                         <Pencil size={14} />
                                                     </button>
@@ -977,6 +1131,7 @@ export function VisaoGestor() {
                                                         onClick={() => handleDeleteClick(t)}
                                                         title={deletando ? 'Excluindo...' : 'Excluir'}
                                                         disabled={deletando}
+                                                        aria-label="Excluir"
                                                     >
                                                         {deletando ? (
                                                             <Loader2 size={14} className="animate-spin" />
@@ -1001,6 +1156,7 @@ export function VisaoGestor() {
                                     <button
                                         className="btn btn-xs btn-ghost text-danger ml-auto"
                                         onClick={() => setExclusaoState(prev => ({ ...prev, erro: null }))}
+                                        aria-label="Fechar"
                                     >
                                         <X size={12} />
                                     </button>
@@ -1019,7 +1175,7 @@ export function VisaoGestor() {
                 anoAtual={ano}
                 mesAtual={mesSelecionado}
                 onSuccess={() => {
-                    buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null);
+                    buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null, abortControllerRef.current?.signal);
                 }}
             />
 
@@ -1060,6 +1216,7 @@ export function VisaoGestor() {
                                 onClick={() => setShowModal(false)}
                                 disabled={processing}
                                 className="text-muted hover:text-white disabled:opacity-50"
+                                aria-label="Fechar"
                             >
                                 <X size={18} />
                             </button>
@@ -1075,6 +1232,7 @@ export function VisaoGestor() {
                                         value={formData.loja_id}
                                         onChange={e => setFormData({ ...formData, loja_id: e.target.value })}
                                         disabled={processing}
+                                        aria-label="Filial"
                                     >
                                         <option value="">Selecione a Filial...</option>
                                         {lojasDisponiveis.map(loja => (
@@ -1098,6 +1256,7 @@ export function VisaoGestor() {
                                         placeholder="Digite ou selecione..."
                                         autoComplete="off"
                                         disabled={processing}
+                                        aria-label="Item do catálogo"
                                     />
                                     <datalist id="categorias-list">
                                         {categorias
@@ -1121,6 +1280,7 @@ export function VisaoGestor() {
                                     onChange={e => setFormData({ ...formData, descricao: e.target.value })}
                                     placeholder="Ex: Ref. ao conserto da porta"
                                     disabled={processing}
+                                    aria-label="Descrição complementar"
                                 />
                             </div>
 
@@ -1141,6 +1301,7 @@ export function VisaoGestor() {
                                         value={formData.vencimento}
                                         onChange={e => setFormData({ ...formData, vencimento: e.target.value })}
                                         disabled={processing}
+                                        aria-label="Data de vencimento"
                                     />
                                 </div>
                             </div>
@@ -1170,6 +1331,7 @@ export function VisaoGestor() {
                                                 }`}
                                                 onClick={() => setFormData({ ...formData, modalidade: opt.key })}
                                                 disabled={processing}
+                                                aria-label={opt.label}
                                             >
                                                 <span className="font-bold block">{opt.label}</span>
                                                 <span className="text-[10px] opacity-70">{opt.desc}</span>
@@ -1185,6 +1347,7 @@ export function VisaoGestor() {
                                 className="btn btn-ghost"
                                 onClick={() => setShowModal(false)}
                                 disabled={processing}
+                                aria-label="Cancelar"
                             >
                                 Cancelar
                             </button>
@@ -1192,6 +1355,7 @@ export function VisaoGestor() {
                                 className={`btn ${modalType === 'receita' ? 'btn-primary' : 'btn-danger'}`}
                                 onClick={handleSave}
                                 disabled={processing || !formData.loja_id || !formData.item || formData.valor <= 0}
+                                aria-label="Salvar"
                             >
                                 {processing ? (
                                     <>
