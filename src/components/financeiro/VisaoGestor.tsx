@@ -54,7 +54,7 @@ function getErrorMessage(error: unknown): string {
 
 export function VisaoGestor() {
     const { transacoes, resumo, loading, fetchTransacoes, fetchAnosDisponiveis, salvarTransacao, darBaixa, atualizarTransacao, excluirTransacao } = useFinanceiro();
-    const { itens: categorias, atualizarItem, fetchItens } = useItensFinanceiros();
+    const { itens: categorias, fetchItens } = useItensFinanceiros();
     const { getParametro } = useParametros();
 
     const { lojaAtual, lojasDisponiveis, setLojaAtual } = useLoja();
@@ -63,9 +63,8 @@ export function VisaoGestor() {
     const { toast } = useToast();
     const confirm = useConfirm();
 
-    // Controle de montagem e abortamento de requisições
+    // Flag para verificar se o componente ainda está montado
     const mounted = useRef(true);
-    const abortControllerRef = useRef<AbortController | null>(null);
 
     // Estado para controle de exclusão
     const [exclusaoState, setExclusaoState] = useState<ExclusaoState>({
@@ -104,23 +103,18 @@ export function VisaoGestor() {
         modalidade: 'VARIAVEL' as 'FIXO_MENSAL' | 'FIXO_VARIAVEL' | 'VARIAVEL'
     });
 
-    // Função segura para buscar transações com AbortController
+    // Função segura para buscar transações (sem signal)
     const buscarTransacoesSeguro = useCallback(async (
         anoParam: number,
         mesParam: number,
-        lojaId: string | null,
-        signal?: AbortSignal
+        lojaId: string | null
     ) => {
         try {
-            await fetchTransacoes(anoParam, mesParam, lojaId, signal);
+            await fetchTransacoes(anoParam, mesParam, lojaId);
             if (mounted.current) {
                 setDataUltimaAtualizacao(new Date());
             }
         } catch (error: any) {
-            if (error.name === 'AbortError') {
-                console.log('[FINANCEIRO] Requisição abortada');
-                return;
-            }
             console.error('[FINANCEIRO] Erro ao buscar transações:', error);
             if (mounted.current) {
                 toast({
@@ -131,26 +125,24 @@ export function VisaoGestor() {
         }
     }, [fetchTransacoes, toast]);
 
-    // Efeito para buscar dados iniciais com proteção contra desmontagem e abortamento
+    // Efeito para buscar dados iniciais com proteção contra desmontagem
     useEffect(() => {
         mounted.current = true;
-        abortControllerRef.current = new AbortController();
 
         const carregarDados = async () => {
-            await buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null, abortControllerRef.current?.signal);
+            await buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null);
         };
 
         carregarDados();
 
-        // Buscar itens e anos disponíveis
-        const fetchItensPromise = fetchItens(lojaAtual?.id || null).catch(error => {
+        fetchItens(lojaAtual?.id || null).catch(error => {
             if (mounted.current) {
                 console.error('[FINANCEIRO] Erro ao buscar itens:', error);
                 toast({ message: 'Erro ao carregar categorias', type: 'error' });
             }
         });
 
-        const fetchAnosPromise = fetchAnosDisponiveis(lojaAtual?.id || null).then(anos => {
+        fetchAnosDisponiveis(lojaAtual?.id || null).then(anos => {
             if (mounted.current && anos.length > 0) {
                 setAnosDisponiveis(anos);
             }
@@ -163,15 +155,12 @@ export function VisaoGestor() {
 
         return () => {
             mounted.current = false;
-            abortControllerRef.current?.abort();
         };
     }, [ano, lojaAtual?.id, mesSelecionado, visualizacaoAnual, buscarTransacoesSeguro, fetchItens, fetchAnosDisponiveis, toast]);
 
     // Função para refresh seguro
     const handleRefresh = useCallback(async () => {
-        abortControllerRef.current?.abort();
-        abortControllerRef.current = new AbortController();
-        await buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null, abortControllerRef.current.signal);
+        await buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null);
         if (mounted.current) {
             toast({ message: 'Dados atualizados!', type: 'success' });
         }
@@ -330,7 +319,6 @@ export function VisaoGestor() {
     const handleEditClick = (t: TransacaoFinanceira) => {
         setEditingTransaction(t);
         setModalType(t.tipo);
-        const cat = categorias.find(c => c.id === t.item_financeiro_id) || categorias.find(c => c.item === t.item);
         setFormData({
             descricao: t.descricao || '',
             valor: t.valor || 0,
@@ -379,7 +367,7 @@ export function VisaoGestor() {
                 type: 'success'
             });
 
-            await buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null, abortControllerRef.current?.signal);
+            await buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null);
 
         } catch (error: any) {
             console.error('[FINANCEIRO] Erro ao excluir:', error);
@@ -466,7 +454,7 @@ export function VisaoGestor() {
 
             await Promise.all([
                 fetchItens(lojaAtual?.id || null).catch(err => console.error('[FINANCEIRO] Erro ao atualizar itens:', err)),
-                buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null, abortControllerRef.current?.signal)
+                buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null)
             ]);
 
         } catch (error: any) {
@@ -494,7 +482,7 @@ export function VisaoGestor() {
             toast({ message: 'Baixa realizada com sucesso!', type: 'success' });
             setModalBaixaOpen(false);
             setTransacaoParaBaixa(null);
-            await buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null, abortControllerRef.current?.signal);
+            await buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null);
         } catch (error: any) {
             console.error('[FINANCEIRO] Erro ao dar baixa:', error);
             toast({
@@ -605,12 +593,6 @@ export function VisaoGestor() {
     const comissaoBruta = resumoCalculado.receitas;
     const totalDespesas = resumoCalculado.despesas;
     const lucroLiquidoReal = comissaoBruta - totalDespesas;
-
-    const taxaDiretor = getParametro('divisao_diretor', 70) / 100;
-    const taxaOperadores = getParametro('pool_operadores', 30) / 100;
-
-    const cotaDiretor = comissaoBruta * taxaDiretor;
-    const poolOperadores = comissaoBruta * taxaOperadores;
 
     const handleChartClick = (monthNumber: number) => {
         if (visualizacaoAnual) return;
@@ -1175,7 +1157,7 @@ export function VisaoGestor() {
                 anoAtual={ano}
                 mesAtual={mesSelecionado}
                 onSuccess={() => {
-                    buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null, abortControllerRef.current?.signal);
+                    buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null);
                 }}
             />
 
