@@ -27,32 +27,32 @@ export function FinancialGrowthChart({ data, type, year, onBarClick, series, sel
 
     const mesesNomes = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
-    const CustomTooltip = ({ active, payload, label }: any) => {
-        if (active && payload && payload.length) {
-            const monthlyValue = payload.find(p => p.dataKey === 'value' || p.dataKey === Object.keys(payload[0]?.payload?.lojas || {})[0])?.value || 0;
-            const accumulatedValue = payload.find(p => p.dataKey === 'accumulated')?.value || 0;
-            return (
-                <div className="bg-bg-card border border-white/10 p-3 rounded-xl backdrop-blur-md">
-                    <p className="text-[10px] font-bold text-text-muted mb-2 uppercase tracking-widest">{label} de {year}</p>
-                    <div className="space-y-1.5">
-                        <div className="flex justify-between items-center gap-4">
-                            <span className="text-[10px] font-bold text-text-secondary uppercase">Mensal</span>
-                            <span className="text-sm font-black text-white">
-                                R$ {monthlyValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                            </span>
-                        </div>
-                        <div className="flex justify-between items-center gap-4">
-                            <span className="text-[10px] font-bold text-text-secondary uppercase">Acumulado</span>
-                            <span className="text-sm font-black text-blue-400">
-                                R$ {accumulatedValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                            </span>
-                        </div>
+   const CustomTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+        const monthlyValue = payload.find((p: any) => p.dataKey === 'value' || p.dataKey === Object.keys(payload[0]?.payload?.lojas || {})[0])?.value || 0;
+        const accumulatedValue = payload.find((p: any) => p.dataKey === 'accumulated')?.value || 0;
+        return (
+            <div className="bg-bg-card border border-white/10 p-3 rounded-xl backdrop-blur-md">
+                <p className="text-[10px] font-bold text-text-muted mb-2 uppercase tracking-widest">{label} de {year}</p>
+                <div className="space-y-1.5">
+                    <div className="flex justify-between items-center gap-4">
+                        <span className="text-[10px] font-bold text-text-secondary uppercase">Mensal</span>
+                        <span className="text-sm font-black text-white">
+                            R$ {monthlyValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </span>
+                    </div>
+                    <div className="flex justify-between items-center gap-4">
+                        <span className="text-[10px] font-bold text-text-secondary uppercase">Acumulado</span>
+                        <span className="text-sm font-black text-blue-400">
+                            R$ {accumulatedValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </span>
                     </div>
                 </div>
-            );
-        }
-        return null;
-    };
+            </div>
+        );
+    }
+    return null;
+};
 
     return (
         <div className="w-full h-[280px] mt-4 mb-8 select-none" style={{ minHeight: '280px' }}>
