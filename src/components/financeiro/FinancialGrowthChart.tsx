@@ -8,16 +8,26 @@ interface FinancialGrowthChartProps {
     year: number;
     onBarClick?: (month: number) => void;
     series?: { key: string; label: string; color: string }[];
-    selectedMonth?: number; // Mês selecionado (1-12)
-    showAllMonths?: boolean; // Toggle ano completo
+    selectedMonth?: number;
+    showAllMonths?: boolean;
 }
 
-export function FinancialGrowthChart({ data, type, year, onBarClick, series, selectedMonth, showAllMonths = false }: FinancialGrowthChartProps) {
+export function FinancialGrowthChart({
+    data,
+    type,
+    year,
+    onBarClick,
+    series,
+    selectedMonth,
+    showAllMonths = false
+}: FinancialGrowthChartProps) {
     const isReceita = type === 'receita';
     const defaultColor = isReceita ? '#10B981' : '#F43F5E';
-    const neutralColor = '#94a3b8'; // tom mais claro que o anterior
+    const neutralColor = '#94a3b8';
 
-    // Calcular acumulado para cada mês
+    console.log('🎨 FinancialGrowthChart props:', { showAllMonths, selectedMonth, dataLength: data.length });
+
+    // Calcular acumulado
     const dataWithAccumulated = data.map((item, index) => {
         const accumulated = data
             .slice(0, index + 1)
@@ -27,10 +37,8 @@ export function FinancialGrowthChart({ data, type, year, onBarClick, series, sel
 
     const mesesNomes = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
-    // Custom Tooltip
     const CustomTooltip = ({ active, payload, label }: any) => {
         if (active && payload && payload.length) {
-            // Encontra o valor mensal (pode vir de 'value' ou das chaves de lojas)
             const monthlyValue = payload.find((p: any) => p.dataKey === 'value' || p.dataKey === Object.keys(payload[0]?.payload?.lojas || {})[0])?.value || 0;
             const accumulatedValue = payload.find((p: any) => p.dataKey === 'accumulated')?.value || 0;
             return (
@@ -74,10 +82,11 @@ export function FinancialGrowthChart({ data, type, year, onBarClick, series, sel
                         dataKey="month"
                         axisLine={false}
                         tickLine={false}
-                        tick={(props: any) => {
+                        tick={(props) => {
                             const { x, y, payload } = props;
                             const monthIndex = mesesNomes.indexOf(payload.value);
-                            const isActive = !showAllMonths && selectedMonth === monthIndex + 1;
+                            const activeMonth = selectedMonth != null ? Number(selectedMonth) : undefined;
+                            const isActive = !showAllMonths && activeMonth !== undefined && monthIndex + 1 === activeMonth;
                             return (
                                 <text x={x} y={y} dy={10} textAnchor="middle" fill={isActive ? '#fff' : '#64748b'} fontWeight={isActive ? 'bold' : 'normal'} fontSize={10}>
                                     {payload.value}
@@ -93,13 +102,8 @@ export function FinancialGrowthChart({ data, type, year, onBarClick, series, sel
                         tickFormatter={(value) => `R$${value >= 1000 ? `${(value / 1000).toFixed(0)}k` : value}`}
                     />
                     <YAxis yAxisId="right" orientation="right" hide />
-                    <Tooltip
-                        content={<CustomTooltip />}
-                        cursor={{ fill: 'rgba(255,255,255,0.03)', radius: 8 }}
-                        allowEscapeViewBox={{ x: false, y: true }}
-                    />
+                    <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)', radius: 8 }} />
 
-                    {/* Barras principais - se houver series (multiloja) */}
                     {series && series.length > 0 ? (
                         series.map((s, idx) => (
                             <Bar
@@ -110,14 +114,16 @@ export function FinancialGrowthChart({ data, type, year, onBarClick, series, sel
                                 radius={[3, 3, 0, 0]}
                                 maxBarSize={30}
                             >
-                                {data.map((_entry, index) => {
+                                {data.map((entry, index) => {
                                     const month = index + 1;
-                                    const isActive = showAllMonths || (selectedMonth !== undefined && month === selectedMonth);
+                                    const activeMonth = selectedMonth != null ? Number(selectedMonth) : undefined;
+                                    const isActive = showAllMonths || (activeMonth !== undefined && month === activeMonth);
+                                    if (index === 0) console.log('🔍 isActive (primeiro mês):', { showAllMonths, selectedMonth, activeMonth, month, isActive });
                                     return (
                                         <Cell
                                             key={`cell-${s.key}-${index}`}
                                             fill={isActive ? s.color : neutralColor}
-                                            fillOpacity={isActive ? 1 : 0.3}
+                                            fillOpacity={isActive ? 1 : 0.5}
                                             stroke={isActive ? '#ffffff' : 'none'}
                                             strokeWidth={isActive ? 2 : 0}
                                             className={`transition-all duration-300 ${showAllMonths ? 'cursor-default' : 'cursor-pointer hover:fill-opacity-80'}`}
@@ -127,16 +133,17 @@ export function FinancialGrowthChart({ data, type, year, onBarClick, series, sel
                             </Bar>
                         ))
                     ) : (
-                        // Caso padrão (sem series, uma única barra por mês)
                         <Bar yAxisId="left" dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={40}>
-                            {data.map((_entry, index) => {
+                            {data.map((entry, index) => {
                                 const month = index + 1;
-                                const isActive = showAllMonths || (selectedMonth !== undefined && month === selectedMonth);
+                                const activeMonth = selectedMonth != null ? Number(selectedMonth) : undefined;
+                                const isActive = showAllMonths || (activeMonth !== undefined && month === activeMonth);
+                                if (index === 0) console.log('🔍 isActive (primeiro mês):', { showAllMonths, selectedMonth, activeMonth, month, isActive });
                                 return (
                                     <Cell
                                         key={`cell-${index}`}
                                         fill={isActive ? defaultColor : neutralColor}
-                                        fillOpacity={isActive ? 1 : 0.3}
+                                        fillOpacity={isActive ? 1 : 0.5}
                                         stroke={isActive ? '#ffffff' : 'none'}
                                         strokeWidth={isActive ? 2 : 0}
                                         className={`transition-all duration-300 ${showAllMonths ? 'cursor-default' : 'cursor-pointer hover:fill-opacity-80'}`}
