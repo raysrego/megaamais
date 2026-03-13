@@ -77,7 +77,7 @@ export function VisaoGestor() {
     const [mesSelecionado, setMesSelecionado] = useState(new Date().getMonth() + 1);
     const [visualizacaoAnual, setVisualizacaoAnual] = useState(false);
 
-    // Filtros para o DRE (intervalo de datas personalizado)
+    // Filtros para o DRE (intervalo personalizado)
     const hoje = new Date();
     const [dataInicio, setDataInicio] = useState(() => {
         const d = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
@@ -87,6 +87,7 @@ export function VisaoGestor() {
         const d = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0);
         return d.toISOString().split('T')[0];
     });
+    const [modoFiltroDRE, setModoFiltroDRE] = useState<'mensal' | 'personalizado'>('mensal');
 
     // UI State
     const [abaAtiva, setAbaAtiva] = useState<Aba>('receitas');
@@ -297,14 +298,18 @@ export function VisaoGestor() {
         };
     }) : undefined;
 
-    // ----- LÓGICA EXCLUSIVA PARA O DRE (filtro por intervalo de datas) -----
+    // ----- LÓGICA EXCLUSIVA PARA O DRE (filtro dinâmico) -----
     const transacoesDoPeriodoDRE = useMemo(() => {
-        if (!dataInicio || !dataFim) return [];
-        return transacoes.filter(t => {
-            if (!t.data_vencimento) return false;
-            return t.data_vencimento >= dataInicio && t.data_vencimento <= dataFim;
-        });
-    }, [transacoes, dataInicio, dataFim]);
+        if (modoFiltroDRE === 'mensal') {
+            return transacoesDoPeriodo;
+        } else {
+            if (!dataInicio || !dataFim) return [];
+            return transacoes.filter(t => {
+                if (!t.data_vencimento) return false;
+                return t.data_vencimento >= dataInicio && t.data_vencimento <= dataFim;
+            });
+        }
+    }, [modoFiltroDRE, transacoesDoPeriodo, transacoes, dataInicio, dataFim]);
 
     const resumoDRE = useMemo(() => {
         const receitas = transacoesDoPeriodoDRE.filter(t => t.tipo === 'receita');
@@ -329,9 +334,9 @@ export function VisaoGestor() {
     }, [transacoesDoPeriodoDRE]);
 
     const lucroLiquidoDRE = resumoDRE.receitas - resumoDRE.despesas;
-    // ---------------------------------------------------------------------
+    // -----------------------------------------------------------------
 
-    // Handlers de CRUD (mantidos como estavam)
+    // Handlers de CRUD
     const handleOpenModalNew = (tipo: 'receita' | 'despesa') => {
         setModalType(tipo);
         setEditingTransaction(null);
@@ -576,7 +581,7 @@ export function VisaoGestor() {
         printWindow.print();
     };
 
-    // Impressão do DRE (agora usando resumoDRE e lucroLiquidoDRE)
+    // Impressão do DRE (usando resumoDRE)
     const handlePrintDRE = () => {
         if (transacoesDoPeriodoDRE.length === 0) {
             toast({ message: 'Nenhum dado no período selecionado.', type: 'warning' });
@@ -604,13 +609,20 @@ export function VisaoGestor() {
             </style>
         `;
 
-        const periodo = `${new Date(dataInicio).toLocaleDateString()} a ${new Date(dataFim).toLocaleDateString()}`;
+        let periodoDescricao;
+        if (modoFiltroDRE === 'mensal') {
+            periodoDescricao = visualizacaoAnual
+                ? `Ano ${ano}`
+                : `${new Date(ano, mesSelecionado - 1, 1).toLocaleString('pt-BR', { month: 'long' })}/${ano}`;
+        } else {
+            periodoDescricao = `${new Date(dataInicio).toLocaleDateString()} a ${new Date(dataFim).toLocaleDateString()}`;
+        }
 
         const html = `
             <html>
-                <head><title>DRE - ${periodo}</title>${estilo}</head>
+                <head><title>DRE - ${periodoDescricao}</title>${estilo}</head>
                 <body>
-                    <h1>Demonstração de Resultados - ${periodo}</h1>
+                    <h1>Demonstração de Resultados - ${periodoDescricao}</h1>
                     <h2>Entradas</h2>
                     <table>
                         <thead><tr><th>Categoria</th><th class="valor">Valor (R$)</th></tr></thead>
@@ -683,7 +695,7 @@ export function VisaoGestor() {
                 )}
             </PageHeader>
 
-            {/* KPIs superiores (sempre baseados no filtro mensal/anual, para consistência com as abas) */}
+            {/* KPIs superiores (sempre baseados no filtro mensal/anual) */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                 <KPICard
                     label="Receitas"
@@ -760,23 +772,69 @@ export function VisaoGestor() {
                             <button className="btn btn-sm btn-accent" onClick={() => handleOpenModalNew(abaAtiva === 'receitas' ? 'receita' : 'despesa')} disabled={loading} aria-label="Novo lançamento"><Plus size={14} /> Novo Lançamento</button>
                         </div>
                     ) : (
-                        // Controles do DRE: filtro por intervalo de datas e botão de impressão específico
+                        // Controles do DRE: seletor de modo e filtros correspondentes
                         <div className="flex gap-3 items-center flex-wrap">
-                            <input
-                                type="date"
-                                className="input input-sm"
-                                value={dataInicio}
-                                onChange={e => setDataInicio(e.target.value)}
-                                aria-label="Data início"
-                            />
-                            <span className="text-muted">até</span>
-                            <input
-                                type="date"
-                                className="input input-sm"
-                                value={dataFim}
-                                onChange={e => setDataFim(e.target.value)}
-                                aria-label="Data fim"
-                            />
+                            <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-lg">
+                                <span className="text-xs text-muted">Filtro:</span>
+                                <button
+                                    className={`px-2 py-1 text-xs rounded ${modoFiltroDRE === 'mensal' ? 'bg-blue-500 text-white' : 'bg-white/10 text-muted'}`}
+                                    onClick={() => setModoFiltroDRE('mensal')}
+                                >
+                                    Mês/Ano
+                                </button>
+                                <button
+                                    className={`px-2 py-1 text-xs rounded ${modoFiltroDRE === 'personalizado' ? 'bg-blue-500 text-white' : 'bg-white/10 text-muted'}`}
+                                    onClick={() => setModoFiltroDRE('personalizado')}
+                                >
+                                    Personalizado
+                                </button>
+                            </div>
+
+                            {modoFiltroDRE === 'mensal' ? (
+                                <>
+                                    <select
+                                        className="input input-sm font-bold text-xs px-3 py-1"
+                                        value={ano}
+                                        onChange={e => setAno(parseInt(e.target.value))}
+                                        aria-label="Ano"
+                                    >
+                                        {[...new Set([new Date().getFullYear(), ano, ...anosDisponiveis])].sort((a,b)=>b-a).map(anoVal => <option key={anoVal} value={anoVal}>{anoVal}</option>)}
+                                    </select>
+                                    <select
+                                        className="input input-sm font-bold text-xs px-3 py-1"
+                                        value={mesSelecionado}
+                                        onChange={e => setMesSelecionado(parseInt(e.target.value))}
+                                        aria-label="Mês"
+                                    >
+                                        {Array.from({length:12},(_,i)=>i+1).map(m=><option key={m} value={m}>{new Date(ano,m-1,1).toLocaleString('pt-BR',{month:'long'})}</option>)}
+                                    </select>
+                                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5">
+                                        <span className="text-xs">Ano Completo:</span>
+                                        <div className={`relative w-10 h-5 rounded-full cursor-pointer transition-all ${visualizacaoAnual ? 'bg-blue-500' : 'bg-white/20'}`} onClick={() => setVisualizacaoAnual(!visualizacaoAnual)} role="switch" aria-checked={visualizacaoAnual}>
+                                            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${visualizacaoAnual ? 'left-5' : 'left-0.5'}`} />
+                                        </div>
+                                    </div>
+                                </>
+                            ) : (
+                                <>
+                                    <input
+                                        type="date"
+                                        className="input input-sm"
+                                        value={dataInicio}
+                                        onChange={e => setDataInicio(e.target.value)}
+                                        aria-label="Data início"
+                                    />
+                                    <span className="text-muted">até</span>
+                                    <input
+                                        type="date"
+                                        className="input input-sm"
+                                        value={dataFim}
+                                        onChange={e => setDataFim(e.target.value)}
+                                        aria-label="Data fim"
+                                    />
+                                </>
+                            )}
+
                             <button
                                 className="btn btn-sm btn-primary"
                                 onClick={handlePrintDRE}
