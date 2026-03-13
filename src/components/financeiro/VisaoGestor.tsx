@@ -932,7 +932,7 @@ export function VisaoGestor() {
                                 year={ano}
                                 series={chartSeries}
                                 onBarClick={handleChartClick}
-                                selectedMonth={mesSelecionado}
+                                selectedMonth={visualizacaoAnual ? undefined : (mesSelecionado ?? 1)}
                                 showAllMonths={visualizacaoAnual}
                             />
                         </div>
