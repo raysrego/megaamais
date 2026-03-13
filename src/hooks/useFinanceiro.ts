@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import { getFinanceiroAction } from './actions';
 import { somaSegura, agruparPorCategoria } from '@/lib/financial-utils';
