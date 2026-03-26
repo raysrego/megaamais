@@ -123,12 +123,13 @@ export function useCaixa() {
     setError(null);
     try {
       console.log('[useCaixa] Verificando sessão ativa do usuário');
-      const { data: { user }, error: userError } = await withRetry(async () => {
+      // Obter usuário diretamente com withRetry
+      const userData = await withRetry(async () => {
         const result = await supabase.auth.getUser();
         if (result.error) throw result.error;
         return result.data;
       });
-      if (userError) throw userError;
+      const user = userData.user;
       if (!user) {
         console.log('[useCaixa] Usuário não autenticado');
         if (isMounted.current) {
@@ -243,11 +244,12 @@ export function useCaixa() {
     setError(null);
     console.log('[useCaixa] abrirCaixa chamado', { valorInicial, terminalCodigo, terminalId, temFundoCaixa, dataTurno });
     try {
-      const { data: user } = await withRetry(async () => {
+      const userData = await withRetry(async () => {
         const result = await supabase.auth.getUser();
         if (result.error) throw result.error;
         return result.data;
       });
+      const user = userData.user;
       if (!user) throw new Error('Usuário não autenticado');
 
       const turnoData = dataTurno || new Date().toISOString().split('T')[0];
