@@ -54,7 +54,8 @@ export interface CaixaMovimentacao {
 }
 
 /**
- * Helper para executar uma Promise com retry automático
+ * Helper para executar uma função assíncrona com retry automático.
+ * A função deve lançar erro para que a tentativa seja considerada falha.
  */
 const withRetry = async <T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> => {
   let lastError: any;
@@ -64,7 +65,7 @@ const withRetry = async <T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> =>
     } catch (err) {
       lastError = err;
       if (i < maxRetries - 1) {
-        await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+        await new Promise(r => setTimeout(r, 1000 * (i + 1))); // backoff exponencial
       }
     }
   }
@@ -93,16 +94,17 @@ export function useCaixa() {
       if (!isMounted.current) return;
       try {
         console.log(`[useCaixa] Buscando movimentações da sessão ${sessaoId}`);
-        const { data, error } = await withRetry(() =>
-          supabase
+        const data = await withRetry(async () => {
+          const result = await supabase
             .from('caixa_movimentacoes')
             .select(`*, categorias_operacionais!categoria_operacional_id(id, nome, cor)`)
             .eq('sessao_id', sessaoId)
             .is('deleted_at', null)
             .order('created_at', { ascending: false })
-            .limit(100)
-        );
-        if (error) throw error;
+            .limit(100);
+          if (result.error) throw result.error;
+          return result.data;
+        });
         if (isMounted.current) {
           console.log(`[useCaixa] ${data?.length || 0} movimentações carregadas`);
           setMovimentacoes(data || []);
@@ -121,7 +123,11 @@ export function useCaixa() {
     setError(null);
     try {
       console.log('[useCaixa] Verificando sessão ativa do usuário');
-      const { data: { user }, error: userError } = await withRetry(() => supabase.auth.getUser());
+      const { data: { user }, error: userError } = await withRetry(async () => {
+        const result = await supabase.auth.getUser();
+        if (result.error) throw result.error;
+        return result.data;
+      });
       if (userError) throw userError;
       if (!user) {
         console.log('[useCaixa] Usuário não autenticado');
@@ -132,15 +138,16 @@ export function useCaixa() {
         return;
       }
 
-      const { data, error } = await withRetry(() =>
-        supabase
+      const data = await withRetry(async () => {
+        const result = await supabase
           .from('caixa_sessoes')
           .select('*, terminais!terminal_id_ref(codigo, descricao), data_turno')
           .eq('operador_id', user.id)
           .eq('status', 'aberto')
-          .maybeSingle()
-      );
-      if (error) throw error;
+          .maybeSingle();
+        if (result.error) throw result.error;
+        return result.data;
+      });
 
       if (isMounted.current) {
         if (data) {
@@ -236,14 +243,17 @@ export function useCaixa() {
     setError(null);
     console.log('[useCaixa] abrirCaixa chamado', { valorInicial, terminalCodigo, terminalId, temFundoCaixa, dataTurno });
     try {
-      const { data: { user }, error: userError } = await withRetry(() => supabase.auth.getUser());
-      if (userError) throw userError;
+      const { data: user } = await withRetry(async () => {
+        const result = await supabase.auth.getUser();
+        if (result.error) throw result.error;
+        return result.data;
+      });
       if (!user) throw new Error('Usuário não autenticado');
 
       const turnoData = dataTurno || new Date().toISOString().split('T')[0];
 
-      const { data, error } = await withRetry(() =>
-        supabase
+      const data = await withRetry(async () => {
+        const result = await supabase
           .from('caixa_sessoes')
           .insert({
             operador_id: user.id,
@@ -256,9 +266,10 @@ export function useCaixa() {
             data_turno: turnoData,
           })
           .select()
-          .single()
-      );
-      if (error) throw error;
+          .single();
+        if (result.error) throw result.error;
+        return result.data;
+      });
       console.log('[useCaixa] Caixa aberto, sessão criada:', data.id);
       setSessaoAtiva(data);
       return data;
@@ -278,17 +289,18 @@ export function useCaixa() {
     console.log('[useCaixa] registrarMovimentacao', { tipo: mov.tipo, valor: mov.valor });
 
     try {
-      const { data, error } = await withRetry(() =>
-        supabase
+      const data = await withRetry(async () => {
+        const result = await supabase
           .from('caixa_movimentacoes')
           .insert({
             sessao_id: sessaoAtiva.id,
             ...mov,
           })
           .select()
-          .single()
-      );
-      if (error) throw error;
+          .single();
+        if (result.error) throw result.error;
+        return result.data;
+      });
 
       let delta = mov.valor;
       if (mov.tipo === 'trocados') {
@@ -298,12 +310,14 @@ export function useCaixa() {
       const novoSaldo = (sessaoAtiva.valor_final_calculado || 0) + delta;
       console.log('[useCaixa] Atualizando saldo calculado para', novoSaldo);
 
-      await withRetry(() =>
-        supabase
+      await withRetry(async () => {
+        const result = await supabase
           .from('caixa_sessoes')
           .update({ valor_final_calculado: novoSaldo })
-          .eq('id', sessaoAtiva.id)
-      );
+          .eq('id', sessaoAtiva.id);
+        if (result.error) throw result.error;
+        return result.data;
+      });
 
       setSessaoAtiva(prev => (prev ? { ...prev, valor_final_calculado: novoSaldo } : null));
       setMovimentacoes(prev => [data, ...prev]);
@@ -339,14 +353,15 @@ export function useCaixa() {
 
     try {
       // Verificar status da sessão
-      const { data: sessaoAtual, error: checkError } = await withRetry(() =>
-        supabase
+      const sessaoAtual = await withRetry(async () => {
+        const result = await supabase
           .from('caixa_sessoes')
           .select('status')
           .eq('id', sessaoAtiva.id)
-          .single()
-      );
-      if (checkError) throw checkError;
+          .single();
+        if (result.error) throw result.error;
+        return result.data;
+      });
       if (sessaoAtual.status !== 'aberto') {
         throw new Error('Sessão já foi fechada por outro processo');
       }
@@ -384,15 +399,16 @@ export function useCaixa() {
 
       console.log('[useCaixa] Enviando update para Supabase:', updateData);
 
-      const { data, error } = await withRetry(() =>
-        supabase
+      const data = await withRetry(async () => {
+        const result = await supabase
           .from('caixa_sessoes')
           .update(updateData)
           .eq('id', sessaoAtiva.id)
           .select()
-          .single()
-      );
-      if (error) throw error;
+          .single();
+        if (result.error) throw result.error;
+        return result.data;
+      });
 
       console.log('[useCaixa] Sessão fechada com sucesso, dados retornados:', data);
       setSessaoAtiva(null);
