@@ -80,6 +80,7 @@ export function useCaixa() {
   const [movimentacoes, setMovimentacoes] = useState<CaixaMovimentacao[]>([]);
   const realtimeChannel = useRef<RealtimeChannel | null>(null);
   const isMounted = useRef(true);
+  const fetchingRef = useRef(false); // Evitar chamadas concorrentes
 
   useEffect(() => {
     isMounted.current = true;
@@ -119,11 +120,19 @@ export function useCaixa() {
 
   // Busca sessão ativa do usuário
   const fetchSessaoAtiva = useCallback(async () => {
-    if (!isMounted.current) return;
+    // Evita execuções concorrentes
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
+
+    if (!isMounted.current) {
+      fetchingRef.current = false;
+      return;
+    }
+
     setError(null);
     try {
       console.log('[useCaixa] Verificando sessão ativa do usuário');
-      // Obter usuário diretamente com withRetry
+      // Obter usuário
       const userData = await withRetry(async () => {
         const result = await supabase.auth.getUser();
         if (result.error) throw result.error;
@@ -136,6 +145,7 @@ export function useCaixa() {
           setSessaoAtiva(null);
           setLoading(false);
         }
+        fetchingRef.current = false;
         return;
       }
 
@@ -152,9 +162,18 @@ export function useCaixa() {
 
       if (isMounted.current) {
         if (data) {
-          console.log('[useCaixa] Sessão ativa encontrada:', data.id);
-          setSessaoAtiva(data);
-          await fetchMovimentacoes(data.id);
+          // Evita atualização desnecessária se a sessão já é a mesma
+          setSessaoAtiva(prev => {
+            if (prev?.id === data.id) return prev;
+            return data;
+          });
+          // Busca movimentações apenas se a sessão mudou ou é a primeira
+          if (!sessaoAtiva || sessaoAtiva.id !== data.id) {
+            await fetchMovimentacoes(data.id);
+          } else {
+            // Se a sessão já está ativa, ainda assim busca movimentações (pode ter mudado)
+            await fetchMovimentacoes(data.id);
+          }
         } else {
           console.log('[useCaixa] Nenhuma sessão ativa encontrada');
           setSessaoAtiva(null);
@@ -172,8 +191,9 @@ export function useCaixa() {
       if (isMounted.current && !sessaoAtiva) {
         setLoading(false);
       }
+      fetchingRef.current = false;
     }
-  }, [supabase, fetchMovimentacoes, sessaoAtiva]);
+  }, [supabase, fetchMovimentacoes, sessaoAtiva]); // Incluímos sessaoAtiva para usar no if, mas é estável
 
   // Configurar Realtime com tratamento de erro e reconexão
   useEffect(() => {
@@ -423,10 +443,11 @@ export function useCaixa() {
     }
   };
 
-  // Carregar dados iniciais
+  // Carregar dados iniciais uma única vez
   useEffect(() => {
     fetchSessaoAtiva();
-  }, [fetchSessaoAtiva]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Dependência vazia – executa apenas na montagem
 
   return {
     sessaoAtiva,
