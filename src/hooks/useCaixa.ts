@@ -81,6 +81,12 @@ export function useCaixa() {
   const realtimeChannel = useRef<RealtimeChannel | null>(null);
   const isMounted = useRef(true);
   const fetchingRef = useRef(false); // Evitar chamadas concorrentes
+  const sessaoAtivaRef = useRef(sessaoAtiva); // Ref para acessar o valor atual sem dependência no callback
+
+  // Mantém a ref sincronizada com o estado atual
+  useEffect(() => {
+    sessaoAtivaRef.current = sessaoAtiva;
+  }, [sessaoAtiva]);
 
   useEffect(() => {
     isMounted.current = true;
@@ -143,9 +149,8 @@ export function useCaixa() {
         console.log('[useCaixa] Usuário não autenticado');
         if (isMounted.current) {
           setSessaoAtiva(null);
-          setLoading(false);
+          setMovimentacoes([]);
         }
-        fetchingRef.current = false;
         return;
       }
 
@@ -167,33 +172,26 @@ export function useCaixa() {
             if (prev?.id === data.id) return prev;
             return data;
           });
-          // Busca movimentações apenas se a sessão mudou ou é a primeira
-          if (!sessaoAtiva || sessaoAtiva.id !== data.id) {
-            await fetchMovimentacoes(data.id);
-          } else {
-            // Se a sessão já está ativa, ainda assim busca movimentações (pode ter mudado)
-            await fetchMovimentacoes(data.id);
-          }
+          // Sempre busca movimentações com o ID da sessão recém-obtida
+          await fetchMovimentacoes(data.id);
         } else {
           console.log('[useCaixa] Nenhuma sessão ativa encontrada');
           setSessaoAtiva(null);
           setMovimentacoes([]);
-          setLoading(false);
         }
       }
     } catch (err) {
       console.error('[useCaixa] Erro ao buscar sessão:', err);
       if (isMounted.current) {
         setError('Erro ao carregar dados do caixa. Verifique sua conexão.');
-        setLoading(false);
       }
     } finally {
-      if (isMounted.current && !sessaoAtiva) {
+      if (isMounted.current) {
         setLoading(false);
       }
       fetchingRef.current = false;
     }
-  }, [supabase, fetchMovimentacoes, sessaoAtiva]); // Incluímos sessaoAtiva para usar no if, mas é estável
+  }, [supabase, fetchMovimentacoes]); // sessaoAtiva removido da dependência, usa a ref
 
   // Configurar Realtime com tratamento de erro e reconexão
   useEffect(() => {
