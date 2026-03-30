@@ -1,266 +1,292 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
-    ShieldCheck,
-    ArrowUpFromLine,
-    History,
-    CheckCircle2,
-    Clock,
-    Building2,
-    AlertCircle,
-    Loader2
+    Vault, ArrowUpCircle, ArrowDownCircle, Building,
+    Loader2, DollarSign, CheckCircle2, Clock,
+    ExternalLink, Plus
 } from 'lucide-react';
-import { useCofre } from '@/hooks/useCofre';
-import { PageHeader } from '@/components/ui/PageHeader';
-import { LoadingState } from '@/components/ui/LoadingState';
-import { useToast } from '@/contexts/ToastContext';
-import { useConfirm } from '@/contexts/ConfirmContext';
+import {
+    getSaldoCofre,
+    getEntradasCofrePorFechamento,
+    getHistoricoCofre,
+    registrarDepositoCofre
+} from '@/actions/cofre';
+import { getContasBancarias } from '@/actions/financeiro';
+import { MoneyInput } from '@/components/ui/MoneyInput';
+import { useToast } from '@/hooks/useToast';
 
-export default function GestaoCofrePage() {
-    const { saldo, pendencias, movimentacoes, loading, confirmarSangria, registrarDeposito } = useCofre();
-    const [showDepositoModal, setShowDepositoModal] = useState(false);
+export default function CofrePage() {
     const { toast } = useToast();
-    const confirm = useConfirm(); // assume que useConfirm retorna a função diretamente
+    const [saldo, setSaldo] = useState(0);
+    const [entradas, setEntradas] = useState<any[]>([]);
+    const [historico, setHistorico] = useState<any[]>([]);
+    const [contas, setContas] = useState<any[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [showDeposito, setShowDeposito] = useState(false);
+    const [depositoValor, setDepositoValor] = useState(0);
+    const [depositoConta, setDepositoConta] = useState('');
+    const [depositoObs, setDepositoObs] = useState('');
+    const [depositing, setDepositing] = useState(false);
+    const [tab, setTab] = useState<'entradas' | 'historico'>('entradas');
 
-    // Estados locais para formulários
-    const [depositoValor, setDepositoValor] = useState('');
-    const [depositoBanco, setDepositoBanco] = useState('Caixa Econômica (001)');
-    const [processing, setProcessing] = useState(false);
-
-    // Filtra apenas movimentações do tipo "entrada_sangria" e "saida_deposito" (saída sangria ou cofre)
-    const movimentacoesFiltradas = useMemo(() => {
-        return movimentacoes.filter(m =>
-            ['entrada_sangria', 'saida_deposito'].includes(m.tipo)
-        );
-    }, [movimentacoes]);
-
-    // Cálculos derivados
-    const totalPendente = pendencias.reduce((acc, s) => acc + s.valor, 0);
-    const ultimoDeposito = movimentacoes.find(m => m.tipo === 'saida_deposito');
-
-    const handleConferir = async (sangriaId: number) => {
+    const carregarDados = useCallback(async () => {
+        setLoading(true);
         try {
-            const confirmed = await confirm({
-                title: 'Conferir Sangria',
-                description: 'Confirmar recebimento do envelope no valor informado?',
-                variant: 'neutral',
-                confirmLabel: 'Confirmar Recebimento'
-            });
-            if (!confirmed) return;
-
-            setProcessing(true);
-            await confirmarSangria(sangriaId);
-            toast({ message: 'Conferência realizada com sucesso!', type: 'success' });
-        } catch (error: any) {
-            toast({ message: 'Erro: ' + (error.message || 'Falha ao confirmar'), type: 'error' });
+            const [s, e, h, c] = await Promise.all([
+                getSaldoCofre(),
+                getEntradasCofrePorFechamento(),
+                getHistoricoCofre(),
+                getContasBancarias(),
+            ]);
+            setSaldo(s);
+            setEntradas(e);
+            setHistorico(h);
+            setContas(c);
+        } catch (err: any) {
+            toast({ message: err.message, type: 'error' });
         } finally {
-            setProcessing(false);
+            setLoading(false);
         }
-    };
+    }, [toast]);
 
-    const handleSalvarDeposito = async () => {
+    useEffect(() => { carregarDados(); }, [carregarDados]);
+
+    const handleDeposito = async () => {
+        if (depositoValor <= 0 || !depositoConta) {
+            toast({ message: 'Informe valor e conta destino', type: 'warning' });
+            return;
+        }
+        setDepositing(true);
         try {
-            const valor = parseFloat(depositoValor);
-            if (isNaN(valor) || valor <= 0) {
-                toast({ message: 'Digite um valor válido', type: 'warning' });
-                return;
-            }
-            if (valor > saldo) {
-                toast({ message: 'Saldo insuficiente no cofre!', type: 'error' });
-                return;
-            }
-
-            setProcessing(true);
-            await registrarDeposito(valor, depositoBanco);
-            setShowDepositoModal(false);
-            setDepositoValor('');
-            toast({ message: 'Depósito registrado com sucesso!', type: 'success' });
-        } catch (error: any) {
-            toast({ message: 'Erro: ' + (error.message || 'Falha ao registrar depósito'), type: 'error' });
+            await registrarDepositoCofre(depositoValor, depositoConta, depositoObs || undefined);
+            toast({ message: 'Depósito registrado!', type: 'success' });
+            setShowDeposito(false);
+            setDepositoValor(0);
+            setDepositoConta('');
+            setDepositoObs('');
+            carregarDados();
+        } catch (err: any) {
+            toast({ message: err.message, type: 'error' });
         } finally {
-            setProcessing(false);
+            setDepositing(false);
         }
     };
 
     if (loading) {
-        return <LoadingState type="dashboard" />;
+        return (
+            <div className="flex items-center justify-center h-64">
+                <Loader2 className="animate-spin text-muted" size={32} />
+            </div>
+        );
     }
 
-    return (
-        <div className="dashboard-content">
-            <PageHeader title="Gestão de Cofre & Depósitos" />
+    const entradasPendentes = entradas.filter(e => e.auditoria_status === 'aprovado' && !e.cofre_confirmado);
+    const totalDisponivel = entradas
+        .filter(e => e.auditoria_status === 'aprovado')
+        .reduce((sum, e) => sum + (e.valor_enviado_cofre || 0), 0);
 
-            <div className="flex justify-end mb-6">
+    return (
+        <div className="space-y-6 p-4 max-w-4xl mx-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-primary-blue-light/10 flex items-center justify-center">
+                        <Vault size={20} className="text-primary-blue-light" />
+                    </div>
+                    <div>
+                        <h1 className="text-xl font-black">Cofre</h1>
+                        <p className="text-xs text-muted">Controle de valores em espécie</p>
+                    </div>
+                </div>
                 <button
+                    onClick={() => setShowDeposito(true)}
                     className="btn btn-primary"
-                    onClick={() => setShowDepositoModal(true)}
-                    disabled={saldo <= 0}
                 >
-                    <ArrowUpFromLine size={16} /> Registrar Depósito
+                    <Building size={14} /> Registrar Depósito
                 </button>
             </div>
 
-            <div className="kpi-grid">
-                <div className="kpi-card success">
-                    <div className="kpi-header">
-                        <span className="kpi-label">Saldo em Espécie (Cofre)</span>
-                        <div className="kpi-icon"><ShieldCheck size={20} /></div>
-                    </div>
-                    <div className="kpi-value">R$ {saldo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                    <div className="kpi-trend positive">Disponível para depósito</div>
-                </div>
-
-                <div className="kpi-card accent">
-                    <div className="kpi-header">
-                        <span className="kpi-label">Sangrias Pendentes</span>
-                        <div className="kpi-icon"><Clock size={20} /></div>
-                    </div>
-                    <div className="kpi-value">R$ {totalPendente.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                    <div className="kpi-trend" style={{ color: '#f59e0b' }}>
-                        <AlertCircle size={14} /> {pendencias.length} envelopes a conferir
-                    </div>
-                </div>
-
-                <div className="kpi-card">
-                    <div className="kpi-header">
-                        <span className="kpi-label">Último Depósito</span>
-                        <div className="kpi-icon"><Building2 size={20} /></div>
-                    </div>
-                    <div className="kpi-value">R$ {ultimoDeposito ? ultimoDeposito.valor.toLocaleString('pt-BR') : '0,00'}</div>
-                    <div className="kpi-trend text-muted">
-                        {ultimoDeposito ? new Date(ultimoDeposito.data_movimentacao).toLocaleDateString('pt-BR') : 'N/A'}
-                    </div>
-                </div>
+            {/* Saldo */}
+            <div className="p-6 rounded-2xl bg-gradient-to-r from-primary-blue-light/10 to-primary-blue-light/5 border border-primary-blue-light/20 text-center">
+                <p className="text-[10px] uppercase font-black text-muted tracking-widest mb-1">Saldo Atual do Cofre</p>
+                <p className="text-3xl font-black text-primary-blue-light">
+                    R$ {saldo.toFixed(2)}
+                </p>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '1.5rem', marginTop: '1.5rem' }}>
-                {/* Coluna 1: Sangrias Pendentes */}
-                <div className="card">
-                    <div className="flex justify-between items-center mb-4">
-                        <h3 className="chart-title mb-0">Sangrias para Conferência</h3>
-                        {processing && <Loader2 size={16} className="animate-spin text-muted" />}
-                    </div>
+            {/* Abas */}
+            <div className="flex gap-1 bg-surface-subtle rounded-xl p-1">
+                <button
+                    onClick={() => setTab('entradas')}
+                    className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${
+                        tab === 'entradas' ? 'bg-bg-card text-text-primary shadow' : 'text-muted'
+                    }`}
+                >
+                    Entradas por Fechamento
+                </button>
+                <button
+                    onClick={() => setTab('historico')}
+                    className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${
+                        tab === 'historico' ? 'bg-bg-card text-text-primary shadow' : 'text-muted'
+                    }`}
+                >
+                    Histórico Completo
+                </button>
+            </div>
 
-                    {pendencias.length === 0 ? (
-                        <div className="text-center py-8 text-muted text-sm">
-                            <CheckCircle2 size={32} className="mx-auto mb-2 opacity-50" />
-                            Nenhuma sangria pendente de conferência.
-                        </div>
+            {/* Tab: Entradas por Fechamento */}
+            {tab === 'entradas' && (
+                <div className="space-y-2">
+                    {entradas.length === 0 ? (
+                        <p className="text-center text-muted text-sm py-8">
+                            Nenhum fechamento aprovado com valor de cofre.
+                        </p>
                     ) : (
-                        <div className="table-container">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Origem</th>
-                                        <th>Horário</th>
-                                        <th>Valor</th>
-                                        <th style={{ textAlign: 'right' }}>Ação</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {pendencias.map(s => (
-                                        <tr key={s.sangria_id}>
-                                            <td>
-                                                <div style={{ fontWeight: 600 }}>{s.terminal_id || 'TFL ???'}</div>
-                                                <div className="text-xs text-muted truncate max-w-[150px]">{s.observacao_caixa}</div>
-                                            </td>
-                                            <td className="text-muted">
-                                                {new Date(s.data_hora).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                                            </td>
-                                            <td style={{ fontWeight: 700 }}>R$ {s.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                                            <td style={{ textAlign: 'right' }}>
-                                                <button
-                                                    className="btn btn-ghost"
-                                                    style={{ fontSize: '0.7rem', background: 'rgba(34, 197, 94, 0.1)', color: '#22c55e' }}
-                                                    onClick={() => handleConferir(s.sangria_id)}
-                                                    disabled={processing}
-                                                >
-                                                    {processing ? '...' : 'Receber Envelope'}
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
+                        entradas.map((e: any) => (
+                            <div key={e.sessao_id} className="p-3 rounded-xl border border-border bg-bg-card flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                                        e.auditoria_status === 'aprovado' ? 'bg-success/10' : 'bg-warning/10'
+                                    }`}>
+                                        {e.auditoria_status === 'aprovado' ? (
+                                            <CheckCircle2 size={14} className="text-success" />
+                                        ) : (
+                                            <Clock size={14} className="text-warning" />
+                                        )}
+                                    </div>
+                                    <div>
+                                        <p className="text-sm font-bold">
+                                            {e.terminal_id} — {e.operador_nome || 'Operador'}
+                                        </p>
+                                        <p className="text-[10px] text-muted">
+                                            Turno {e.data_turno} • {e.auditoria_status === 'aprovado' ? 'Aprovado' : 'Pendente'}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    <p className="text-sm font-black text-success">
+                                        R$ {(e.valor_enviado_cofre || 0).toFixed(2)}
+                                    </p>
+                                    {e.cofre_movimentacao_id && (
+                                        <p className="text-[10px] text-muted">Confirmado no cofre</p>
+                                    )}
+                                </div>
+                            </div>
+                        ))
                     )}
                 </div>
+            )}
 
-                {/* Coluna 2: Histórico (apenas saída sangria ou cofre) */}
-                <div className="card">
-                    <h3 className="chart-title"><History size={18} /> Histórico do Cofre</h3>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '400px', overflowY: 'auto' }}>
-                        {movimentacoesFiltradas.length === 0 && (
-                            <div className="text-center text-muted text-xs py-4">Sem movimentações recentes.</div>
-                        )}
-                        {movimentacoesFiltradas.map(m => (
-                            <div key={m.id} className="card" style={{ padding: '0.8rem', background: 'rgba(255,255,255,0.02)' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
-                                    <div style={{ fontWeight: 700, color: m.tipo.includes('entrada') ? '#22c55e' : '#ef4444' }}>
-                                        {m.tipo.includes('entrada') ? '+' : '-'} R$ {m.valor.toLocaleString('pt-BR')}
+            {/* Tab: Histórico */}
+            {tab === 'historico' && (
+                <div className="space-y-2">
+                    {historico.length === 0 ? (
+                        <p className="text-center text-muted text-sm py-8">Nenhuma movimentação.</p>
+                    ) : (
+                        historico.map((m: any) => {
+                            const isEntrada = m.tipo.includes('entrada');
+                            return (
+                                <div key={m.id} className="p-3 rounded-xl border border-border bg-bg-card flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                                            isEntrada ? 'bg-success/10' : 'bg-danger/10'
+                                        }`}>
+                                            {isEntrada ? (
+                                                <ArrowUpCircle size={14} className="text-success" />
+                                            ) : (
+                                                <ArrowDownCircle size={14} className="text-danger" />
+                                            )}
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-medium">
+                                                {m.tipo === 'entrada_fechamento' ? 'Fechamento de Turno' :
+                                                 m.tipo === 'entrada_sangria' ? 'Sangria Recebida' :
+                                                 m.tipo === 'saida_deposito' ? 'Depósito Bancário' :
+                                                 m.tipo}
+                                            </p>
+                                            <p className="text-[10px] text-muted">
+                                                {new Date(m.data_movimentacao || m.created_at).toLocaleString('pt-BR')}
+                                                {m.observacoes && ` — ${m.observacoes}`}
+                                            </p>
+                                        </div>
                                     </div>
-                                    <span className="badge" style={{ fontSize: '0.6rem', opacity: 0.8 }}>
-                                        {m.tipo === 'entrada_sangria' ? 'SANGRIA' : 'DEPÓSITO'}
-                                    </span>
+                                    <p className={`text-sm font-black ${isEntrada ? 'text-success' : 'text-danger'}`}>
+                                        {isEntrada ? '+' : '-'}R$ {Math.abs(m.valor).toFixed(2)}
+                                    </p>
                                 </div>
-                                <div className="text-xs text-muted flex justify-between mt-1">
-                                    <span>{m.observacoes || (m.tipo.includes('sangria') ? 'Conferência de Sangria' : 'Movimentação')}</span>
-                                    <span>{new Date(m.data_movimentacao).toLocaleDateString('pt-BR')}</span>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
+                            );
+                        })
+                    )}
                 </div>
-            </div>
+            )}
 
-            {/* Modal de Depósito */}
-            {showDepositoModal && (
-                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-                    <div className="card" style={{ width: '100%', maxWidth: '450px', padding: '2rem' }}>
-                        <h2 style={{ fontSize: '1.4rem', fontWeight: 800, marginBottom: '0.5rem' }}>Registrar Depósito</h2>
-                        <div style={{ padding: '1rem', background: 'rgba(34, 197, 94, 0.1)', borderRadius: 12, marginBottom: '1.5rem' }}>
-                            <div className="text-xs text-muted">Saldo Disponível no Cofre</div>
-                            <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#22c55e' }}>R$ {saldo.toLocaleString('pt-BR')}</div>
-                        </div>
-                        <div className="flex flex-col gap-4">
-                            <div className="form-group">
-                                <label className="text-xs text-muted uppercase font-bold">Conta de Destino</label>
-                                <select
-                                    className="input"
-                                    value={depositoBanco}
-                                    onChange={e => setDepositoBanco(e.target.value)}
-                                >
-                                    <option>Caixa Econômica (001)</option>
-                                    <option>Banco do Brasil (002)</option>
-                                    <option>Cofre Inteligente Natureza</option>
-                                    <option>Transportadora de Valores</option>
-                                </select>
-                            </div>
-                            <div className="form-group">
-                                <label className="text-xs text-muted uppercase font-bold">Valor do Depósito</label>
-                                <input
-                                    type="number"
-                                    className="input"
-                                    placeholder="0.00"
-                                    value={depositoValor}
-                                    onChange={e => setDepositoValor(e.target.value)}
-                                />
-                            </div>
-                        </div>
-                        <div className="flex gap-3 justify-end mt-8">
-                            <button className="btn btn-ghost" onClick={() => setShowDepositoModal(false)} disabled={processing}>Cancelar</button>
-                            <button
-                                className="btn btn-primary"
-                                onClick={handleSalvarDeposito}
-                                disabled={processing}
+            {/* Modal Depósito */}
+            {showDeposito && (
+                <>
+                    <div className="fixed inset-0 bg-black/70 z-50" onClick={() => setShowDeposito(false)} />
+                    <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-sm bg-bg-card border border-border rounded-2xl z-50 p-6 space-y-4">
+                        <h3 className="text-base font-black flex items-center gap-2">
+                            <Building size={16} className="text-primary-blue-light" />
+                            Registrar Depósito Bancário
+                        </h3>
+
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-muted uppercase">Conta Destino</label>
+                            <select
+                                value={depositoConta}
+                                onChange={e => setDepositoConta(e.target.value)}
+                                className="input w-full"
                             >
-                                {processing ? <Loader2 className="animate-spin" size={16} /> : 'Confirmar Saída'}
+                                <option value="">Selecione...</option>
+                                {contas.map((c: any) => (
+                                    <option key={c.id} value={c.id}>
+                                        {c.banco} — {c.nome}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-muted uppercase">Valor do Depósito</label>
+                            <MoneyInput value={depositoValor} onValueChange={setDepositoValor} className="text-lg font-bold" />
+                            {depositoValor > saldo && (
+                                <p className="text-xs text-danger font-bold">
+                                    Valor superior ao saldo do cofre (R$ {saldo.toFixed(2)})
+                                </p>
+                            )}
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-muted uppercase">Observação (opcional)</label>
+                            <input
+                                className="input w-full"
+                                value={depositoObs}
+                                onChange={e => setDepositoObs(e.target.value)}
+                                placeholder="Ex: Depósito ref. turnos 26/03"
+                            />
+                        </div>
+
+                        <p className="text-xs text-muted">
+                            Sobram R$ {Math.max(0, saldo - depositoValor).toFixed(2)} no cofre após o depósito.
+                        </p>
+
+                        <div className="flex gap-3">
+                            <button className="btn btn-ghost flex-1" onClick={() => setShowDeposito(false)} disabled={depositing}>
+                                Cancelar
+                            </button>
+                            <button
+                                className="btn btn-primary flex-1 font-black"
+                                onClick={handleDeposito}
+                                disabled={depositing || depositoValor <= 0 || !depositoConta || depositoValor > saldo}
+                            >
+                                {depositing ? <Loader2 className="animate-spin" size={14} /> : 'Confirmar'}
                             </button>
                         </div>
                     </div>
-                </div>
+                </>
             )}
         </div>
     );
 }
+
