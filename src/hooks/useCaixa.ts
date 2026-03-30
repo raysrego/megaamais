@@ -1,3 +1,5 @@
+// hooks/useCaixa.ts - CORREÇÃO
+
 'use client';
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
@@ -64,10 +66,6 @@ export interface FechamentoPayload {
     fundoCaixaDevolvido: boolean;
 }
 
-/**
- * Helper para executar uma função assíncrona com retry automático.
- * A função deve lançar erro para que a tentativa seja considerada falha.
- */
 const withRetry = async <T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> => {
   let lastError: any;
   for (let i = 0; i < maxRetries; i++) {
@@ -76,7 +74,7 @@ const withRetry = async <T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> =>
     } catch (err) {
       lastError = err;
       if (i < maxRetries - 1) {
-        await new Promise(r => setTimeout(r, 1000 * (i + 1))); // backoff exponencial
+        await new Promise(r => setTimeout(r, 1000 * (i + 1)));
       }
     }
   }
@@ -101,13 +99,33 @@ export function useCaixa() {
     };
   }, []);
 
-  // Busca movimentações de uma sessão
+  // Função para calcular totais consistentes
+  const calcularTotaisMovimentacoes = useCallback((movs: CaixaMovimentacao[]) => {
+    const entradas = movs.filter(m => m.valor > 0).reduce((acc, m) => acc + m.valor, 0);
+    const saidas = movs.filter(m => m.valor < 0).reduce((acc, m) => acc + Math.abs(m.valor), 0);
+    const saldo = entradas - saidas;
+    
+    // Agrupamento por tipo para resumo
+    const resumo = {
+      pix: movs.filter(m => m.tipo === 'pix' && m.valor > 0).reduce((acc, m) => acc + m.valor, 0),
+      dinheiro: movs.filter(m => m.metodo_pagamento === 'dinheiro' && m.valor > 0 && m.tipo !== 'sangria').reduce((acc, m) => acc + m.valor, 0),
+      bolao_dinheiro: 0, // Será calculado separadamente
+      bolao_pix: 0, // Será calculado separadamente
+      sangria: movs.filter(m => m.tipo === 'sangria').reduce((acc, m) => acc + Math.abs(m.valor), 0),
+      deposito: movs.filter(m => m.tipo === 'deposito').reduce((acc, m) => acc + Math.abs(m.valor), 0),
+      boleto: movs.filter(m => m.tipo === 'boleto').reduce((acc, m) => acc + Math.abs(m.valor), 0),
+      trocados: movs.filter(m => m.tipo === 'trocados').reduce((acc, m) => acc + Math.abs(m.valor), 0),
+    };
+    
+    return { entradas, saidas, saldo, resumo };
+  }, []);
+
   const fetchMovimentacoes = useCallback(
     async (sessaoId: number) => {
       if (!isMounted.current) return;
       try {
         console.log(`[useCaixa] Buscando movimentações da sessão ${sessaoId}`);
-        const data = await withRetry(async () => {
+        const { data, error } = await withRetry(async () => {
           const result = await supabase
             .from('caixa_movimentacoes')
             .select(`*, categorias_operacionais!categoria_operacional_id(id, nome, cor)`)
@@ -118,16 +136,32 @@ export function useCaixa() {
           if (result.error) throw result.error;
           return result.data;
         });
-        if (isMounted.current) {
-          console.log(`[useCaixa] ${data?.length || 0} movimentações carregadas`);
-          setMovimentacoes(data || []);
+        
+        if (isMounted.current && data) {
+          console.log(`[useCaixa] ${data.length} movimentações carregadas`);
+          setMovimentacoes(data);
+          
+          // Atualizar valor_final_calculado para garantir consistência
+          const { saldo } = calcularTotaisMovimentacoes(data);
+          const valorFinalCalculado = (sessaoAtiva?.valor_inicial || 0) + saldo;
+          
+          // Se houver discrepância, atualizar no banco
+          if (sessaoAtiva && Math.abs(sessaoAtiva.valor_final_calculado - valorFinalCalculado) > 0.01) {
+            console.warn('[useCaixa] Discrepância detectada no saldo calculado, corrigindo...');
+            await supabase
+              .from('caixa_sessoes')
+              .update({ valor_final_calculado: valorFinalCalculado })
+              .eq('id', sessaoAtiva.id);
+            
+            setSessaoAtiva(prev => prev ? { ...prev, valor_final_calculado: valorFinalCalculado } : null);
+          }
         }
       } catch (err) {
         console.error('[useCaixa] Erro ao buscar movimentações:', err);
         if (isMounted.current) setError('Erro ao carregar movimentações');
       }
     },
-    [supabase]
+    [supabase, sessaoAtiva, calcularTotaisMovimentacoes]
   );
 
   const fetchSessaoAtiva = useCallback(async () => {
@@ -142,12 +176,9 @@ export function useCaixa() {
     setError(null);
     try {
       console.log('[useCaixa] Verificando sessão ativa do usuário');
-      const userData = await withRetry(async () => {
-        const result = await supabase.auth.getUser();
-        if (result.error) throw result.error;
-        return result.data;
-      });
-      const user = userData.user;
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+      
       if (!user) {
         console.log('[useCaixa] Usuário não autenticado');
         if (isMounted.current) {
@@ -157,7 +188,7 @@ export function useCaixa() {
         return;
       }
 
-      const data = await withRetry(async () => {
+      const { data, error } = await withRetry(async () => {
         const result = await supabase
           .from('caixa_sessoes')
           .select('*, terminais!terminal_id_ref(codigo, descricao), data_turno')
@@ -230,7 +261,6 @@ export function useCaixa() {
         } else if (status === 'CHANNEL_ERROR') {
           console.error('[useCaixa] Erro no canal Realtime:', err);
           setError('Erro na conexão em tempo real. Tentando reconectar...');
-          // Tenta reconectar após 5 segundos
           setTimeout(() => {
             if (realtimeChannel.current && sessaoAtiva) {
               console.log('[useCaixa] Tentando reconectar canal Realtime');
@@ -263,17 +293,13 @@ export function useCaixa() {
     setError(null);
     console.log('[useCaixa] abrirCaixa chamado', { valorInicial, terminalCodigo, terminalId, temFundoCaixa, dataTurno });
     try {
-      const userData = await withRetry(async () => {
-        const result = await supabase.auth.getUser();
-        if (result.error) throw result.error;
-        return result.data;
-      });
-      const user = userData.user;
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
       if (!user) throw new Error('Usuário não autenticado');
 
       const turnoData = dataTurno || new Date().toISOString().split('T')[0];
 
-      const data = await withRetry(async () => {
+      const { data, error } = await withRetry(async () => {
         const result = await supabase
           .from('caixa_sessoes')
           .insert({
@@ -301,7 +327,7 @@ export function useCaixa() {
     }
   };
 
-  // Registrar movimentação
+  // Registrar movimentação - CORRIGIDO
   const registrarMovimentacao = async (
     mov: Omit<CaixaMovimentacao, 'id' | 'sessao_id' | 'created_at'>
   ) => {
@@ -310,7 +336,12 @@ export function useCaixa() {
     console.log('[useCaixa] registrarMovimentacao', { tipo: mov.tipo, valor: mov.valor });
 
     try {
-      const data = await withRetry(async () => {
+      // Validar data do turno para movimentações
+      if (mov.data_vencimento && mov.data_vencimento !== sessaoAtiva.data_turno) {
+        throw new Error(`Data do lançamento (${mov.data_vencimento}) não corresponde à data do turno (${sessaoAtiva.data_turno})`);
+      }
+
+      const { data, error } = await withRetry(async () => {
         const result = await supabase
           .from('caixa_movimentacoes')
           .insert({
@@ -323,12 +354,11 @@ export function useCaixa() {
         return result.data;
       });
 
-      let delta = mov.valor;
-      if (mov.tipo === 'trocados') {
-        delta = 0;
-      }
+      // Recalcular saldo baseado nas movimentações atuais + nova
+      const todasMovs = [...movimentacoes, data];
+      const { saldo } = calcularTotaisMovimentacoes(todasMovs);
+      const novoSaldo = sessaoAtiva.valor_inicial + saldo;
 
-      const novoSaldo = (sessaoAtiva.valor_final_calculado || 0) + delta;
       console.log('[useCaixa] Atualizando saldo calculado para', novoSaldo);
 
       await withRetry(async () => {
@@ -351,102 +381,12 @@ export function useCaixa() {
     }
   };
 
-  // Fechar caixa
-  const fecharCaixa = async (
-    observacoes?: string,
-    tflData?: {
-      tfl_vendas?: number;
-      tfl_premios?: number;
-      tfl_contas?: number;
-      tfl_saldo_projetado?: number;
-      tfl_comprovante_url?: string;
-    },
-    valorCofre?: number,
-    valorPixExterno?: number
-  ) => {
-    console.log('[useCaixa] fecharCaixa iniciado', { observacoes, tflData, valorCofre, valorPixExterno });
-    if (!sessaoAtiva) {
-      console.error('[useCaixa] Erro: sessão ativa é nula');
-      throw new Error('Nenhuma sessão de caixa aberta');
-    }
-
-    setError(null);
-
-    try {
-      // Verificar status da sessão
-      const sessaoAtual = await withRetry(async () => {
-        const result = await supabase
-          .from('caixa_sessoes')
-          .select('status')
-          .eq('id', sessaoAtiva.id)
-          .single();
-        if (result.error) throw result.error;
-        return result.data;
-      });
-      if (sessaoAtual.status !== 'aberto') {
-        throw new Error('Sessão já foi fechada por outro processo');
-      }
-
-      // Registrar sangria para o valor do cofre
-      if (valorCofre && valorCofre > 0) {
-        try {
-          console.log('[useCaixa] Registrando sangria de R$', valorCofre);
-          await registrarMovimentacao({
-            tipo: 'sangria',
-            valor: -Math.abs(valorCofre),
-            descricao: 'Sangria para cofre',
-            metodo_pagamento: 'dinheiro',
-            referencia_id: null,
-            classificacao_pix: null,
-            categoria_operacional_id: null,
-          });
-          console.log('[useCaixa] Sangria registrada com sucesso');
-        } catch (error) {
-          console.error('[useCaixa] Erro ao registrar sangria:', error);
-          throw new Error('Falha ao registrar sangria: ' + (error as Error).message);
-        }
-      }
-
-      const valorDeclarado = sessaoAtiva.valor_final_calculado;
-      const updateData = {
-        valor_final_declarado: valorDeclarado,
-        status: 'fechado',
-        data_fechamento: new Date().toISOString(),
-        observacoes: observacoes,
-        ...(tflData || {}),
-        valor_cofre: valorCofre || 0,
-        valor_pix_externo: valorPixExterno || 0,
-      };
-
-      console.log('[useCaixa] Enviando update para Supabase:', updateData);
-
-      const data = await withRetry(async () => {
-        const result = await supabase
-          .from('caixa_sessoes')
-          .update(updateData)
-          .eq('id', sessaoAtiva.id)
-          .select()
-          .single();
-        if (result.error) throw result.error;
-        return result.data;
-      });
-
-      console.log('[useCaixa] Sessão fechada com sucesso, dados retornados:', data);
-      setSessaoAtiva(null);
-      setMovimentacoes([]);
-      return data;
-    } catch (err) {
-      console.error('[useCaixa] Erro ao fechar caixa:', err);
-      setError('Falha ao fechar o caixa. Tente novamente.');
-      throw err;
-    }
-  };
-
+  // Fechar caixa V2 - CORRIGIDO
   const fecharCaixaV2 = useCallback(async (payload: FechamentoPayload) => {
     if (!sessaoAtivaRef.current) {
-      setError('Nenhuma sessão ativa');
-      return;
+      throw new Error('Nenhuma sessão ativa');
     }
+    
     setLoading(true);
     try {
       const { resumo, reconciliacao, dinheiroEmMaos, valorEnviadoCofre,
@@ -461,26 +401,49 @@ export function useCaixa() {
         reconciliacao
       });
 
+      // Validar consistência dos dados
+      const { entradas: entradasCalc, saidas: saidasCalc, saldo: saldoCalc } = calcularTotaisMovimentacoes(movimentacoes);
+      const saldoEsperado = sessaoAtivaRef.current.valor_inicial + saldoCalc;
+      
+      // Verificar se o resumo está consistente com as movimentações
+      const resumoConsistente = Math.abs(resumo.total_entradas - entradasCalc) < 0.01 &&
+                                Math.abs(resumo.total_saidas - saidasCalc) < 0.01;
+      
+      if (!resumoConsistente) {
+        console.warn('[useCaixa] Inconsistência detectada no resumo. Recalculando...');
+        // Corrigir resumo baseado nas movimentações reais
+        const { resumo: resumoRecalculado } = calcularTotaisMovimentacoes(movimentacoes);
+        resumo.total_entradas = resumoRecalculado.pix + resumoRecalculado.dinheiro + resumoRecalculado.bolao_dinheiro + resumoRecalculado.bolao_pix;
+        resumo.total_saidas = resumoRecalculado.sangria + resumoRecalculado.deposito + resumoRecalculado.boleto + resumoRecalculado.trocados;
+      }
+
+      // Calcular diferença corretamente
+      const saldoEsperadoDinheiro = sessaoAtivaRef.current.valor_inicial + 
+                                    (resumo.entradas_dinheiro + resumo.entradas_bolao_dinheiro) - 
+                                    (resumo.saidas_sangria + resumo.saidas_deposito + resumo.saidas_boleto + resumo.saidas_trocados);
+      
+      const diferencaCorreta = dinheiroEmMaos - saldoEsperadoDinheiro;
+
       const updateData = {
         status: 'fechado',
         data_fechamento: new Date().toISOString(),
         valor_final_declarado: dinheiroEmMaos,
-        resumo_entradas_pix: resumo.entradas_pix,
-        resumo_entradas_dinheiro: resumo.entradas_dinheiro,
-        resumo_entradas_bolao_dinheiro: resumo.entradas_bolao_dinheiro,
-        resumo_entradas_bolao_pix: resumo.entradas_bolao_pix,
-        resumo_saidas_sangria: resumo.saidas_sangria,
-        resumo_saidas_deposito: resumo.saidas_deposito,
-        resumo_saidas_boleto: resumo.saidas_boleto,
-        resumo_saidas_trocados: resumo.saidas_trocados,
-        resumo_total_entradas: resumo.total_entradas,
-        resumo_total_saidas: resumo.total_saidas,
+        resumo_entradas_pix: resumo.entradas_pix || 0,
+        resumo_entradas_dinheiro: resumo.entradas_dinheiro || 0,
+        resumo_entradas_bolao_dinheiro: resumo.entradas_bolao_dinheiro || 0,
+        resumo_entradas_bolao_pix: resumo.entradas_bolao_pix || 0,
+        resumo_saidas_sangria: resumo.saidas_sangria || 0,
+        resumo_saidas_deposito: resumo.saidas_deposito || 0,
+        resumo_saidas_boleto: resumo.saidas_boleto || 0,
+        resumo_saidas_trocados: resumo.saidas_trocados || 0,
+        resumo_total_entradas: resumo.total_entradas || 0,
+        resumo_total_saidas: resumo.total_saidas || 0,
         dinheiro_em_maos: dinheiroEmMaos,
         valor_enviado_cofre: valorEnviadoCofre,
         pix_externo_informado: pixExternoInformado,
         fundo_caixa_devolvido: fundoCaixaDevolvido,
-        saldo_esperado_dinheiro: reconciliacao.saldo_esperado_dinheiro,
-        diferenca_caixa: reconciliacao.diferenca,
+        saldo_esperado_dinheiro: saldoEsperadoDinheiro,
+        diferenca_caixa: diferencaCorreta,
         auditoria_status: 'pendente',
         observacoes: observacoes || null,
       };
@@ -500,8 +463,10 @@ export function useCaixa() {
 
       console.log('[useCaixa] fecharCaixaV2 - Resposta do Supabase:', data);
       console.log('[useCaixa] Turno encerrado! Enviado para auditoria.');
+      
       setSessaoAtiva(null);
       setMovimentacoes([]);
+      return data;
     } catch (error: any) {
       console.error('[useCaixa] Erro ao fechar caixa:', error);
       setError(`Erro ao fechar caixa: ${error.message}`);
@@ -509,7 +474,74 @@ export function useCaixa() {
     } finally {
       setLoading(false);
     }
-  }, [supabase]);
+  }, [supabase, movimentacoes, calcularTotaisMovimentacoes]);
+
+  // Fechar caixa (versão antiga) - DEPRECATED, mantida para compatibilidade
+  const fecharCaixa = async (
+    observacoes?: string,
+    tflData?: {
+      tfl_vendas?: number;
+      tfl_premios?: number;
+      tfl_contas?: number;
+      tfl_saldo_projetado?: number;
+      tfl_comprovante_url?: string;
+    },
+    valorCofre?: number,
+    valorPixExterno?: number
+  ) => {
+    console.warn('[useCaixa] fecharCaixa está deprecated. Use fecharCaixaV2');
+    
+    if (!sessaoAtiva) {
+      throw new Error('Nenhuma sessão de caixa aberta');
+    }
+
+    setError(null);
+
+    try {
+      // Verificar status da sessão
+      const { data: sessaoAtual, error: sessaoError } = await supabase
+        .from('caixa_sessoes')
+        .select('status')
+        .eq('id', sessaoAtiva.id)
+        .single();
+        
+      if (sessaoError) throw sessaoError;
+      if (sessaoAtual.status !== 'aberto') {
+        throw new Error('Sessão já foi fechada por outro processo');
+      }
+
+      // Calcular valores corretamente
+      const { entradas, saidas, saldo } = calcularTotaisMovimentacoes(movimentacoes);
+      const valorFinalCalculado = sessaoAtiva.valor_inicial + saldo;
+
+      const updateData = {
+        valor_final_declarado: valorFinalCalculado,
+        status: 'fechado',
+        data_fechamento: new Date().toISOString(),
+        observacoes: observacoes,
+        ...(tflData || {}),
+        valor_cofre: valorCofre || 0,
+        valor_pix_externo: valorPixExterno || 0,
+      };
+
+      const { data, error } = await supabase
+        .from('caixa_sessoes')
+        .update(updateData)
+        .eq('id', sessaoAtiva.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setSessaoAtiva(null);
+      setMovimentacoes([]);
+      return data;
+    } catch (err) {
+      console.error('[useCaixa] Erro ao fechar caixa:', err);
+      setError('Falha ao fechar o caixa. Tente novamente.');
+      throw err;
+    }
+  };
 
   useEffect(() => {
     sessaoAtivaRef.current = sessaoAtiva;
@@ -517,8 +549,7 @@ export function useCaixa() {
 
   useEffect(() => {
     fetchSessaoAtiva();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fetchSessaoAtiva]);
 
   return {
     sessaoAtiva,
@@ -530,5 +561,6 @@ export function useCaixa() {
     fecharCaixa,
     fecharCaixaV2,
     refresh: fetchSessaoAtiva,
+    calcularTotaisMovimentacoes, // Expor função para uso externo
   };
 }
