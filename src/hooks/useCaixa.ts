@@ -37,7 +37,7 @@ export interface CaixaSessao {
 export interface CaixaMovimentacao {
   id: number;
   sessao_id: number;
-  tipo: 'venda' | 'sangria' | 'suprimento' | 'pagamento' | 'estorno' | 'pix' | 'trocados' | 'deposito' | 'boleto';
+  tipo: 'venda' | 'sangria' | 'suprimento' | 'pagamento' | 'estorno' | 'pix' | 'trocados' | 'deposito' | 'boleto' | 'venda_bolao' | 'venda_bolao_pix';
   valor: number;
   descricao: string | null;
   metodo_pagamento: string;
@@ -103,76 +103,77 @@ export function useCaixa() {
   }, []);
 
   // Função para calcular totais consistentes
- const calcularTotaisMovimentacoes = useCallback((movs: CaixaMovimentacao[]) => {
-  console.log('[useCaixa] Calculando totais para', movs.length, 'movimentações');
-  console.log('[useCaixa] Movimentações:', movs.map(m => ({ tipo: m.tipo, valor: m.valor, metodo: m.metodo_pagamento })));
-  
-  // Total de entradas (valores positivos)
-  const entradas = movs.filter(m => m.valor > 0).reduce((acc, m) => acc + m.valor, 0);
-  
-  // Total de saídas (valores negativos)
-  const saidas = movs.filter(m => m.valor < 0).reduce((acc, m) => acc + Math.abs(m.valor), 0);
-  
-  // Saldo final
-  const saldo = entradas - saidas;
-  
-  // Resumo detalhado por tipo e método de pagamento
-  const resumo = {
-    // PIX: qualquer movimentação do tipo 'pix' com valor positivo
-    pix: movs.filter(m => m.tipo === 'pix' && m.valor > 0).reduce((acc, m) => acc + m.valor, 0),
+  const calcularTotaisMovimentacoes = useCallback((movs: CaixaMovimentacao[]) => {
+    console.log('[useCaixa] Calculando totais para', movs.length, 'movimentações');
+    console.log('[useCaixa] Movimentações:', movs.map(m => ({ tipo: m.tipo, valor: m.valor, metodo: m.metodo_pagamento })));
     
-    // Dinheiro (jogos): movimentações do tipo 'venda' ou 'suprimento' com método dinheiro
-    dinheiro: movs.filter(m => (m.tipo === 'venda' || m.tipo === 'suprimento') && 
-                               m.metodo_pagamento === 'dinheiro' && 
-                               m.valor > 0)
-                   .reduce((acc, m) => acc + m.valor, 0),
+    // Total de entradas (valores positivos)
+    const entradas = movs.filter(m => m.valor > 0).reduce((acc, m) => acc + m.valor, 0);
     
-    // Bolões (dinheiro): movimentações do tipo 'venda_bolao' com método dinheiro
-    bolao_dinheiro: movs.filter(m => m.tipo === 'venda_bolao' && 
-                                     m.metodo_pagamento === 'dinheiro' && 
-                                     m.valor > 0)
-                         .reduce((acc, m) => acc + m.valor, 0),
+    // Total de saídas (valores negativos)
+    const saidas = movs.filter(m => m.valor < 0).reduce((acc, m) => acc + Math.abs(m.valor), 0);
     
-    // Bolões (PIX): movimentações do tipo 'venda_bolao' com método pix
-    bolao_pix: movs.filter(m => m.tipo === 'venda_bolao' && 
-                                m.metodo_pagamento === 'pix' && 
-                                m.valor > 0)
-                    .reduce((acc, m) => acc + m.valor, 0),
+    // Saldo final
+    const saldo = entradas - saidas;
     
-    // Sangrias: qualquer movimentação do tipo 'sangria'
-    sangria: movs.filter(m => m.tipo === 'sangria').reduce((acc, m) => acc + Math.abs(m.valor), 0),
+    // Resumo detalhado por tipo e método de pagamento
+    const resumo = {
+      // PIX: qualquer movimentação do tipo 'pix' com valor positivo
+      pix: movs.filter(m => m.tipo === 'pix' && m.valor > 0).reduce((acc, m) => acc + m.valor, 0),
+      
+      // Dinheiro (jogos): movimentações do tipo 'venda' ou 'suprimento' com método dinheiro
+      dinheiro: movs.filter(m => (m.tipo === 'venda' || m.tipo === 'suprimento') && 
+                                 m.metodo_pagamento === 'dinheiro' && 
+                                 m.valor > 0)
+                     .reduce((acc, m) => acc + m.valor, 0),
+      
+      // Bolões (dinheiro): movimentações do tipo 'venda_bolao' com método dinheiro
+      bolao_dinheiro: movs.filter(m => m.tipo === 'venda_bolao' && 
+                                       m.metodo_pagamento === 'dinheiro' && 
+                                       m.valor > 0)
+                           .reduce((acc, m) => acc + m.valor, 0),
+      
+      // Bolões (PIX): movimentações do tipo 'venda_bolao_pix' com método pix
+      bolao_pix: movs.filter(m => m.tipo === 'venda_bolao_pix' && 
+                                  m.metodo_pagamento === 'pix' && 
+                                  m.valor > 0)
+                      .reduce((acc, m) => acc + m.valor, 0),
+      
+      // Sangrias: qualquer movimentação do tipo 'sangria'
+      sangria: movs.filter(m => m.tipo === 'sangria').reduce((acc, m) => acc + Math.abs(m.valor), 0),
+      
+      // Depósitos: movimentações do tipo 'deposito'
+      deposito: movs.filter(m => m.tipo === 'deposito').reduce((acc, m) => acc + Math.abs(m.valor), 0),
+      
+      // Boletos: movimentações do tipo 'boleto'
+      boleto: movs.filter(m => m.tipo === 'boleto').reduce((acc, m) => acc + Math.abs(m.valor), 0),
+      
+      // Trocados: movimentações do tipo 'trocados'
+      trocados: movs.filter(m => m.tipo === 'trocados').reduce((acc, m) => acc + Math.abs(m.valor), 0),
+    };
     
-    // Depósitos: movimentações do tipo 'deposito'
-    deposito: movs.filter(m => m.tipo === 'deposito').reduce((acc, m) => acc + Math.abs(m.valor), 0),
+    // Adicionar outras entradas que não se encaixam nas categorias acima
+    const outrasEntradas = movs.filter(m => m.valor > 0 && 
+                                           m.tipo !== 'pix' && 
+                                           m.tipo !== 'venda' && 
+                                           m.tipo !== 'suprimento' && 
+                                           m.tipo !== 'venda_bolao' &&
+                                           m.tipo !== 'venda_bolao_pix')
+                                .reduce((acc, m) => acc + m.valor, 0);
     
-    // Boletos: movimentações do tipo 'boleto'
-    boleto: movs.filter(m => m.tipo === 'boleto').reduce((acc, m) => acc + Math.abs(m.valor), 0),
+    if (outrasEntradas > 0) {
+      console.log('[useCaixa] Outras entradas detectadas:', outrasEntradas);
+      // Se houver outras entradas, podemos adicionar ao dinheiro
+      resumo.dinheiro += outrasEntradas;
+    }
     
-    // Trocados: movimentações do tipo 'trocados'
-    trocados: movs.filter(m => m.tipo === 'trocados').reduce((acc, m) => acc + Math.abs(m.valor), 0),
-  };
-  
-  // Adicionar outras entradas que não se encaixam nas categorias acima
-  const outrasEntradas = movs.filter(m => m.valor > 0 && 
-                                         m.tipo !== 'pix' && 
-                                         m.tipo !== 'venda' && 
-                                         m.tipo !== 'suprimento' && 
-                                         m.tipo !== 'venda_bolao')
-                              .reduce((acc, m) => acc + m.valor, 0);
-  
-  if (outrasEntradas > 0) {
-    console.log('[useCaixa] Outras entradas detectadas:', outrasEntradas);
-    // Se houver outras entradas, podemos adicionar ao dinheiro ou criar uma categoria separada
-    resumo.dinheiro += outrasEntradas;
-  }
-  
-  console.log('[useCaixa] Totais calculados:', resumo);
-  console.log('[useCaixa] Total entradas:', entradas);
-  console.log('[useCaixa] Total saídas:', saidas);
-  console.log('[useCaixa] Saldo:', saldo);
-  
-  return { entradas, saidas, saldo, resumo };
-}, []);
+    console.log('[useCaixa] Totais calculados:', resumo);
+    console.log('[useCaixa] Total entradas:', entradas);
+    console.log('[useCaixa] Total saídas:', saidas);
+    console.log('[useCaixa] Saldo:', saldo);
+    
+    return { entradas, saidas, saldo, resumo };
+  }, []);
 
   const fetchMovimentacoes = useCallback(
     async (sessaoId: number) => {
@@ -317,7 +318,6 @@ export function useCaixa() {
         } else if (status === 'CHANNEL_ERROR') {
           console.error('[useCaixa] Erro no canal Realtime:', err);
           setError('Erro na conexão em tempo real. Tentando reconectar...');
-          // Tenta reconectar após 5 segundos
           setTimeout(() => {
             if (realtimeChannel.current && sessaoAtiva) {
               console.log('[useCaixa] Tentando reconectar canal Realtime');
@@ -454,12 +454,23 @@ export function useCaixa() {
         valorEnviadoCofre,
         pixExternoInformado,
         fundoCaixaDevolvido,
-        resumo,
+        resumo: {
+          entradas_pix: resumo.entradas_pix,
+          entradas_dinheiro: resumo.entradas_dinheiro,
+          entradas_bolao_dinheiro: resumo.entradas_bolao_dinheiro,
+          entradas_bolao_pix: resumo.entradas_bolao_pix,
+          saidas_sangria: resumo.saidas_sangria,
+          saidas_deposito: resumo.saidas_deposito,
+          saidas_boleto: resumo.saidas_boleto,
+          saidas_trocados: resumo.saidas_trocados,
+          total_entradas: resumo.total_entradas,
+          total_saidas: resumo.total_saidas
+        },
         reconciliacao
       });
 
       // Validar consistência dos dados
-      const { entradas: entradasCalc, saidas: saidasCalc, saldo: saldoCalc } = calcularTotaisMovimentacoes(movimentacoes);
+      const { entradas: entradasCalc, saidas: saidasCalc, saldo: saldoCalc, resumo: resumoCalc } = calcularTotaisMovimentacoes(movimentacoes);
       const saldoEsperado = sessaoAtivaRef.current.valor_inicial + saldoCalc;
       
       // Verificar se o resumo está consistente com as movimentações
@@ -467,11 +478,18 @@ export function useCaixa() {
                                 Math.abs(resumo.total_saidas - saidasCalc) < 0.01;
       
       if (!resumoConsistente) {
-        console.warn('[useCaixa] Inconsistência detectada no resumo. Recalculando...');
-        // Corrigir resumo baseado nas movimentações reais
-        const { resumo: resumoRecalculado } = calcularTotaisMovimentacoes(movimentacoes);
-        resumo.total_entradas = resumoRecalculado.pix + resumoRecalculado.dinheiro + resumoRecalculado.bolao_dinheiro + resumoRecalculado.bolao_pix;
-        resumo.total_saidas = resumoRecalculado.sangria + resumoRecalculado.deposito + resumoRecalculado.boleto + resumoRecalculado.trocados;
+        console.warn('[useCaixa] Inconsistência detectada no resumo. Usando valores calculados:', resumoCalc);
+        // Usar os valores calculados das movimentações
+        resumo.entradas_pix = resumoCalc.pix;
+        resumo.entradas_dinheiro = resumoCalc.dinheiro;
+        resumo.entradas_bolao_dinheiro = resumoCalc.bolao_dinheiro;
+        resumo.entradas_bolao_pix = resumoCalc.bolao_pix;
+        resumo.saidas_sangria = resumoCalc.sangria;
+        resumo.saidas_deposito = resumoCalc.deposito;
+        resumo.saidas_boleto = resumoCalc.boleto;
+        resumo.saidas_trocados = resumoCalc.trocados;
+        resumo.total_entradas = entradasCalc;
+        resumo.total_saidas = saidasCalc;
       }
 
       // Calcular diferença corretamente
