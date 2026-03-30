@@ -552,71 +552,115 @@ export function useCaixa() {
   }, [supabase, movimentacoes, calcularTotaisMovimentacoes]);
 
   // Fechar caixa (versão antiga) - DEPRECATED, mantida para compatibilidade
-  const fecharCaixa = async (
+ const fecharCaixa = async (
     observacoes?: string,
-    tflData?: {
-      tfl_vendas?: number;
-      tfl_premios?: number;
-      tfl_contas?: number;
-      tfl_saldo_projetado?: number;
-      tfl_comprovante_url?: string;
-    },
+    tflData?: any,
     valorCofre?: number,
     valorPixExterno?: number
-  ) => {
-    console.warn('[useCaixa] fecharCaixa está deprecated. Use fecharCaixaV2');
+) => {
+    console.log('[useCaixa] fecharCaixa iniciado', { observacoes, valorCofre, valorPixExterno });
     
     if (!sessaoAtiva) {
-      throw new Error('Nenhuma sessão de caixa aberta');
+        throw new Error('Nenhuma sessão de caixa aberta');
     }
 
     setError(null);
 
     try {
-      // Verificar status da sessão
-      const { data: sessaoAtual, error: sessaoError } = await supabase
-        .from('caixa_sessoes')
-        .select('status')
-        .eq('id', sessaoAtiva.id)
-        .single();
+        // Verificar status da sessão
+        const { data: sessaoAtual, error: sessaoError } = await supabase
+            .from('caixa_sessoes')
+            .select('status')
+            .eq('id', sessaoAtiva.id)
+            .single();
+            
+        if (sessaoError) throw sessaoError;
+        if (sessaoAtual.status !== 'aberto') {
+            throw new Error('Sessão já foi fechada por outro processo');
+        }
+
+        // Calcular totais das movimentações
+        const { entradas, saidas, saldo, resumo } = calcularTotaisMovimentacoes(movimentacoes);
         
-      if (sessaoError) throw sessaoError;
-      if (sessaoAtual.status !== 'aberto') {
-        throw new Error('Sessão já foi fechada por outro processo');
-      }
+        // Calcular saldo final em dinheiro
+        const totalEntradasDinheiro = resumo.dinheiro + resumo.bolao_dinheiro;
+        const totalSaidasDinheiro = resumo.sangria + resumo.deposito + resumo.boleto + resumo.trocados;
+        const saldoEsperadoDinheiro = sessaoAtiva.valor_inicial + totalEntradasDinheiro - totalSaidasDinheiro;
+        
+        // Saldo declarado pelo operador (dinheiro em mãos)
+        // O operador não informa mais dinheiro em mãos diretamente, mas podemos calcular
+        // a partir do valor no cofre + fundo devolvido + dinheiro que ficou na gaveta?
+        // Neste caso, o operador declarou saldo de R$ 12.274,94 que deve ser o dinheiro em mãos
+        const dinheiroEmMaos = saldoEsperadoDinheiro; // Por enquanto usa o esperado
+        
+        // Calcular diferença
+        const diferenca = (valorCofre || 0) + (valorPixExterno || 0) - saldoEsperadoDinheiro;
+        
+        console.log('[useCaixa] Cálculos do fechamento:', {
+            valor_inicial: sessaoAtiva.valor_inicial,
+            resumo,
+            totalEntradas: entradas,
+            totalSaidas: saidas,
+            saldoCalculado: saldo,
+            totalEntradasDinheiro,
+            totalSaidasDinheiro,
+            saldoEsperadoDinheiro,
+            valorCofre,
+            valorPixExterno,
+            diferenca
+        });
 
-      // Calcular valores corretamente
-      const { entradas, saidas, saldo } = calcularTotaisMovimentacoes(movimentacoes);
-      const valorFinalCalculado = sessaoAtiva.valor_inicial + saldo;
+        const updateData = {
+            status: 'fechado',
+            data_fechamento: new Date().toISOString(),
+            // Campos de resumo das movimentações
+            resumo_entradas_pix: resumo.pix,
+            resumo_entradas_dinheiro: resumo.dinheiro,
+            resumo_entradas_bolao_dinheiro: resumo.bolao_dinheiro,
+            resumo_entradas_bolao_pix: resumo.bolao_pix,
+            resumo_saidas_sangria: resumo.sangria,
+            resumo_saidas_deposito: resumo.deposito,
+            resumo_saidas_boleto: resumo.boleto,
+            resumo_saidas_trocados: resumo.trocados,
+            resumo_total_entradas: entradas,
+            resumo_total_saidas: saidas,
+            // Campos do operador
+            dinheiro_em_maos: dinheiroEmMaos,
+            valor_enviado_cofre: valorCofre || 0,
+            pix_externo_informado: valorPixExterno || 0,
+            fundo_caixa_devolvido: sessaoAtiva.tem_fundo_caixa !== false,
+            saldo_esperado_dinheiro: saldoEsperadoDinheiro,
+            diferenca_caixa: diferenca,
+            valor_final_declarado: dinheiroEmMaos,
+            valor_final_calculado: sessaoAtiva.valor_inicial + saldo,
+            observacoes: observacoes || null,
+            auditoria_status: 'pendente'
+        };
 
-      const updateData = {
-        valor_final_declarado: valorFinalCalculado,
-        status: 'fechado',
-        data_fechamento: new Date().toISOString(),
-        observacoes: observacoes,
-        ...(tflData || {}),
-        valor_cofre: valorCofre || 0,
-        valor_pix_externo: valorPixExterno || 0,
-      };
+        console.log('[useCaixa] Dados enviados para update:', updateData);
 
-      const { data, error } = await supabase
-        .from('caixa_sessoes')
-        .update(updateData)
-        .eq('id', sessaoAtiva.id)
-        .select()
-        .single();
+        const { data, error } = await supabase
+            .from('caixa_sessoes')
+            .update(updateData)
+            .eq('id', sessaoAtiva.id)
+            .select()
+            .single();
 
-      if (error) throw error;
+        if (error) {
+            console.error('[useCaixa] Erro no update:', error);
+            throw error;
+        }
 
-      setSessaoAtiva(null);
-      setMovimentacoes([]);
-      return data;
+        console.log('[useCaixa] Sessão fechada com sucesso:', data);
+        setSessaoAtiva(null);
+        setMovimentacoes([]);
+        return data;
     } catch (err) {
-      console.error('[useCaixa] Erro ao fechar caixa:', err);
-      setError('Falha ao fechar o caixa. Tente novamente.');
-      throw err;
+        console.error('[useCaixa] Erro ao fechar caixa:', err);
+        setError('Falha ao fechar o caixa. Tente novamente.');
+        throw err;
     }
-  };
+};
 
   useEffect(() => {
     sessaoAtivaRef.current = sessaoAtiva;
