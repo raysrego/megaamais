@@ -83,6 +83,32 @@ interface MovimentacaoDetalhada {
     };
 }
 
+// Função auxiliar para formatar status de reconciliação
+function getStatusReconciliacao(diferenca: number): { label: string; cor: string; icone: 'check' | 'alert' | 'x'; texto: string } {
+    if (Math.abs(diferenca) < 0.01) {
+        return {
+            label: 'Conferido',
+            cor: '#22c55e',
+            icone: 'check',
+            texto: 'Valores conferem'
+        };
+    }
+    if (diferenca > 0) {
+        return {
+            label: 'Sobra',
+            cor: '#f97316',
+            icone: 'alert',
+            texto: 'Sobra de caixa'
+        };
+    }
+    return {
+        label: 'Falta',
+        cor: '#ef4444',
+        icone: 'x',
+        texto: 'Falta de caixa'
+    };
+}
+
 export function AuditoriaFechamentos() {
     const { toast } = useToast();
     const confirm = useConfirm();
@@ -179,7 +205,7 @@ export function AuditoriaFechamentos() {
             title: 'Aprovar Fechamento',
             description: `Tem certeza que deseja aprovar o fechamento do terminal ${selected.terminal_id} do turno ${selected.data_turno}?${observacoesGerente ? '\n\nObservação: ' + observacoesGerente : ''}`,
             confirmLabel: 'Sim, Aprovar',
-            variant: 'neutral' // Alterado de 'success' para 'neutral'
+            variant: 'neutral'
         });
         
         if (!confirmado) return;
@@ -219,7 +245,7 @@ export function AuditoriaFechamentos() {
                 ? `Solicitar correção para o operador do terminal ${selected.terminal_id}? Ele poderá ajustar os valores e reenviar.`
                 : `Rejeitar definitivamente o fechamento do terminal ${selected.terminal_id}? Esta ação não poderá ser desfeita.`,
             confirmLabel: solicitarCorrecao ? 'Solicitar Correção' : 'Rejeitar',
-            variant: solicitarCorrecao ? 'danger' : 'danger' // Ambos usam 'danger' que é permitido
+            variant: 'danger'
         });
         
         if (!confirmado) return;
@@ -516,10 +542,7 @@ export function AuditoriaFechamentos() {
 
                         {/* Conferência de Caixa */}
                         {(() => {
-                            const statusInfo = formatarStatusReconciliacao(
-                                Math.abs(selected.diferenca_caixa || 0) < 0.01 ? 'batido' :
-                                    (selected.diferenca_caixa || 0) > 0 ? 'sobra' : 'falta'
-                            );
+                            const statusInfo = getStatusReconciliacao(selected.diferenca_caixa || 0);
                             return (
                                 <div className={`p-4 rounded-xl border-2 ${
                                     statusInfo.icone === 'check' ? 'bg-success/10 border-success/20' :
@@ -550,7 +573,7 @@ export function AuditoriaFechamentos() {
                                                     {(selected.diferenca_caixa || 0) >= 0 ? '+' : ''}R$ {(selected.diferenca_caixa || 0).toFixed(2)}
                                                 </span>
                                                 <p className="text-[10px] text-muted mt-0.5">
-                                                    {statusInfo.texto || (selected.diferenca_caixa === 0 ? 'Conferido' : 'Divergente')}
+                                                    {statusInfo.texto}
                                                 </p>
                                             </div>
                                         </div>
