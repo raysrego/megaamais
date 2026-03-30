@@ -1,5 +1,3 @@
-// hooks/useCaixa.ts - CORREÇÃO
-
 'use client';
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
@@ -47,6 +45,7 @@ export interface CaixaMovimentacao {
   classificacao_pix: string | null;
   item_financeiro_id?: number | null;
   categoria_operacional_id?: number | null;
+  data_vencimento?: string;
   created_at: string;
   deleted_at?: string | null;
   categorias_operacionais?: {
@@ -66,6 +65,10 @@ export interface FechamentoPayload {
     fundoCaixaDevolvido: boolean;
 }
 
+/**
+ * Helper para executar uma função assíncrona com retry automático.
+ * A função deve lançar erro para que a tentativa seja considerada falha.
+ */
 const withRetry = async <T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> => {
   let lastError: any;
   for (let i = 0; i < maxRetries; i++) {
@@ -74,7 +77,7 @@ const withRetry = async <T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> =>
     } catch (err) {
       lastError = err;
       if (i < maxRetries - 1) {
-        await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+        await new Promise(r => setTimeout(r, 1000 * (i + 1))); // backoff exponencial
       }
     }
   }
@@ -108,7 +111,7 @@ export function useCaixa() {
     // Agrupamento por tipo para resumo
     const resumo = {
       pix: movs.filter(m => m.tipo === 'pix' && m.valor > 0).reduce((acc, m) => acc + m.valor, 0),
-      dinheiro: movs.filter(m => m.metodo_pagamento === 'dinheiro' && m.valor > 0 && m.tipo !== 'sangria').reduce((acc, m) => acc + m.valor, 0),
+      dinheiro: movs.filter(m => m.metodo_pagamento === 'dinheiro' && m.valor > 0 && m.tipo !== 'pix').reduce((acc, m) => acc + m.valor, 0),
       bolao_dinheiro: 0, // Será calculado separadamente
       bolao_pix: 0, // Será calculado separadamente
       sangria: movs.filter(m => m.tipo === 'sangria').reduce((acc, m) => acc + Math.abs(m.valor), 0),
@@ -125,35 +128,37 @@ export function useCaixa() {
       if (!isMounted.current) return;
       try {
         console.log(`[useCaixa] Buscando movimentações da sessão ${sessaoId}`);
-        const { data, error } = await withRetry(async () => {
-          const result = await supabase
+        const result = await withRetry(async () => {
+          const response = await supabase
             .from('caixa_movimentacoes')
             .select(`*, categorias_operacionais!categoria_operacional_id(id, nome, cor)`)
             .eq('sessao_id', sessaoId)
             .is('deleted_at', null)
             .order('created_at', { ascending: false })
             .limit(100);
-          if (result.error) throw result.error;
-          return result.data;
+          if (response.error) throw response.error;
+          return response.data;
         });
         
-        if (isMounted.current && data) {
-          console.log(`[useCaixa] ${data.length} movimentações carregadas`);
-          setMovimentacoes(data);
+        if (isMounted.current && result) {
+          console.log(`[useCaixa] ${result.length} movimentações carregadas`);
+          setMovimentacoes(result as CaixaMovimentacao[]);
           
           // Atualizar valor_final_calculado para garantir consistência
-          const { saldo } = calcularTotaisMovimentacoes(data);
+          const { saldo } = calcularTotaisMovimentacoes(result as CaixaMovimentacao[]);
           const valorFinalCalculado = (sessaoAtiva?.valor_inicial || 0) + saldo;
           
           // Se houver discrepância, atualizar no banco
           if (sessaoAtiva && Math.abs(sessaoAtiva.valor_final_calculado - valorFinalCalculado) > 0.01) {
             console.warn('[useCaixa] Discrepância detectada no saldo calculado, corrigindo...');
-            await supabase
+            const { error: updateError } = await supabase
               .from('caixa_sessoes')
               .update({ valor_final_calculado: valorFinalCalculado })
               .eq('id', sessaoAtiva.id);
             
-            setSessaoAtiva(prev => prev ? { ...prev, valor_final_calculado: valorFinalCalculado } : null);
+            if (!updateError) {
+              setSessaoAtiva(prev => prev ? { ...prev, valor_final_calculado: valorFinalCalculado } : null);
+            }
           }
         }
       } catch (err) {
@@ -176,10 +181,10 @@ export function useCaixa() {
     setError(null);
     try {
       console.log('[useCaixa] Verificando sessão ativa do usuário');
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      const { data: userData, error: userError } = await supabase.auth.getUser();
       if (userError) throw userError;
       
-      if (!user) {
+      if (!userData.user) {
         console.log('[useCaixa] Usuário não autenticado');
         if (isMounted.current) {
           setSessaoAtiva(null);
@@ -188,24 +193,24 @@ export function useCaixa() {
         return;
       }
 
-      const { data, error } = await withRetry(async () => {
-        const result = await supabase
+      const result = await withRetry(async () => {
+        const response = await supabase
           .from('caixa_sessoes')
           .select('*, terminais!terminal_id_ref(codigo, descricao), data_turno')
-          .eq('operador_id', user.id)
+          .eq('operador_id', userData.user.id)
           .eq('status', 'aberto')
           .maybeSingle();
-        if (result.error) throw result.error;
-        return result.data;
+        if (response.error) throw response.error;
+        return response.data;
       });
 
       if (isMounted.current) {
-        if (data) {
+        if (result) {
           setSessaoAtiva(prev => {
-            if (prev?.id === data.id) return prev;
-            return data;
+            if (prev?.id === result.id) return prev;
+            return result as CaixaSessao;
           });
-          await fetchMovimentacoes(data.id);
+          await fetchMovimentacoes(result.id);
         } else {
           console.log('[useCaixa] Nenhuma sessão ativa encontrada');
           setSessaoAtiva(null);
@@ -261,6 +266,7 @@ export function useCaixa() {
         } else if (status === 'CHANNEL_ERROR') {
           console.error('[useCaixa] Erro no canal Realtime:', err);
           setError('Erro na conexão em tempo real. Tentando reconectar...');
+          // Tenta reconectar após 5 segundos
           setTimeout(() => {
             if (realtimeChannel.current && sessaoAtiva) {
               console.log('[useCaixa] Tentando reconectar canal Realtime');
@@ -293,17 +299,17 @@ export function useCaixa() {
     setError(null);
     console.log('[useCaixa] abrirCaixa chamado', { valorInicial, terminalCodigo, terminalId, temFundoCaixa, dataTurno });
     try {
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      const { data: userData, error: userError } = await supabase.auth.getUser();
       if (userError) throw userError;
-      if (!user) throw new Error('Usuário não autenticado');
+      if (!userData.user) throw new Error('Usuário não autenticado');
 
       const turnoData = dataTurno || new Date().toISOString().split('T')[0];
 
-      const { data, error } = await withRetry(async () => {
-        const result = await supabase
+      const result = await withRetry(async () => {
+        const response = await supabase
           .from('caixa_sessoes')
           .insert({
-            operador_id: user.id,
+            operador_id: userData.user.id,
             terminal_id: terminalCodigo || 'TFL-WEB',
             terminal_id_ref: terminalId || null,
             valor_inicial: valorInicial,
@@ -314,12 +320,12 @@ export function useCaixa() {
           })
           .select()
           .single();
-        if (result.error) throw result.error;
-        return result.data;
+        if (response.error) throw response.error;
+        return response.data;
       });
-      console.log('[useCaixa] Caixa aberto, sessão criada:', data.id);
-      setSessaoAtiva(data);
-      return data;
+      console.log('[useCaixa] Caixa aberto, sessão criada:', result.id);
+      setSessaoAtiva(result as CaixaSessao);
+      return result;
     } catch (err) {
       console.error('[useCaixa] Erro ao abrir caixa:', err);
       setError('Falha ao abrir o caixa. Tente novamente.');
@@ -327,7 +333,7 @@ export function useCaixa() {
     }
   };
 
-  // Registrar movimentação - CORRIGIDO
+  // Registrar movimentação
   const registrarMovimentacao = async (
     mov: Omit<CaixaMovimentacao, 'id' | 'sessao_id' | 'created_at'>
   ) => {
@@ -341,8 +347,8 @@ export function useCaixa() {
         throw new Error(`Data do lançamento (${mov.data_vencimento}) não corresponde à data do turno (${sessaoAtiva.data_turno})`);
       }
 
-      const { data, error } = await withRetry(async () => {
-        const result = await supabase
+      const result = await withRetry(async () => {
+        const response = await supabase
           .from('caixa_movimentacoes')
           .insert({
             sessao_id: sessaoAtiva.id,
@@ -350,30 +356,30 @@ export function useCaixa() {
           })
           .select()
           .single();
-        if (result.error) throw result.error;
-        return result.data;
+        if (response.error) throw response.error;
+        return response.data;
       });
 
       // Recalcular saldo baseado nas movimentações atuais + nova
-      const todasMovs = [...movimentacoes, data];
+      const todasMovs = [...movimentacoes, result as CaixaMovimentacao];
       const { saldo } = calcularTotaisMovimentacoes(todasMovs);
       const novoSaldo = sessaoAtiva.valor_inicial + saldo;
 
       console.log('[useCaixa] Atualizando saldo calculado para', novoSaldo);
 
       await withRetry(async () => {
-        const result = await supabase
+        const response = await supabase
           .from('caixa_sessoes')
           .update({ valor_final_calculado: novoSaldo })
           .eq('id', sessaoAtiva.id);
-        if (result.error) throw result.error;
-        return result.data;
+        if (response.error) throw response.error;
+        return response.data;
       });
 
       setSessaoAtiva(prev => (prev ? { ...prev, valor_final_calculado: novoSaldo } : null));
-      setMovimentacoes(prev => [data, ...prev]);
+      setMovimentacoes(prev => [result as CaixaMovimentacao, ...prev]);
 
-      return data;
+      return result;
     } catch (err) {
       console.error('[useCaixa] Erro ao registrar movimentação:', err);
       setError('Erro ao registrar movimentação. Verifique sua conexão.');
@@ -381,7 +387,7 @@ export function useCaixa() {
     }
   };
 
-  // Fechar caixa V2 - CORRIGIDO
+  // Fechar caixa V2
   const fecharCaixaV2 = useCallback(async (payload: FechamentoPayload) => {
     if (!sessaoAtivaRef.current) {
       throw new Error('Nenhuma sessão ativa');
@@ -561,6 +567,6 @@ export function useCaixa() {
     fecharCaixa,
     fecharCaixaV2,
     refresh: fetchSessaoAtiva,
-    calcularTotaisMovimentacoes, // Expor função para uso externo
+    calcularTotaisMovimentacoes,
   };
 }
