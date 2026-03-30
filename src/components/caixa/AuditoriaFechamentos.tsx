@@ -77,7 +77,7 @@ interface MovimentacaoDetalhada {
     descricao: string | null;
     metodo_pagamento: string;
     created_at: string;
-    categoria_operacional?: {
+    categorias_operacionais?: {
         nome: string;
         cor: string;
     };
@@ -160,7 +160,7 @@ export function AuditoriaFechamentos() {
             const movs = await getMovimentacoesSessao(f.id);
             setMovimentacoes(movs.map(m => ({
                 ...m,
-                categoria_operacional: m.categorias_operacionais
+                categorias_operacionais: m.categorias_operacionais
             })));
         } catch (err: any) {
             console.error('[AuditoriaFechamentos] Erro ao carregar movimentações:', err);
@@ -174,12 +174,12 @@ export function AuditoriaFechamentos() {
     const handleAprovar = async () => {
         if (!selected) return;
         
-        // Confirmar aprovação
+        // Confirmar aprovação - usando 'neutral' que é o tipo permitido
         const confirmado = await confirm({
             title: 'Aprovar Fechamento',
             description: `Tem certeza que deseja aprovar o fechamento do terminal ${selected.terminal_id} do turno ${selected.data_turno}?${observacoesGerente ? '\n\nObservação: ' + observacoesGerente : ''}`,
             confirmLabel: 'Sim, Aprovar',
-            variant: 'success'
+            variant: 'neutral' // Alterado de 'success' para 'neutral'
         });
         
         if (!confirmado) return;
@@ -219,7 +219,7 @@ export function AuditoriaFechamentos() {
                 ? `Solicitar correção para o operador do terminal ${selected.terminal_id}? Ele poderá ajustar os valores e reenviar.`
                 : `Rejeitar definitivamente o fechamento do terminal ${selected.terminal_id}? Esta ação não poderá ser desfeita.`,
             confirmLabel: solicitarCorrecao ? 'Solicitar Correção' : 'Rejeitar',
-            variant: solicitarCorrecao ? 'warning' : 'danger'
+            variant: solicitarCorrecao ? 'danger' : 'danger' // Ambos usam 'danger' que é permitido
         });
         
         if (!confirmado) return;
@@ -860,9 +860,9 @@ function DetalhesMovimentacoes({
                             }`}>
                                 {m.tipo}
                             </span>
-                            {m.categoria_operacional?.nome && (
+                            {m.categorias_operacionais?.nome && (
                                 <span className="text-[10px] text-muted">
-                                    • {m.categoria_operacional.nome}
+                                    • {m.categorias_operacionais.nome}
                                 </span>
                             )}
                         </div>
