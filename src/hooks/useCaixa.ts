@@ -105,7 +105,6 @@ export function useCaixa() {
   // Função para calcular totais consistentes
   const calcularTotaisMovimentacoes = useCallback((movs: CaixaMovimentacao[]) => {
     console.log('[useCaixa] Calculando totais para', movs.length, 'movimentações');
-    console.log('[useCaixa] Movimentações:', movs.map(m => ({ tipo: m.tipo, valor: m.valor, metodo: m.metodo_pagamento })));
     
     // Total de entradas (valores positivos)
     const entradas = movs.filter(m => m.valor > 0).reduce((acc, m) => acc + m.valor, 0);
@@ -118,62 +117,49 @@ export function useCaixa() {
     
     // Resumo detalhado por tipo e método de pagamento
     const resumo = {
-      // PIX: qualquer movimentação do tipo 'pix' com valor positivo
-      pix: movs.filter(m => m.tipo === 'pix' && m.valor > 0).reduce((acc, m) => acc + m.valor, 0),
-      
-      // Dinheiro (jogos): movimentações do tipo 'venda' ou 'suprimento' com método dinheiro
-      dinheiro: movs.filter(m => (m.tipo === 'venda' || m.tipo === 'suprimento') && 
-                                 m.metodo_pagamento === 'dinheiro' && 
-                                 m.valor > 0)
-                     .reduce((acc, m) => acc + m.valor, 0),
-      
-      // Bolões (dinheiro): movimentações do tipo 'venda_bolao' com método dinheiro
-      bolao_dinheiro: movs.filter(m => m.tipo === 'venda_bolao' && 
-                                       m.metodo_pagamento === 'dinheiro' && 
-                                       m.valor > 0)
-                           .reduce((acc, m) => acc + m.valor, 0),
-      
-      // Bolões (PIX): movimentações do tipo 'venda_bolao_pix' com método pix
-      bolao_pix: movs.filter(m => m.tipo === 'venda_bolao_pix' && 
-                                  m.metodo_pagamento === 'pix' && 
-                                  m.valor > 0)
-                      .reduce((acc, m) => acc + m.valor, 0),
-      
-      // Sangrias: qualquer movimentação do tipo 'sangria'
-      sangria: movs.filter(m => m.tipo === 'sangria').reduce((acc, m) => acc + Math.abs(m.valor), 0),
-      
-      // Depósitos: movimentações do tipo 'deposito'
-      deposito: movs.filter(m => m.tipo === 'deposito').reduce((acc, m) => acc + Math.abs(m.valor), 0),
-      
-      // Boletos: movimentações do tipo 'boleto'
-      boleto: movs.filter(m => m.tipo === 'boleto').reduce((acc, m) => acc + Math.abs(m.valor), 0),
-      
-      // Trocados: movimentações do tipo 'trocados'
-      trocados: movs.filter(m => m.tipo === 'trocados').reduce((acc, m) => acc + Math.abs(m.valor), 0),
+        // PIX: qualquer movimentação do tipo 'pix' com valor positivo
+        pix: movs.filter(m => m.tipo === 'pix' && m.valor > 0).reduce((acc, m) => acc + m.valor, 0),
+        
+        // Dinheiro (jogos): movimentações do tipo 'venda' ou 'suprimento' com método dinheiro
+        dinheiro: movs.filter(m => (m.tipo === 'venda' || m.tipo === 'suprimento') && 
+                                   m.metodo_pagamento === 'dinheiro' && 
+                                   m.valor > 0)
+                       .reduce((acc, m) => acc + m.valor, 0),
+        
+        // Bolões (dinheiro): movimentações do tipo 'venda_bolao' com método dinheiro
+        bolao_dinheiro: movs.filter(m => m.tipo === 'venda_bolao' && 
+                                         m.metodo_pagamento === 'dinheiro' && 
+                                         m.valor > 0)
+                             .reduce((acc, m) => acc + m.valor, 0),
+        
+        // Bolões (PIX): movimentações do tipo 'venda_bolao_pix' com método pix
+        bolao_pix: movs.filter(m => m.tipo === 'venda_bolao_pix' && 
+                                    m.metodo_pagamento === 'pix' && 
+                                    m.valor > 0)
+                        .reduce((acc, m) => acc + m.valor, 0),
+        
+        // Sangrias: qualquer movimentação do tipo 'sangria'
+        sangria: movs.filter(m => m.tipo === 'sangria').reduce((acc, m) => acc + Math.abs(m.valor), 0),
+        
+        // Depósitos: movimentações do tipo 'deposito'
+        deposito: movs.filter(m => m.tipo === 'deposito').reduce((acc, m) => acc + Math.abs(m.valor), 0),
+        
+        // Boletos: movimentações do tipo 'boleto'
+        boleto: movs.filter(m => m.tipo === 'boleto').reduce((acc, m) => acc + Math.abs(m.valor), 0),
+        
+        // Trocados: movimentações do tipo 'trocados'
+        trocados: movs.filter(m => m.tipo === 'trocados').reduce((acc, m) => acc + Math.abs(m.valor), 0),
     };
     
-    // Adicionar outras entradas que não se encaixam nas categorias acima
-    const outrasEntradas = movs.filter(m => m.valor > 0 && 
-                                           m.tipo !== 'pix' && 
-                                           m.tipo !== 'venda' && 
-                                           m.tipo !== 'suprimento' && 
-                                           m.tipo !== 'venda_bolao' &&
-                                           m.tipo !== 'venda_bolao_pix')
-                                .reduce((acc, m) => acc + m.valor, 0);
-    
-    if (outrasEntradas > 0) {
-      console.log('[useCaixa] Outras entradas detectadas:', outrasEntradas);
-      // Se houver outras entradas, podemos adicionar ao dinheiro
-      resumo.dinheiro += outrasEntradas;
-    }
-    
-    console.log('[useCaixa] Totais calculados:', resumo);
-    console.log('[useCaixa] Total entradas:', entradas);
-    console.log('[useCaixa] Total saídas:', saidas);
-    console.log('[useCaixa] Saldo:', saldo);
+    console.log('[useCaixa] Totais calculados:', {
+        entradas,
+        saidas,
+        saldo,
+        resumo
+    });
     
     return { entradas, saidas, saldo, resumo };
-  }, []);
+}, []);
 
   const fetchMovimentacoes = useCallback(
     async (sessaoId: number) => {
