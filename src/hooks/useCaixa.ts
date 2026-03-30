@@ -452,34 +452,53 @@ export function useCaixa() {
       const { resumo, reconciliacao, dinheiroEmMaos, valorEnviadoCofre,
           pixExternoInformado, fundoCaixaDevolvido, observacoes } = payload;
 
-      const { error } = await supabase
-        .from('caixa_sessoes')
-        .update({
-          status: 'fechado',
-          data_fechamento: new Date().toISOString(),
-          valor_final_declarado: dinheiroEmMaos,
-          resumo_entradas_pix: resumo.entradas_pix,
-          resumo_entradas_dinheiro: resumo.entradas_dinheiro,
-          resumo_entradas_bolao_dinheiro: resumo.entradas_bolao_dinheiro,
-          resumo_entradas_bolao_pix: resumo.entradas_bolao_pix,
-          resumo_saidas_sangria: resumo.saidas_sangria,
-          resumo_saidas_deposito: resumo.saidas_deposito,
-          resumo_saidas_boleto: resumo.saidas_boleto,
-          resumo_saidas_trocados: resumo.saidas_trocados,
-          resumo_total_entradas: resumo.total_entradas,
-          resumo_total_saidas: resumo.total_saidas,
-          dinheiro_em_maos: dinheiroEmMaos,
-          valor_enviado_cofre: valorEnviadoCofre,
-          pix_externo_informado: pixExternoInformado,
-          fundo_caixa_devolvido: fundoCaixaDevolvido,
-          saldo_esperado_dinheiro: reconciliacao.saldo_esperado_dinheiro,
-          diferenca_caixa: reconciliacao.diferenca,
-          auditoria_status: 'pendente',
-          observacoes: observacoes || null,
-        })
-        .eq('id', sessaoAtivaRef.current.id);
+      console.log('[useCaixa] fecharCaixaV2 - Payload recebido:', {
+        dinheiroEmMaos,
+        valorEnviadoCofre,
+        pixExternoInformado,
+        fundoCaixaDevolvido,
+        resumo,
+        reconciliacao
+      });
 
-      if (error) throw error;
+      const updateData = {
+        status: 'fechado',
+        data_fechamento: new Date().toISOString(),
+        valor_final_declarado: dinheiroEmMaos,
+        resumo_entradas_pix: resumo.entradas_pix,
+        resumo_entradas_dinheiro: resumo.entradas_dinheiro,
+        resumo_entradas_bolao_dinheiro: resumo.entradas_bolao_dinheiro,
+        resumo_entradas_bolao_pix: resumo.entradas_bolao_pix,
+        resumo_saidas_sangria: resumo.saidas_sangria,
+        resumo_saidas_deposito: resumo.saidas_deposito,
+        resumo_saidas_boleto: resumo.saidas_boleto,
+        resumo_saidas_trocados: resumo.saidas_trocados,
+        resumo_total_entradas: resumo.total_entradas,
+        resumo_total_saidas: resumo.total_saidas,
+        dinheiro_em_maos: dinheiroEmMaos,
+        valor_enviado_cofre: valorEnviadoCofre,
+        pix_externo_informado: pixExternoInformado,
+        fundo_caixa_devolvido: fundoCaixaDevolvido,
+        saldo_esperado_dinheiro: reconciliacao.saldo_esperado_dinheiro,
+        diferenca_caixa: reconciliacao.diferenca,
+        auditoria_status: 'pendente',
+        observacoes: observacoes || null,
+      };
+
+      console.log('[useCaixa] fecharCaixaV2 - Dados enviados para update:', updateData);
+
+      const { data, error } = await supabase
+        .from('caixa_sessoes')
+        .update(updateData)
+        .eq('id', sessaoAtivaRef.current.id)
+        .select();
+
+      if (error) {
+        console.error('[useCaixa] fecharCaixaV2 - Erro no update:', error);
+        throw error;
+      }
+
+      console.log('[useCaixa] fecharCaixaV2 - Resposta do Supabase:', data);
       console.log('[useCaixa] Turno encerrado! Enviado para auditoria.');
       setSessaoAtiva(null);
       setMovimentacoes([]);
