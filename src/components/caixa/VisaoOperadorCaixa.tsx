@@ -1,7 +1,27 @@
 'use client';
 
 import { useState, useMemo, useCallback, memo } from 'react';
-import { Calculator, Smartphone, ArrowRightLeft, Wallet, Building, FileText, History, TrendingUp, TrendingDown, DollarSign, Clock, CircleCheck as CheckCircle2, Clock as Unlock, Loader as Loader2, TriangleAlert as AlertTriangle, CircleArrowUp as ArrowUpCircle, CircleArrowDown as ArrowDownCircle, Pencil, Trash2 } from 'lucide-react';
+import {
+    Calculator,
+    Smartphone,
+    ArrowRightLeft,
+    Wallet,
+    Building,
+    FileText,
+    History,
+    TrendingUp,
+    TrendingDown,
+    DollarSign,
+    Clock,
+    CheckCircle2,
+    Unlock,
+    Loader2,
+    AlertTriangle,
+    ArrowUpCircle,
+    ArrowDownCircle,
+    Pencil,
+    Trash2
+} from 'lucide-react';
 import { ModalLancamentoRapido, type TipoLancamento } from '@/components/financeiro/ModalLancamentoRapido';
 import { ModalFechamentoCaixa } from '@/components/financeiro/ModalFechamentoCaixa';
 import { ModalMovimentacaoGeral } from './ModalMovimentacaoGeral';
@@ -15,8 +35,6 @@ import { useTerminais } from '@/hooks/useTerminais';
 import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmContext';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
-import { ResumoFechamento, ReconciliacaoCaixa } from '@/lib/fechamento-utils';
-import { validarFechamento } from '@/lib/validate-fechamento';
 
 // Componente memoizado para cada item da lista
 const MovimentacaoItem = memo(({ mov, onEdit, onDelete, getIcon, getLabel }: any) => {
@@ -82,7 +100,6 @@ export function VisaoOperadorCaixa() {
         abrirCaixa,
         registrarMovimentacao,
         fecharCaixa,
-        fecharCaixaV2,
         refresh
     } = useCaixa();
 
@@ -139,7 +156,8 @@ export function VisaoOperadorCaixa() {
                     metodo_pagamento: data.metodo || data.metodo_pagamento || 'dinheiro',
                     referencia_id: null,
                     classificacao_pix: data.classificacao_pix || null,
-                    categoria_operacional_id: data.categoria_operacional_id || null
+                    categoria_operacional_id: data.categoria_operacional_id || null,
+                    data_vencimento: data.data_vencimento
                 });
             }
             setTipoSelecionado(null);
@@ -173,53 +191,39 @@ export function VisaoOperadorCaixa() {
         }
     }, [supabase, toast, confirm, refresh]);
 
-    const handleFinishCaixa = async (payload: {
+    // Função de fechamento simplificada - operador só informa PIX externo e valor do cofre
+    const handleFinishCaixa = async (result: {
         observacoes?: string;
-        resumo: ResumoFechamento;
-        reconciliacao: ReconciliacaoCaixa;
-        dinheiroEmMaos: number;
-        valorEnviadoCofre: number;
-        pixExternoInformado: number;
-        fundoCaixaDevolvido: boolean;
+        tflData?: any;
+        valorCofre?: number;
+        valorPixExterno?: number;
     }) => {
+        console.log('[handleFinishCaixa] Recebido resultado do modal:', result);
+        
+        // Validar se o valor do cofre foi informado
+        if (!result.valorCofre || result.valorCofre <= 0) {
+            toast({ 
+                message: 'Informe o valor enviado ao cofre antes de fechar o caixa.', 
+                type: 'warning' 
+            });
+            return;
+        }
+        
         try {
-            // Validar consistência dos dados antes de fechar
-            const validacao = validarFechamento(
-                sessaoAtiva!.valor_inicial,
-                movimentacoes,
-                {
-                    entradas_pix: payload.resumo.entradas_pix,
-                    entradas_dinheiro: payload.resumo.entradas_dinheiro,
-                    entradas_bolao_dinheiro: payload.resumo.entradas_bolao_dinheiro,
-                    entradas_bolao_pix: payload.resumo.entradas_bolao_pix,
-                    saidas_sangria: payload.resumo.saidas_sangria,
-                    saidas_deposito: payload.resumo.saidas_deposito,
-                    saidas_boleto: payload.resumo.saidas_boleto,
-                    saidas_trocados: payload.resumo.saidas_trocados,
-                },
-                payload.dinheiroEmMaos
+            await fecharCaixa(
+                result.observacoes,
+                result.tflData,
+                result.valorCofre,
+                result.valorPixExterno
             );
-            
-            if (!validacao.valido) {
-                console.warn('[VisaoOperadorCaixa] Inconsistências detectadas:', validacao.inconsistencias);
-                
-                // Mostrar alerta com as inconsistências - usando 'danger' em vez de 'warning'
-                const confirmar = await confirm({
-                    title: 'Inconsistências Detectadas',
-                    description: `As seguintes inconsistências foram encontradas:\n\n${validacao.inconsistencias.join('\n')}\n\nDeseja continuar mesmo assim?`,
-                    confirmLabel: 'Continuar Mesmo Assim',
-                    variant: 'danger' // Alterado de 'warning' para 'danger'
-                });
-                
-                if (!confirmar) return;
-            }
-            
-            await fecharCaixaV2(payload);
             setShowFechamento(false);
             toast({ message: 'Caixa fechado com sucesso!', type: 'success' });
         } catch (error) {
             console.error('[handleFinishCaixa] Erro ao fechar caixa:', error);
-            toast({ message: 'Erro ao fechar caixa: ' + (error instanceof Error ? error.message : 'Erro desconhecido'), type: 'error' });
+            toast({ 
+                message: 'Erro ao fechar caixa: ' + (error instanceof Error ? error.message : 'Erro desconhecido'), 
+                type: 'error' 
+            });
         }
     };
 
