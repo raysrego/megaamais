@@ -16,6 +16,9 @@ import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmContext';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import { ResumoFechamento, ReconciliacaoCaixa } from '@/lib/fechamento-utils';
+import { validarFechamento } from '@/lib/validate-fechamento';
+
+
 
 // Componente memoizado para cada item da lista
 const MovimentacaoItem = memo(({ mov, onEdit, onDelete, getIcon, getLabel }: any) => {
@@ -172,24 +175,55 @@ export function VisaoOperadorCaixa() {
         }
     }, [supabase, toast, confirm, refresh]);
 
-    const handleFinishCaixa = async (payload: {
-        observacoes?: string;
-        resumo: ResumoFechamento;
-        reconciliacao: ReconciliacaoCaixa;
-        dinheiroEmMaos: number;
-        valorEnviadoCofre: number;
-        pixExternoInformado: number;
-        fundoCaixaDevolvido: boolean;
-    }) => {
-        try {
-            await fecharCaixaV2(payload);
-            setShowFechamento(false);
-            toast({ message: 'Caixa fechado com sucesso!', type: 'success' });
-        } catch (error) {
-            console.error('[handleFinishCaixa] Erro ao fechar caixa:', error);
-            toast({ message: 'Erro ao fechar caixa: ' + (error instanceof Error ? error.message : 'Erro desconhecido'), type: 'error' });
+   const handleFinishCaixa = async (payload: {
+    observacoes?: string;
+    resumo: ResumoFechamento;
+    reconciliacao: ReconciliacaoCaixa;
+    dinheiroEmMaos: number;
+    valorEnviadoCofre: number;
+    pixExternoInformado: number;
+    fundoCaixaDevolvido: boolean;
+}) => {
+    try {
+        // Validar consistência dos dados antes de fechar
+        const validacao = validarFechamento(
+            sessaoAtiva!.valor_inicial,
+            movimentacoes,
+            {
+                entradas_pix: payload.resumo.entradas_pix,
+                entradas_dinheiro: payload.resumo.entradas_dinheiro,
+                entradas_bolao_dinheiro: payload.resumo.entradas_bolao_dinheiro,
+                entradas_bolao_pix: payload.resumo.entradas_bolao_pix,
+                saidas_sangria: payload.resumo.saidas_sangria,
+                saidas_deposito: payload.resumo.saidas_deposito,
+                saidas_boleto: payload.resumo.saidas_boleto,
+                saidas_trocados: payload.resumo.saidas_trocados,
+            },
+            payload.dinheiroEmMaos
+        );
+        
+        if (!validacao.valido) {
+            console.warn('[VisaoOperadorCaixa] Inconsistências detectadas:', validacao.inconsistencias);
+            
+            // Mostrar alerta com as inconsistências
+            const confirmar = await confirm({
+                title: 'Inconsistências Detectadas',
+                description: `As seguintes inconsistências foram encontradas:\n\n${validacao.inconsistencias.join('\n')}\n\nDeseja continuar mesmo assim?`,
+                confirmLabel: 'Continuar Mesmo Assim',
+                variant: 'warning'
+            });
+            
+            if (!confirmar) return;
         }
-    };
+        
+        await fecharCaixaV2(payload);
+        setShowFechamento(false);
+        toast({ message: 'Caixa fechado com sucesso!', type: 'success' });
+    } catch (error) {
+        console.error('[handleFinishCaixa] Erro ao fechar caixa:', error);
+        toast({ message: 'Erro ao fechar caixa: ' + (error instanceof Error ? error.message : 'Erro desconhecido'), type: 'error' });
+    }
+};
 
     const handleAbrirCaixa = async () => {
         if (!terminalSelecionado) {
