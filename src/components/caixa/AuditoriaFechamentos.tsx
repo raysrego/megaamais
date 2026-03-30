@@ -377,204 +377,196 @@ export function AuditoriaFechamentos() {
     const [showValidationModal, setShowValidationModal] = useState(false);
     const [filtroStatus, setFiltroStatus] = useState<'todos' | 'fechado' | 'divergente' | 'batido'>('todos');
 
-    const fetchHistorico = useCallback(async () => {
-        setLoading(true);
-        try {
-            // ---------- QUERY TFL (caixa_sessoes) com TODOS os campos de resumo ----------
-            let queryTFL = supabase
-                .from('caixa_sessoes')
-                .select(`
-                    id,
-                    data_turno,
-                    data_fechamento,
-                    terminal_id,
-                    operador_id,
-                    valor_inicial,
-                    valor_final_calculado,
-                    valor_final_declarado,
-                    status,
-                    observacoes,
-                    -- Campos de resumo
-                    resumo_entradas_pix,
-                    resumo_entradas_dinheiro,
-                    resumo_entradas_bolao_dinheiro,
-                    resumo_entradas_bolao_pix,
-                    resumo_saidas_sangria,
-                    resumo_saidas_deposito,
-                    resumo_saidas_boleto,
-                    resumo_saidas_trocados,
-                    resumo_total_entradas,
-                    resumo_total_saidas,
-                    dinheiro_em_maos,
-                    valor_enviado_cofre,
-                    pix_externo_informado,
-                    fundo_caixa_devolvido,
-                    saldo_esperado_dinheiro,
-                    diferenca_caixa,
-                    total_sangrias,
-                    total_depositos_filial,
-                    valor_cofre,
-                    valor_pix_externo,
-                    diferenca_apurada,
-                    justificativa_divergencia
-                `)
-                .neq('status', 'aberto')
-                .order('created_at', { ascending: false });
+   const fetchHistorico = useCallback(async () => {
+    setLoading(true);
+    try {
+        // ---------- QUERY TFL (caixa_sessoes) - CORRIGIDA ----------
+        let queryTFL = supabase
+            .from('caixa_sessoes')
+            .select(`
+                id,
+                data_turno,
+                data_fechamento,
+                terminal_id,
+                operador_id,
+                valor_inicial,
+                valor_final_calculado,
+                valor_final_declarado,
+                status,
+                observacoes,
+                resumo_entradas_pix,
+                resumo_entradas_dinheiro,
+                resumo_entradas_bolao_dinheiro,
+                resumo_entradas_bolao_pix,
+                resumo_saidas_sangria,
+                resumo_saidas_deposito,
+                resumo_saidas_boleto,
+                resumo_saidas_trocados,
+                resumo_total_entradas,
+                resumo_total_saidas,
+                dinheiro_em_maos,
+                valor_enviado_cofre,
+                pix_externo_informado,
+                fundo_caixa_devolvido,
+                saldo_esperado_dinheiro,
+                diferenca_caixa,
+                total_sangrias,
+                total_depositos_filial,
+                valor_cofre,
+                valor_pix_externo,
+                diferenca_apurada,
+                justificativa_divergencia
+            `)
+            .neq('status', 'aberto')
+            .order('created_at', { ascending: false });
 
-            if (filtroStatus !== 'todos') {
-                let statusFilter: string;
-                if (filtroStatus === 'fechado') statusFilter = 'fechado';
-                else if (filtroStatus === 'batido') statusFilter = 'conferido';
-                else if (filtroStatus === 'divergente') statusFilter = 'discrepante';
-                else statusFilter = filtroStatus;
-                queryTFL = queryTFL.eq('status', statusFilter);
-            }
-
-            const { data: dataTFL, error: errorTFL } = await queryTFL;
-            if (errorTFL) throw errorTFL;
-
-            // ---------- QUERY BOLÃO (caixa_bolao_sessoes) ----------
-            let queryBolao = supabase
-                .from('caixa_bolao_sessoes')
-                .select(`
-                    id,
-                    data_fechamento,
-                    total_dinheiro,
-                    total_pix,
-                    total_vendido,
-                    status_validacao,
-                    observacoes_gerente
-                `)
-                .order('data_fechamento', { ascending: false });
-
-            if (filtroStatus !== 'todos') {
-                let statusFilter: string[] = [];
-                if (filtroStatus === 'fechado') {
-                    statusFilter = ['pendente'];
-                } else if (filtroStatus === 'batido') {
-                    statusFilter = ['aprovado'];
-                } else if (filtroStatus === 'divergente') {
-                    statusFilter = ['rejeitado', 'discrepante'];
-                }
-                if (statusFilter.length > 0) {
-                    queryBolao = queryBolao.in('status_validacao', statusFilter);
-                }
-            }
-
-            const { data: dataBolao, error: errorBolao } = await queryBolao;
-            if (errorBolao) throw errorBolao;
-
-            // ---------- Normalizar dados TFL com TODOS os campos ----------
-            const fechamentosTFL: Fechamento[] = (dataTFL || []).map((f: any) => {
-                // Calcula totais a partir dos resumos
-                const totalPix = (f.resumo_entradas_pix || 0) + (f.resumo_entradas_bolao_pix || 0);
-                const totalDinheiro = (f.resumo_entradas_dinheiro || 0) + (f.resumo_entradas_bolao_dinheiro || 0);
-                const totalEntradas = totalPix + totalDinheiro;
-                const totalSaidas = (f.resumo_saidas_sangria || 0) + 
-                                    (f.resumo_saidas_deposito || 0) + 
-                                    (f.resumo_saidas_boleto || 0) + 
-                                    (f.resumo_saidas_trocados || 0);
-                const totalLancamentos = totalEntradas - totalSaidas;
-                const saldoNoCaixa = f.dinheiro_em_maos || f.valor_final_declarado || 0;
-                const divergencia = f.diferenca_caixa || (saldoNoCaixa - ((f.valor_inicial || 0) + totalLancamentos));
-
-                return {
-                    id: f.id,
-                    data_turno: f.data_turno,
-                    data_fechamento: f.data_fechamento,
-                    terminal_id: f.terminal_id || 'TFL-WEB',
-                    operador_id: f.operador_id || 'Sistema',
-                    operador_nome: f.operador_id ? `${f.operador_id.split('-')[0]}...` : 'Sistema',
-                    valor_inicial: f.valor_inicial || 0,
-                    total_lancamentos: totalLancamentos,
-                    saldo_no_caixa: saldoNoCaixa,
-                    divergencia: divergencia,
-                    total_pix: totalPix,
-                    total_dinheiro: totalDinheiro,
-                    total_sangrias: f.resumo_saidas_sangria || 0,
-                    total_depositos: f.resumo_saidas_deposito || 0,
-                    total_boletos: f.resumo_saidas_boleto || 0,
-                    total_trocados: f.resumo_saidas_trocados || 0,
-                    status_validacao: f.status,
-                    tipo: 'tfl',
-                    justificativa: f.observacoes,
-                    valor_cofre: f.valor_enviado_cofre || f.valor_cofre || 0,
-                    valor_pix_externo: f.pix_externo_informado || f.valor_pix_externo || 0,
-                    fundo_caixa_devolvido: f.fundo_caixa_devolvido,
-                    saldo_esperado: f.saldo_esperado_dinheiro,
-                    diferenca_apurada: f.diferenca_apurada,
-                    justificativa_divergencia: f.justificativa_divergencia,
-                    _raw: {
-                        entradas_pix: f.resumo_entradas_pix,
-                        entradas_dinheiro: f.resumo_entradas_dinheiro,
-                        entradas_bolao_dinheiro: f.resumo_entradas_bolao_dinheiro,
-                        entradas_bolao_pix: f.resumo_entradas_bolao_pix,
-                        saidas_sangria: f.resumo_saidas_sangria,
-                        saidas_deposito: f.resumo_saidas_deposito,
-                        saidas_boleto: f.resumo_saidas_boleto,
-                        saidas_trocados: f.resumo_saidas_trocados
-                    }
-                };
-            });
-
-            // ---------- Normalizar dados Bolão ----------
-            const fechamentosBolao: Fechamento[] = (dataBolao || []).map((f: any) => {
-                const totalLancamentos = f.total_vendido || 0;
-                const saldoNoCaixa = (f.total_dinheiro || 0) + (f.total_pix || 0);
-                const divergencia = totalLancamentos - saldoNoCaixa;
-                return {
-                    id: f.id,
-                    data_turno: f.data_fechamento,
-                    data_fechamento: f.data_fechamento,
-                    terminal_id: 'Bolão',
-                    operador_id: '',
-                    operador_nome: 'Sistema Bolão',
-                    valor_inicial: 0,
-                    total_lancamentos: totalLancamentos,
-                    saldo_no_caixa: saldoNoCaixa,
-                    divergencia: divergencia,
-                    total_pix: f.total_pix || 0,
-                    total_dinheiro: f.total_dinheiro || 0,
-                    total_sangrias: 0,
-                    total_depositos: 0,
-                    total_boletos: 0,
-                    total_trocados: 0,
-                    status_validacao: f.status_validacao || 'pendente',
-                    tipo: 'bolao',
-                    justificativa: f.observacoes_gerente,
-                    valor_cofre: undefined,
-                    valor_pix_externo: undefined,
-                    fundo_caixa_devolvido: undefined,
-                    saldo_esperado: undefined,
-                    diferenca_apurada: undefined,
-                    justificativa_divergencia: undefined
-                };
-            });
-
-            const todosFechamentos = [...fechamentosTFL, ...fechamentosBolao];
-            setFechamentos(todosFechamentos);
-            
-            // Log para debug
-            console.log('[fetchHistorico] Fechamentos carregados:', fechamentosTFL.length, 'TFL,', fechamentosBolao.length, 'Bolão');
-            if (fechamentosTFL.length > 0) {
-                console.log('[fetchHistorico] Primeiro fechamento TFL:', {
-                    id: fechamentosTFL[0].id,
-                    total_pix: fechamentosTFL[0].total_pix,
-                    total_dinheiro: fechamentosTFL[0].total_dinheiro,
-                    total_sangrias: fechamentosTFL[0].total_sangrias,
-                    total_boletos: fechamentosTFL[0].total_boletos,
-                    total_lancamentos: fechamentosTFL[0].total_lancamentos
-                });
-            }
-            
-        } catch (err: any) {
-            console.error('Erro ao carregar histórico:', err);
-            const errorMsg = err?.message || err?.error_description || err?.details || 'Erro desconhecido';
-            toast({ message: 'Erro ao carregar fechamentos: ' + errorMsg, type: 'error' });
-        } finally {
-            setLoading(false);
+        if (filtroStatus !== 'todos') {
+            let statusFilter: string;
+            if (filtroStatus === 'fechado') statusFilter = 'fechado';
+            else if (filtroStatus === 'batido') statusFilter = 'conferido';
+            else if (filtroStatus === 'divergente') statusFilter = 'discrepante';
+            else statusFilter = filtroStatus;
+            queryTFL = queryTFL.eq('status', statusFilter);
         }
-    }, [supabase, filtroStatus, toast]);
+
+        const { data: dataTFL, error: errorTFL } = await queryTFL;
+        if (errorTFL) throw errorTFL;
+
+        // ---------- QUERY BOLÃO (caixa_bolao_sessoes) ----------
+        let queryBolao = supabase
+            .from('caixa_bolao_sessoes')
+            .select(`
+                id,
+                data_fechamento,
+                total_dinheiro,
+                total_pix,
+                total_vendido,
+                status_validacao,
+                observacoes_gerente
+            `)
+            .order('data_fechamento', { ascending: false });
+
+        if (filtroStatus !== 'todos') {
+            let statusFilter: string[] = [];
+            if (filtroStatus === 'fechado') {
+                statusFilter = ['pendente'];
+            } else if (filtroStatus === 'batido') {
+                statusFilter = ['aprovado'];
+            } else if (filtroStatus === 'divergente') {
+                statusFilter = ['rejeitado', 'discrepante'];
+            }
+            if (statusFilter.length > 0) {
+                queryBolao = queryBolao.in('status_validacao', statusFilter);
+            }
+        }
+
+        const { data: dataBolao, error: errorBolao } = await queryBolao;
+        if (errorBolao) throw errorBolao;
+
+        // ---------- Normalizar dados TFL com TODOS os campos ----------
+        const fechamentosTFL: Fechamento[] = (dataTFL || []).map((f: any) => {
+            // Calcula totais a partir dos resumos
+            const totalPix = (f.resumo_entradas_pix || 0) + (f.resumo_entradas_bolao_pix || 0);
+            const totalDinheiro = (f.resumo_entradas_dinheiro || 0) + (f.resumo_entradas_bolao_dinheiro || 0);
+            const totalEntradas = totalPix + totalDinheiro;
+            const totalSaidas = (f.resumo_saidas_sangria || 0) + 
+                                (f.resumo_saidas_deposito || 0) + 
+                                (f.resumo_saidas_boleto || 0) + 
+                                (f.resumo_saidas_trocados || 0);
+            const totalLancamentos = totalEntradas - totalSaidas;
+            const saldoNoCaixa = f.dinheiro_em_maos || f.valor_final_declarado || 0;
+            const divergencia = f.diferenca_caixa || (saldoNoCaixa - ((f.valor_inicial || 0) + totalLancamentos));
+
+            return {
+                id: f.id,
+                data_turno: f.data_turno,
+                data_fechamento: f.data_fechamento,
+                terminal_id: f.terminal_id || 'TFL-WEB',
+                operador_id: f.operador_id || 'Sistema',
+                operador_nome: f.operador_id ? `${f.operador_id.split('-')[0]}...` : 'Sistema',
+                valor_inicial: f.valor_inicial || 0,
+                total_lancamentos: totalLancamentos,
+                saldo_no_caixa: saldoNoCaixa,
+                divergencia: divergencia,
+                total_pix: totalPix,
+                total_dinheiro: totalDinheiro,
+                total_sangrias: f.resumo_saidas_sangria || 0,
+                total_depositos: f.resumo_saidas_deposito || 0,
+                total_boletos: f.resumo_saidas_boleto || 0,
+                total_trocados: f.resumo_saidas_trocados || 0,
+                status_validacao: f.status,
+                tipo: 'tfl',
+                justificativa: f.observacoes,
+                valor_cofre: f.valor_enviado_cofre || f.valor_cofre || 0,
+                valor_pix_externo: f.pix_externo_informado || f.valor_pix_externo || 0,
+                fundo_caixa_devolvido: f.fundo_caixa_devolvido,
+                saldo_esperado: f.saldo_esperado_dinheiro,
+                diferenca_apurada: f.diferenca_apurada,
+                justificativa_divergencia: f.justificativa_divergencia
+            };
+        });
+
+        // ---------- Normalizar dados Bolão ----------
+        const fechamentosBolao: Fechamento[] = (dataBolao || []).map((f: any) => {
+            const totalLancamentos = f.total_vendido || 0;
+            const saldoNoCaixa = (f.total_dinheiro || 0) + (f.total_pix || 0);
+            const divergencia = totalLancamentos - saldoNoCaixa;
+            return {
+                id: f.id,
+                data_turno: f.data_fechamento,
+                data_fechamento: f.data_fechamento,
+                terminal_id: 'Bolão',
+                operador_id: '',
+                operador_nome: 'Sistema Bolão',
+                valor_inicial: 0,
+                total_lancamentos: totalLancamentos,
+                saldo_no_caixa: saldoNoCaixa,
+                divergencia: divergencia,
+                total_pix: f.total_pix || 0,
+                total_dinheiro: f.total_dinheiro || 0,
+                total_sangrias: 0,
+                total_depositos: 0,
+                total_boletos: 0,
+                total_trocados: 0,
+                status_validacao: f.status_validacao || 'pendente',
+                tipo: 'bolao',
+                justificativa: f.observacoes_gerente,
+                valor_cofre: undefined,
+                valor_pix_externo: undefined,
+                fundo_caixa_devolvido: undefined,
+                saldo_esperado: undefined,
+                diferenca_apurada: undefined,
+                justificativa_divergencia: undefined
+            };
+        });
+
+        const todosFechamentos = [...fechamentosTFL, ...fechamentosBolao];
+        setFechamentos(todosFechamentos);
+        
+        // Log para debug
+        console.log('[fetchHistorico] Fechamentos carregados:', fechamentosTFL.length, 'TFL,', fechamentosBolao.length, 'Bolão');
+        if (fechamentosTFL.length > 0) {
+            console.log('[fetchHistorico] Primeiro fechamento TFL:', {
+                id: fechamentosTFL[0].id,
+                total_pix: fechamentosTFL[0].total_pix,
+                total_dinheiro: fechamentosTFL[0].total_dinheiro,
+                total_sangrias: fechamentosTFL[0].total_sangrias,
+                total_boletos: fechamentosTFL[0].total_boletos,
+                total_lancamentos: fechamentosTFL[0].total_lancamentos,
+                saldo_esperado: fechamentosTFL[0].saldo_esperado,
+                saldo_no_caixa: fechamentosTFL[0].saldo_no_caixa,
+                divergencia: fechamentosTFL[0].divergencia
+            });
+        }
+        
+    } catch (err: any) {
+        console.error('Erro ao carregar histórico:', err);
+        const errorMsg = err?.message || err?.error_description || err?.details || 'Erro desconhecido';
+        toast({ message: 'Erro ao carregar fechamentos: ' + errorMsg, type: 'error' });
+    } finally {
+        setLoading(false);
+    }
+}, [supabase, filtroStatus, toast]);
 
     useEffect(() => {
         fetchHistorico();
