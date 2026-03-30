@@ -6,6 +6,11 @@ export async function updateSession(request: NextRequest) {
         request,
     })
 
+    const publicPaths = ['/login', '/auth', '/_next', '/favicon.ico', '/api/cron', '/api/webhook', '/manifest.json', '/sw.js'];
+    if (publicPaths.some(p => request.nextUrl.pathname.startsWith(p))) {
+        return supabaseResponse;
+    }
+
     const supabase = createServerClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
         process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,

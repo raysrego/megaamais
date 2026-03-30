@@ -1,27 +1,7 @@
 'use client';
 
 import { useState, useMemo, useCallback, memo } from 'react';
-import {
-    Calculator,
-    Smartphone,
-    ArrowRightLeft,
-    Wallet,
-    Building,
-    FileText,
-    History,
-    TrendingUp,
-    TrendingDown,
-    DollarSign,
-    Clock,
-    CheckCircle2,
-    Unlock,
-    Loader2,
-    AlertTriangle,
-    ArrowUpCircle,
-    ArrowDownCircle,
-    Pencil,
-    Trash2
-} from 'lucide-react';
+import { Calculator, Smartphone, ArrowRightLeft, Wallet, Building, FileText, History, TrendingUp, TrendingDown, DollarSign, Clock, CircleCheck as CheckCircle2, Clock as Unlock, Loader as Loader2, TriangleAlert as AlertTriangle, CircleArrowUp as ArrowUpCircle, CircleArrowDown as ArrowDownCircle, Pencil, Trash2 } from 'lucide-react';
 import { ModalLancamentoRapido, type TipoLancamento } from '@/components/financeiro/ModalLancamentoRapido';
 import { ModalFechamentoCaixa } from '@/components/financeiro/ModalFechamentoCaixa';
 import { ModalMovimentacaoGeral } from './ModalMovimentacaoGeral';
@@ -35,6 +15,7 @@ import { useTerminais } from '@/hooks/useTerminais';
 import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmContext';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
+import { ResumoFechamento, ReconciliacaoCaixa } from '@/lib/fechamento-utils';
 
 // Componente memoizado para cada item da lista
 const MovimentacaoItem = memo(({ mov, onEdit, onDelete, getIcon, getLabel }: any) => {
@@ -100,6 +81,7 @@ export function VisaoOperadorCaixa() {
         abrirCaixa,
         registrarMovimentacao,
         fecharCaixa,
+        fecharCaixaV2,
         refresh
     } = useCaixa();
 
@@ -190,28 +172,24 @@ export function VisaoOperadorCaixa() {
         }
     }, [supabase, toast, confirm, refresh]);
 
-    // Função de fechamento com logs detalhados
-  const handleFinishCaixa = async (result: {
-    observacoes?: string;
-    tflData?: any;
-    valorCofre?: number;
-    valorPixExterno?: number;
-}) => {
-    console.log('[handleFinishCaixa] Recebido resultado do modal:', result);
-    try {
-        await fecharCaixa(
-            result.observacoes,
-            result.tflData,
-            result.valorCofre,
-            result.valorPixExterno
-        );
-        setShowFechamento(false);
-        toast({ message: 'Caixa fechado com sucesso!', type: 'success' });
-    } catch (error) {
-        console.error('[handleFinishCaixa] Erro ao fechar caixa:', error);
-        toast({ message: 'Erro ao fechar caixa: ' + (error instanceof Error ? error.message : 'Erro desconhecido'), type: 'error' });
-    }
-};
+    const handleFinishCaixa = async (payload: {
+        observacoes?: string;
+        resumo: ResumoFechamento;
+        reconciliacao: ReconciliacaoCaixa;
+        dinheiroEmMaos: number;
+        valorEnviadoCofre: number;
+        pixExternoInformado: number;
+        fundoCaixaDevolvido: boolean;
+    }) => {
+        try {
+            await fecharCaixaV2(payload);
+            setShowFechamento(false);
+            toast({ message: 'Caixa fechado com sucesso!', type: 'success' });
+        } catch (error) {
+            console.error('[handleFinishCaixa] Erro ao fechar caixa:', error);
+            toast({ message: 'Erro ao fechar caixa: ' + (error instanceof Error ? error.message : 'Erro desconhecido'), type: 'error' });
+        }
+    };
 
     const handleAbrirCaixa = async () => {
         if (!terminalSelecionado) {

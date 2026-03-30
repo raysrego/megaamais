@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import { RealtimeChannel } from '@supabase/supabase-js';
+import { ResumoFechamento, ReconciliacaoCaixa } from '@/lib/fechamento-utils';
 
 export interface CaixaSessao {
   id: number;
@@ -53,6 +54,16 @@ export interface CaixaMovimentacao {
   } | null;
 }
 
+export interface FechamentoPayload {
+    observacoes?: string;
+    resumo: ResumoFechamento;
+    reconciliacao: ReconciliacaoCaixa;
+    dinheiroEmMaos: number;
+    valorEnviadoCofre: number;
+    pixExternoInformado: number;
+    fundoCaixaDevolvido: boolean;
+}
+
 /**
  * Helper para executar uma função assíncrona com retry automático.
  * A função deve lançar erro para que a tentativa seja considerada falha.
@@ -80,13 +91,8 @@ export function useCaixa() {
   const [movimentacoes, setMovimentacoes] = useState<CaixaMovimentacao[]>([]);
   const realtimeChannel = useRef<RealtimeChannel | null>(null);
   const isMounted = useRef(true);
-  const fetchingRef = useRef(false); // Evitar chamadas concorrentes
-  const sessaoAtivaRef = useRef(sessaoAtiva); // Ref para acessar o valor atual sem dependência no callback
-
-  // Mantém a ref sincronizada com o estado atual
-  useEffect(() => {
-    sessaoAtivaRef.current = sessaoAtiva;
-  }, [sessaoAtiva]);
+  const fetchingRef = useRef(false);
+  const sessaoAtivaRef = useRef(sessaoAtiva);
 
   useEffect(() => {
     isMounted.current = true;
@@ -124,9 +130,7 @@ export function useCaixa() {
     [supabase]
   );
 
-  // Busca sessão ativa do usuário
   const fetchSessaoAtiva = useCallback(async () => {
-    // Evita execuções concorrentes
     if (fetchingRef.current) return;
     fetchingRef.current = true;
 
@@ -138,7 +142,6 @@ export function useCaixa() {
     setError(null);
     try {
       console.log('[useCaixa] Verificando sessão ativa do usuário');
-      // Obter usuário
       const userData = await withRetry(async () => {
         const result = await supabase.auth.getUser();
         if (result.error) throw result.error;
@@ -167,12 +170,10 @@ export function useCaixa() {
 
       if (isMounted.current) {
         if (data) {
-          // Evita atualização desnecessária se a sessão já é a mesma
           setSessaoAtiva(prev => {
             if (prev?.id === data.id) return prev;
             return data;
           });
-          // Sempre busca movimentações com o ID da sessão recém-obtida
           await fetchMovimentacoes(data.id);
         } else {
           console.log('[useCaixa] Nenhuma sessão ativa encontrada');
@@ -191,7 +192,7 @@ export function useCaixa() {
       }
       fetchingRef.current = false;
     }
-  }, [supabase, fetchMovimentacoes]); // sessaoAtiva removido da dependência, usa a ref
+  }, [supabase, fetchMovimentacoes]);
 
   // Configurar Realtime com tratamento de erro e reconexão
   useEffect(() => {
@@ -441,11 +442,64 @@ export function useCaixa() {
     }
   };
 
-  // Carregar dados iniciais uma única vez
+  const fecharCaixaV2 = useCallback(async (payload: FechamentoPayload) => {
+    if (!sessaoAtivaRef.current) {
+      setError('Nenhuma sessão ativa');
+      return;
+    }
+    setLoading(true);
+    try {
+      const { resumo, reconciliacao, dinheiroEmMaos, valorEnviadoCofre,
+          pixExternoInformado, fundoCaixaDevolvido, observacoes } = payload;
+
+      const { error } = await supabase
+        .from('caixa_sessoes')
+        .update({
+          status: 'fechado',
+          data_fechamento: new Date().toISOString(),
+          valor_final_declarado: dinheiroEmMaos,
+          resumo_entradas_pix: resumo.entradas_pix,
+          resumo_entradas_dinheiro: resumo.entradas_dinheiro,
+          resumo_entradas_bolao_dinheiro: resumo.entradas_bolao_dinheiro,
+          resumo_entradas_bolao_pix: resumo.entradas_bolao_pix,
+          resumo_saidas_sangria: resumo.saidas_sangria,
+          resumo_saidas_deposito: resumo.saidas_deposito,
+          resumo_saidas_boleto: resumo.saidas_boleto,
+          resumo_saidas_trocados: resumo.saidas_trocados,
+          resumo_total_entradas: resumo.total_entradas,
+          resumo_total_saidas: resumo.total_saidas,
+          dinheiro_em_maos: dinheiroEmMaos,
+          valor_enviado_cofre: valorEnviadoCofre,
+          pix_externo_informado: pixExternoInformado,
+          fundo_caixa_devolvido: fundoCaixaDevolvido,
+          saldo_esperado_dinheiro: reconciliacao.saldo_esperado_dinheiro,
+          diferenca_caixa: reconciliacao.diferenca,
+          auditoria_status: 'pendente',
+          observacoes: observacoes || null,
+        })
+        .eq('id', sessaoAtivaRef.current.id);
+
+      if (error) throw error;
+      console.log('[useCaixa] Turno encerrado! Enviado para auditoria.');
+      setSessaoAtiva(null);
+      setMovimentacoes([]);
+    } catch (error: any) {
+      console.error('[useCaixa] Erro ao fechar caixa:', error);
+      setError(`Erro ao fechar caixa: ${error.message}`);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  }, [supabase]);
+
+  useEffect(() => {
+    sessaoAtivaRef.current = sessaoAtiva;
+  }, [sessaoAtiva]);
+
   useEffect(() => {
     fetchSessaoAtiva();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Dependência vazia – executa apenas na montagem
+  }, []);
 
   return {
     sessaoAtiva,
@@ -455,6 +509,7 @@ export function useCaixa() {
     abrirCaixa,
     registrarMovimentacao,
     fecharCaixa,
+    fecharCaixaV2,
     refresh: fetchSessaoAtiva,
   };
 }

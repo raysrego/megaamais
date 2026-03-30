@@ -149,9 +149,9 @@ export async function toggleUserStatus(userId: string, active: boolean) {
 
         if (error) throw error;
 
-        // Se inativar, podemos opcionalmente deslogar o usuário
         if (!active) {
-            await supabaseAdmin.auth.admin.signOut(userId);
+            await supabaseAdmin.auth.admin.updateUserById(userId, { ban_duration: '1s' });
+            await supabaseAdmin.auth.admin.updateUserById(userId, { ban_duration: 'none' });
         }
 
         revalidatePath('/configuracoes');

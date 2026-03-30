@@ -25,10 +25,10 @@ export async function buscarCotasEncalhadasRecentes(lojaId: string): Promise<Cot
             id,
             valor_cota_base,
             boloes!inner (
-                nome,
                 concurso,
                 data_sorteio,
-                loja_id
+                loja_id,
+                produtos (nome)
             )
         `)
         .eq('status', 'encalhe')
@@ -43,7 +43,7 @@ export async function buscarCotasEncalhadasRecentes(lojaId: string): Promise<Cot
 
     return data.map((item: any) => ({
         id: item.id,
-        bolao_nome: item.boloes.nome,
+        bolao_nome: item.boloes?.produtos?.nome || 'Bolão',
         concurso: item.boloes.concurso,
         data_sorteio: item.boloes.data_sorteio,
         valor_cota: item.valor_cota_base
