@@ -191,7 +191,7 @@ export function VisaoOperadorCaixa() {
         }
     }, [supabase, toast, confirm, refresh]);
 
-    // Função de fechamento simplificada - operador só informa PIX externo e valor do cofre
+    // Função de fechamento simplificada - operador só informa cofre e PIX externo
     const handleFinishCaixa = async (result: {
         observacoes?: string;
         tflData?: any;
@@ -199,15 +199,6 @@ export function VisaoOperadorCaixa() {
         valorPixExterno?: number;
     }) => {
         console.log('[handleFinishCaixa] Recebido resultado do modal:', result);
-        
-        // Validar se o valor do cofre foi informado
-        if (!result.valorCofre || result.valorCofre <= 0) {
-            toast({ 
-                message: 'Informe o valor enviado ao cofre antes de fechar o caixa.', 
-                type: 'warning' 
-            });
-            return;
-        }
         
         try {
             await fecharCaixa(
