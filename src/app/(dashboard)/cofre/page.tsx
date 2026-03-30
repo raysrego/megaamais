@@ -1,11 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import {
-    Vault, ArrowUpCircle, ArrowDownCircle, Building,
-    Loader2, DollarSign, CheckCircle2, Clock,
-    ExternalLink, Plus
-} from 'lucide-react';
+import { Vault, CircleArrowUp as ArrowUpCircle, CircleArrowDown as ArrowDownCircle, Building, Loader as Loader2, DollarSign, CircleCheck as CheckCircle2, Clock, ExternalLink, Plus } from 'lucide-react';
 import {
     getSaldoCofre,
     getEntradasCofrePorFechamento,
@@ -14,7 +10,7 @@ import {
 } from '@/actions/cofre';
 import { getContasBancarias } from '@/actions/financeiro';
 import { MoneyInput } from '@/components/ui/MoneyInput';
-import { useToast } from '@/hooks/useToast';
+import { useToast } from '@/contexts/ToastContext';
 
 export default function CofrePage() {
     const { toast } = useToast();

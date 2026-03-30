@@ -1,12 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import {
-    Shield, CheckCircle2, XCircle, AlertTriangle, Clock,
-    ChevronDown, ChevronUp, ArrowUpCircle, ArrowDownCircle,
-    DollarSign, Smartphone, Ticket, FileText, Building,
-    ArrowRightLeft, Loader2, RotateCcw, Filter, Wallet
-} from 'lucide-react';
+import { Shield, CircleCheck as CheckCircle2, Circle as XCircle, TriangleAlert as AlertTriangle, Clock, ChevronDown, ChevronUp, CircleArrowUp as ArrowUpCircle, CircleArrowDown as ArrowDownCircle, DollarSign, Smartphone, Ticket, FileText, Building, ArrowRightLeft, Loader as Loader2, RotateCcw, ListFilter as Filter, Wallet } from 'lucide-react';
 import {
     getFechamentosAuditoria,
     aprovarFechamento,
@@ -15,7 +10,7 @@ import {
     type FechamentoAuditoria
 } from '@/actions/auditoria';
 import { formatarStatusReconciliacao } from '@/lib/fechamento-utils';
-import { useToast } from '@/hooks/useToast';
+import { useToast } from '@/contexts/ToastContext';
 
 const STATUS_CONFIG: Record<string, { label: string; cor: string; icon: any }> = {
     pendente: { label: 'Pendente', cor: '#eab308', icon: Clock },

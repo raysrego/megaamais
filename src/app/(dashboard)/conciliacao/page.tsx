@@ -1,11 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import {
-    Building, Loader2, CheckCircle2, AlertTriangle, Clock,
-    Plus, RefreshCw, FileText, Smartphone, DollarSign,
-    ArrowDownCircle, TrendingUp, TrendingDown, Scale
-} from 'lucide-react';
+import { Building, Loader as Loader2, CircleCheck as CheckCircle2, TriangleAlert as AlertTriangle, Clock, Plus, RefreshCw, FileText, Smartphone, DollarSign, CircleArrowDown as ArrowDownCircle, TrendingUp, TrendingDown, Scale } from 'lucide-react';
 import {
     registrarExtratoDiario,
     getExtratosConciliacao,
@@ -15,7 +11,7 @@ import {
 } from '@/actions/conciliacao';
 import { getContasBancarias } from '@/actions/financeiro';
 import { MoneyInput } from '@/components/ui/MoneyInput';
-import { useToast } from '@/hooks/useToast';
+import { useToast } from '@/contexts/ToastContext';
 
 const STATUS_LABELS: Record<string, { label: string; cor: string; icon: any }> = {
     conciliado: { label: 'Conciliado', cor: '#22c55e', icon: CheckCircle2 },
