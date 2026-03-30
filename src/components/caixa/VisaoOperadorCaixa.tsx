@@ -18,8 +18,6 @@ import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import { ResumoFechamento, ReconciliacaoCaixa } from '@/lib/fechamento-utils';
 import { validarFechamento } from '@/lib/validate-fechamento';
 
-
-
 // Componente memoizado para cada item da lista
 const MovimentacaoItem = memo(({ mov, onEdit, onDelete, getIcon, getLabel }: any) => {
     return (
@@ -99,7 +97,7 @@ export function VisaoOperadorCaixa() {
     const [terminalId, setTerminalId] = useState<number | undefined>();
     const [temFundoCaixa, setTemFundoCaixa] = useState<boolean>(true);
     const [dataInicioTurno, setDataInicioTurno] = useState<string>(
-        new Date().toISOString().split('T')[0] // formato YYYY-MM-DD
+        new Date().toISOString().split('T')[0]
     );
     const [isOpening, setIsOpening] = useState(false);
     const [abaCaixa, setAbaCaixa] = useState<'tfl' | 'bolao'>('tfl');
@@ -116,7 +114,7 @@ export function VisaoOperadorCaixa() {
                     message: 'Este lançamento possui data diferente do turno atual. Encerre o turno e abra um novo com a data correta para lançar este período.',
                     type: 'warning'
                 });
-                return; // não salva
+                return;
             }
 
             if (editandoMovimentacao) {
@@ -175,55 +173,55 @@ export function VisaoOperadorCaixa() {
         }
     }, [supabase, toast, confirm, refresh]);
 
-   const handleFinishCaixa = async (payload: {
-    observacoes?: string;
-    resumo: ResumoFechamento;
-    reconciliacao: ReconciliacaoCaixa;
-    dinheiroEmMaos: number;
-    valorEnviadoCofre: number;
-    pixExternoInformado: number;
-    fundoCaixaDevolvido: boolean;
-}) => {
-    try {
-        // Validar consistência dos dados antes de fechar
-        const validacao = validarFechamento(
-            sessaoAtiva!.valor_inicial,
-            movimentacoes,
-            {
-                entradas_pix: payload.resumo.entradas_pix,
-                entradas_dinheiro: payload.resumo.entradas_dinheiro,
-                entradas_bolao_dinheiro: payload.resumo.entradas_bolao_dinheiro,
-                entradas_bolao_pix: payload.resumo.entradas_bolao_pix,
-                saidas_sangria: payload.resumo.saidas_sangria,
-                saidas_deposito: payload.resumo.saidas_deposito,
-                saidas_boleto: payload.resumo.saidas_boleto,
-                saidas_trocados: payload.resumo.saidas_trocados,
-            },
-            payload.dinheiroEmMaos
-        );
-        
-        if (!validacao.valido) {
-            console.warn('[VisaoOperadorCaixa] Inconsistências detectadas:', validacao.inconsistencias);
+    const handleFinishCaixa = async (payload: {
+        observacoes?: string;
+        resumo: ResumoFechamento;
+        reconciliacao: ReconciliacaoCaixa;
+        dinheiroEmMaos: number;
+        valorEnviadoCofre: number;
+        pixExternoInformado: number;
+        fundoCaixaDevolvido: boolean;
+    }) => {
+        try {
+            // Validar consistência dos dados antes de fechar
+            const validacao = validarFechamento(
+                sessaoAtiva!.valor_inicial,
+                movimentacoes,
+                {
+                    entradas_pix: payload.resumo.entradas_pix,
+                    entradas_dinheiro: payload.resumo.entradas_dinheiro,
+                    entradas_bolao_dinheiro: payload.resumo.entradas_bolao_dinheiro,
+                    entradas_bolao_pix: payload.resumo.entradas_bolao_pix,
+                    saidas_sangria: payload.resumo.saidas_sangria,
+                    saidas_deposito: payload.resumo.saidas_deposito,
+                    saidas_boleto: payload.resumo.saidas_boleto,
+                    saidas_trocados: payload.resumo.saidas_trocados,
+                },
+                payload.dinheiroEmMaos
+            );
             
-            // Mostrar alerta com as inconsistências
-            const confirmar = await confirm({
-                title: 'Inconsistências Detectadas',
-                description: `As seguintes inconsistências foram encontradas:\n\n${validacao.inconsistencias.join('\n')}\n\nDeseja continuar mesmo assim?`,
-                confirmLabel: 'Continuar Mesmo Assim',
-                variant: 'warning'
-            });
+            if (!validacao.valido) {
+                console.warn('[VisaoOperadorCaixa] Inconsistências detectadas:', validacao.inconsistencias);
+                
+                // Mostrar alerta com as inconsistências - usando 'danger' em vez de 'warning'
+                const confirmar = await confirm({
+                    title: 'Inconsistências Detectadas',
+                    description: `As seguintes inconsistências foram encontradas:\n\n${validacao.inconsistencias.join('\n')}\n\nDeseja continuar mesmo assim?`,
+                    confirmLabel: 'Continuar Mesmo Assim',
+                    variant: 'danger' // Alterado de 'warning' para 'danger'
+                });
+                
+                if (!confirmar) return;
+            }
             
-            if (!confirmar) return;
+            await fecharCaixaV2(payload);
+            setShowFechamento(false);
+            toast({ message: 'Caixa fechado com sucesso!', type: 'success' });
+        } catch (error) {
+            console.error('[handleFinishCaixa] Erro ao fechar caixa:', error);
+            toast({ message: 'Erro ao fechar caixa: ' + (error instanceof Error ? error.message : 'Erro desconhecido'), type: 'error' });
         }
-        
-        await fecharCaixaV2(payload);
-        setShowFechamento(false);
-        toast({ message: 'Caixa fechado com sucesso!', type: 'success' });
-    } catch (error) {
-        console.error('[handleFinishCaixa] Erro ao fechar caixa:', error);
-        toast({ message: 'Erro ao fechar caixa: ' + (error instanceof Error ? error.message : 'Erro desconhecido'), type: 'error' });
-    }
-};
+    };
 
     const handleAbrirCaixa = async () => {
         if (!terminalSelecionado) {
@@ -232,7 +230,6 @@ export function VisaoOperadorCaixa() {
         }
         setIsOpening(true);
         try {
-            // Passa a data de início do turno (formato YYYY-MM-DD)
             await abrirCaixa(valorInicial, terminalSelecionado, terminalId, temFundoCaixa, dataInicioTurno);
             toast({ message: 'Caixa aberto!', type: 'success' });
         } catch (error: any) {
@@ -329,7 +326,6 @@ export function VisaoOperadorCaixa() {
                                 </select>
                             </div>
 
-                            {/* Campo de Data de Início do Turno */}
                             <div className="form-group">
                                 <label className="text-[10px] font-black uppercase text-muted mb-1 block">Data de Início do Turno</label>
                                 <input
@@ -337,7 +333,7 @@ export function VisaoOperadorCaixa() {
                                     className="input w-full"
                                     value={dataInicioTurno}
                                     onChange={(e) => setDataInicioTurno(e.target.value)}
-                                    max={new Date().toISOString().split('T')[0]} // não permitir futuro? opcional
+                                    max={new Date().toISOString().split('T')[0]}
                                 />
                                 <p className="text-[0.65rem] text-muted mt-1">Informe a data em que o turno realmente começou. Lançamentos com data diferente não serão permitidos.</p>
                             </div>
@@ -618,7 +614,7 @@ export function VisaoOperadorCaixa() {
                 <ModalMovimentacaoGeral
                     onClose={() => setShowMovimentacaoGeral(false)}
                     onSave={handleSaveEntry}
-                    dataTurnoInicial={sessaoAtiva?.data_turno} // ← passa a data do turno
+                    dataTurnoInicial={sessaoAtiva?.data_turno}
                 />
             )}
 
@@ -636,13 +632,13 @@ export function VisaoOperadorCaixa() {
             )}
 
             {showFechamento && (
-    <ModalFechamentoCaixa
-        sessao={sessaoAtiva}
-        transacoes={movimentacoes}
-        onClose={() => setShowFechamento(false)}
-        onFinish={handleFinishCaixa}
-    />
-)}
+                <ModalFechamentoCaixa
+                    sessao={sessaoAtiva}
+                    transacoes={movimentacoes}
+                    onClose={() => setShowFechamento(false)}
+                    onFinish={handleFinishCaixa}
+                />
+            )}
         </div>
     );
 }
