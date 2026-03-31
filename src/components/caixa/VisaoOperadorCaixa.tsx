@@ -218,22 +218,26 @@ export function VisaoOperadorCaixa() {
         }
     };
 
-    const handleAbrirCaixa = async () => {
-        if (!terminalSelecionado) {
-            toast({ message: 'Selecione um terminal.', type: 'warning' });
-            return;
-        }
-        setIsOpening(true);
-        try {
-            await abrirCaixa(valorInicial, terminalSelecionado, terminalId, temFundoCaixa, dataInicioTurno);
-            toast({ message: 'Caixa aberto!', type: 'success' });
-        } catch (error: any) {
-            toast({ message: 'Erro ao abrir caixa: ' + error.message, type: 'error' });
-        } finally {
-            setIsOpening(false);
-        }
-    };
-
+   const handleAbrirCaixa = async () => {
+    if (!terminalSelecionado) {
+        toast({ message: 'Selecione um terminal.', type: 'warning' });
+        return;
+    }
+    setIsOpening(true);
+    try {
+        // Criar data no formato YYYY-MM-DD com timezone local
+        const dataSelecionada = new Date(dataInicioTurno);
+        const dataFormatada = dataSelecionada.toISOString().split('T')[0];
+        
+        await abrirCaixa(valorInicial, terminalSelecionado, terminalId, temFundoCaixa, dataFormatada);
+        toast({ message: 'Caixa aberto!', type: 'success' });
+    } catch (error: any) {
+        toast({ message: 'Erro ao abrir caixa: ' + error.message, type: 'error' });
+    } finally {
+        setIsOpening(false);
+    }
+};
+    
     const getIcon = useCallback((tipo: TipoLancamento) => {
         switch (tipo) {
             case 'pix': return <Smartphone size={16} className="text-success" />;
@@ -321,17 +325,23 @@ export function VisaoOperadorCaixa() {
                                 </select>
                             </div>
 
-                            <div className="form-group">
-                                <label className="text-[10px] font-black uppercase text-muted mb-1 block">Data de Início do Turno</label>
-                                <input
-                                    type="date"
-                                    className="input w-full"
-                                    value={dataInicioTurno}
-                                    onChange={(e) => setDataInicioTurno(e.target.value)}
-                                    max={new Date().toISOString().split('T')[0]}
-                                />
-                                <p className="text-[0.65rem] text-muted mt-1">Informe a data em que o turno realmente começou. Lançamentos com data diferente não serão permitidos.</p>
-                            </div>
+                           <div className="form-group">
+    <label className="text-[10px] font-black uppercase text-muted mb-1 block">Data de Início do Turno</label>
+    <input
+        type="date"
+        className="input w-full"
+        value={dataInicioTurno}
+        onChange={(e) => {
+            const valor = e.target.value;
+            setDataInicioTurno(valor);
+            console.log('[Abertura] Data selecionada:', valor);
+        }}
+        max={new Date().toISOString().split('T')[0]}
+    />
+    <p className="text-[0.65rem] text-muted mt-1">
+        Informe a data em que o turno realmente começou.
+    </p>
+</div>
 
                             <div className="form-group">
                                 <label className="text-[10px] font-black uppercase text-muted mb-1 block">Fundo de Troco (Saldo Inicial)</label>
