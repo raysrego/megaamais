@@ -223,126 +223,136 @@ export function AuditoriaFechamentos() {
     const [showValidationModal, setShowValidationModal] = useState(false);
     const [filtroStatus, setFiltroStatus] = useState<'todos' | 'fechado' | 'divergente' | 'batido'>('todos');
 
-    const fetchHistorico = useCallback(async () => {
-        setLoading(true);
-        try {
-            let query = supabase
-                .from('caixa_sessoes')
-                .select(`
-                    id,
-                    data_turno,
-                    data_fechamento,
-                    terminal_id,
-                    operador_id,
-                    valor_inicial,
-                    valor_final_declarado,
-                    status,
-                    observacoes,
-                    valor_enviado_cofre,
-                    pix_externo_informado,
-                    fundo_caixa_devolvido,
-                    resumo_entradas_pix,
-                    resumo_entradas_dinheiro,
-                    resumo_entradas_bolao_dinheiro,
-                    resumo_entradas_bolao_pix,
-                    resumo_saidas_sangria,
-                    resumo_saidas_deposito,
-                    resumo_saidas_boleto,
-                    resumo_saidas_trocados,
-                    resumo_total_entradas,
-                    resumo_total_saidas
-                `)
-                .neq('status', 'aberto')
-                .order('created_at', { ascending: false });
+   const fetchHistorico = useCallback(async () => {
+    setLoading(true);
+    try {
+        let query = supabase
+            .from('caixa_sessoes')
+            .select(`
+                id,
+                data_turno,
+                data_fechamento,
+                terminal_id,
+                operador_id,
+                valor_inicial,
+                valor_final_declarado,
+                status,
+                observacoes,
+                valor_enviado_cofre,
+                pix_externo_informado,
+                fundo_caixa_devolvido,
+                resumo_entradas_pix,
+                resumo_entradas_dinheiro,
+                resumo_entradas_bolao_dinheiro,
+                resumo_entradas_bolao_pix,
+                resumo_saidas_sangria,
+                resumo_saidas_deposito,
+                resumo_saidas_boleto,
+                resumo_saidas_trocados,
+                resumo_total_entradas,
+                resumo_total_saidas
+            `)
+            .neq('status', 'aberto')
+            .order('created_at', { ascending: false });
 
-            if (filtroStatus !== 'todos') {
-                let statusFilter: string;
-                if (filtroStatus === 'fechado') statusFilter = 'fechado';
-                else if (filtroStatus === 'batido') statusFilter = 'conferido';
-                else if (filtroStatus === 'divergente') statusFilter = 'discrepante';
-                else statusFilter = filtroStatus;
-                query = query.eq('status', statusFilter);
-            }
-
-            const { data: sessoes, error } = await query;
-            if (error) throw error;
-
-            const fechamentosProcessados: Fechamento[] = [];
-
-            for (const sessao of (sessoes || [])) {
-                // Buscar operador nome
-                let operadorNome = 'Sistema';
-                if (sessao.operador_id) {
-                    const { data: userData } = await supabase
-                        .from('usuarios')
-                        .select('nome')
-                        .eq('id', sessao.operador_id)
-                        .single();
-                    if (userData) operadorNome = userData.nome;
-                }
-
-                // Totais
-                const totalPix = (sessao.resumo_entradas_pix || 0) + (sessao.resumo_entradas_bolao_pix || 0);
-                const totalDinheiro = (sessao.resumo_entradas_dinheiro || 0) + (sessao.resumo_entradas_bolao_dinheiro || 0);
-                const totalEntradas = sessao.resumo_total_entradas || (totalPix + totalDinheiro);
-                const totalSaidas = sessao.resumo_total_saidas || 0;
-                
-                // Total de lançamentos = entradas - saídas
-                const totalLancamentos = totalEntradas - totalSaidas;
-                
-                // Saldo esperado = valor inicial + total de lançamentos
-                const saldoEsperado = (sessao.valor_inicial || 0) + totalLancamentos;
-                
-                // Valor na conta = PIX externo + total de lançamentos (desconsidera valor inicial)
-                const valorNaConta = (sessao.pix_externo_informado || 0) + totalLancamentos;
-                
-                // Saldo declarado pelo operador
-                const saldoDeclarado = sessao.valor_final_declarado || 0;
-                
-                // Divergência (mantida para referência)
-                const divergencia = saldoDeclarado - saldoEsperado;
-                
-                // Informações do cofre
-                const valorCofre = sessao.valor_enviado_cofre || 0;
-                const pixExterno = sessao.pix_externo_informado || 0;
-
-                fechamentosProcessados.push({
-                    id: sessao.id,
-                    data_turno: sessao.data_turno,
-                    data_fechamento: sessao.data_fechamento,
-                    terminal_id: sessao.terminal_id || 'TFL-WEB',
-                    operador_id: sessao.operador_id || 'Sistema',
-                    operador_nome: operadorNome,
-                    valor_inicial: sessao.valor_inicial || 0,
-                    total_lancamentos: totalLancamentos,
-                    saldo_no_caixa: saldoDeclarado,
-                    divergencia: divergencia,
-                    valor_na_conta: valorNaConta,
-                    total_pix: totalPix,
-                    total_dinheiro: totalDinheiro,
-                    total_sangrias: sessao.resumo_saidas_sangria || 0,
-                    total_depositos: sessao.resumo_saidas_deposito || 0,
-                    total_boletos: sessao.resumo_saidas_boleto || 0,
-                    total_trocados: sessao.resumo_saidas_trocados || 0,
-                    status_validacao: sessao.status,
-                    tipo: 'tfl',
-                    justificativa: sessao.observacoes,
-                    valor_cofre: valorCofre,
-                    valor_pix_externo: pixExterno,
-                    fundo_caixa_devolvido: sessao.fundo_caixa_devolvido,
-                    saldo_esperado: saldoEsperado
-                });
-            }
-
-            setFechamentos(fechamentosProcessados);
-            
-        } catch (err: any) {
-            console.error('Erro ao carregar histórico:', err);
-            toast({ message: 'Erro ao carregar fechamentos: ' + (err.message || 'Erro desconhecido'), type: 'error' });
-        } finally {
-            setLoading(false);
+        if (filtroStatus !== 'todos') {
+            let statusFilter: string;
+            if (filtroStatus === 'fechado') statusFilter = 'fechado';
+            else if (filtroStatus === 'batido') statusFilter = 'conferido';
+            else if (filtroStatus === 'divergente') statusFilter = 'discrepante';
+            else statusFilter = filtroStatus;
+            query = query.eq('status', statusFilter);
         }
-    }, [supabase, filtroStatus, toast]);
+
+        const { data: sessoes, error } = await query;
+        if (error) throw error;
+
+        const fechamentosProcessados: Fechamento[] = [];
+
+        for (const sessao of (sessoes || [])) {
+            // Buscar operador nome
+            let operadorNome = 'Sistema';
+            if (sessao.operador_id) {
+                const { data: userData } = await supabase
+                    .from('usuarios')
+                    .select('nome')
+                    .eq('id', sessao.operador_id)
+                    .single();
+                if (userData) operadorNome = userData.nome;
+            }
+
+            // CORREÇÃO DA DATA - Ajustar para timezone local
+            const formatarDataLocal = (data: string | null) => {
+                if (!data) return null;
+                // Adicionar 'T00:00:00' se for apenas data
+                const dataStr = data.includes('T') ? data : `${data}T00:00:00`;
+                const date = new Date(dataStr);
+                // Ajustar para timezone local
+                const offset = date.getTimezoneOffset();
+                const dataLocal = new Date(date.getTime() - offset * 60 * 1000);
+                return dataLocal.toISOString().split('T')[0];
+            };
+
+            const formatarDataHoraLocal = (data: string | null) => {
+                if (!data) return null;
+                const date = new Date(data);
+                // Ajustar para timezone local
+                const offset = date.getTimezoneOffset();
+                const dataLocal = new Date(date.getTime() - offset * 60 * 1000);
+                return dataLocal.toISOString();
+            };
+
+            // Totais
+            const totalPix = (sessao.resumo_entradas_pix || 0) + (sessao.resumo_entradas_bolao_pix || 0);
+            const totalDinheiro = (sessao.resumo_entradas_dinheiro || 0) + (sessao.resumo_entradas_bolao_dinheiro || 0);
+            const totalEntradas = sessao.resumo_total_entradas || (totalPix + totalDinheiro);
+            const totalSaidas = sessao.resumo_total_saidas || 0;
+            
+            const totalLancamentos = totalEntradas - totalSaidas;
+            const saldoEsperado = (sessao.valor_inicial || 0) + totalLancamentos;
+            const valorNaConta = (sessao.pix_externo_informado || 0) + totalLancamentos;
+            const saldoDeclarado = sessao.valor_final_declarado || 0;
+            const divergencia = saldoDeclarado - saldoEsperado;
+            const valorCofre = sessao.valor_enviado_cofre || 0;
+            const pixExterno = sessao.pix_externo_informado || 0;
+
+            fechamentosProcessados.push({
+                id: sessao.id,
+                data_turno: formatarDataLocal(sessao.data_turno) || sessao.data_turno,
+                data_fechamento: formatarDataHoraLocal(sessao.data_fechamento) || sessao.data_fechamento,
+                terminal_id: sessao.terminal_id || 'TFL-WEB',
+                operador_id: sessao.operador_id || 'Sistema',
+                operador_nome: operadorNome,
+                valor_inicial: sessao.valor_inicial || 0,
+                total_lancamentos: totalLancamentos,
+                saldo_no_caixa: saldoDeclarado,
+                divergencia: divergencia,
+                valor_na_conta: valorNaConta,
+                total_pix: totalPix,
+                total_dinheiro: totalDinheiro,
+                total_sangrias: sessao.resumo_saidas_sangria || 0,
+                total_depositos: sessao.resumo_saidas_deposito || 0,
+                total_boletos: sessao.resumo_saidas_boleto || 0,
+                total_trocados: sessao.resumo_saidas_trocados || 0,
+                status_validacao: sessao.status,
+                tipo: 'tfl',
+                justificativa: sessao.observacoes,
+                valor_cofre: valorCofre,
+                valor_pix_externo: pixExterno,
+                fundo_caixa_devolvido: sessao.fundo_caixa_devolvido,
+                saldo_esperado: saldoEsperado
+            });
+        }
+
+        setFechamentos(fechamentosProcessados);
+        
+    } catch (err: any) {
+        console.error('Erro ao carregar histórico:', err);
+        toast({ message: 'Erro ao carregar fechamentos: ' + (err.message || 'Erro desconhecido'), type: 'error' });
+    } finally {
+        setLoading(false);
+    }
+}, [supabase, filtroStatus, toast]);
 
     useEffect(() => {
         fetchHistorico();
