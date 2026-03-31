@@ -237,11 +237,10 @@ export default function ConciliacaoPage() {
             const dataInicio = `${mesReferencia}-01`;
             
             const { data, error } = await supabase
-                .rpc('get_resumo_conciliacao_completo', {
-                    p_loja_id: lojaSelecionada,
-                    p_conta_bancaria_id: contaSelecionada,
-                    p_mes_referencia: dataInicio
-                });
+    .rpc('get_resumo_conciliacao_completo', {
+        p_conta_bancaria_id: contaSelecionada,
+        p_mes_referencia: dataInicio
+    });
 
             if (error) throw error;
             
