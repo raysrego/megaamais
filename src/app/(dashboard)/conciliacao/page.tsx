@@ -48,6 +48,7 @@ export default function ConciliacaoPage() {
     const { toast } = useToast();
 
     const [loading, setLoading] = useState(true);
+    const [initialLoad, setInitialLoad] = useState(true);
     const [lojas, setLojas] = useState<Loja[]>([]);
     const [contas, setContas] = useState<ContaBancaria[]>([]);
     
@@ -75,42 +76,57 @@ export default function ConciliacaoPage() {
 
     // Carregar lojas do usuário
     const carregarLojas = useCallback(async () => {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-
-        // Buscar a empresa do usuário
-        const { data: userData, error: userError } = await supabase
-            .from('usuarios')
-            .select('empresa_id')
-            .eq('id', user.id)
-            .single();
-
-        if (userError) {
-            console.error('Erro ao buscar usuário:', userError);
-            return;
-        }
-
-        if (userData?.empresa_id) {
-            // Buscar os dados da empresa
-            const { data: empresaData, error: empresaError } = await supabase
-                .from('empresas')
-                .select('id, nome_fantasia')
-                .eq('id', userData.empresa_id)
-                .single();
-
-            if (empresaError) {
-                console.error('Erro ao buscar empresa:', empresaError);
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                setInitialLoad(false);
+                setLoading(false);
                 return;
             }
 
-            if (empresaData) {
-                const loja: Loja = {
-                    id: empresaData.id,
-                    nome_fantasia: empresaData.nome_fantasia || 'Minha Loja'
-                };
-                setLojas([loja]);
-                setLojaSelecionada(loja.id);
+            // Buscar a empresa do usuário
+            const { data: userData, error: userError } = await supabase
+                .from('usuarios')
+                .select('empresa_id')
+                .eq('id', user.id)
+                .single();
+
+            if (userError) {
+                console.error('Erro ao buscar usuário:', userError);
+                setInitialLoad(false);
+                setLoading(false);
+                return;
             }
+
+            if (userData?.empresa_id) {
+                // Buscar os dados da empresa
+                const { data: empresaData, error: empresaError } = await supabase
+                    .from('empresas')
+                    .select('id, nome_fantasia')
+                    .eq('id', userData.empresa_id)
+                    .single();
+
+                if (empresaError) {
+                    console.error('Erro ao buscar empresa:', empresaError);
+                    setInitialLoad(false);
+                    setLoading(false);
+                    return;
+                }
+
+                if (empresaData) {
+                    const loja: Loja = {
+                        id: empresaData.id,
+                        nome_fantasia: empresaData.nome_fantasia || 'Minha Loja'
+                    };
+                    setLojas([loja]);
+                    setLojaSelecionada(loja.id);
+                }
+            }
+            setInitialLoad(false);
+        } catch (err) {
+            console.error('Erro carregar lojas:', err);
+            setInitialLoad(false);
+            setLoading(false);
         }
     }, [supabase]);
 
@@ -118,57 +134,64 @@ export default function ConciliacaoPage() {
     const carregarContas = useCallback(async () => {
         if (!lojaSelecionada) return;
 
-        // Buscar contas bancárias
-        const { data: contasData, error: contasError } = await supabase
-            .from('financeiro_contas_bancarias')
-            .select(`
-                id,
-                nome,
-                banco_id,
-                agencia,
-                conta_numero
-            `)
-            .eq('loja_id', lojaSelecionada);
+        try {
+            // Buscar contas bancárias
+            const { data: contasData, error: contasError } = await supabase
+                .from('financeiro_contas_bancarias')
+                .select(`
+                    id,
+                    nome,
+                    banco_id,
+                    agencia,
+                    conta_numero
+                `)
+                .eq('loja_id', lojaSelecionada);
 
-        if (contasError) {
-            console.error('Erro ao carregar contas:', contasError);
-            return;
-        }
-
-        if (!contasData || contasData.length === 0) {
-            setContas([]);
-            return;
-        }
-
-        // Buscar dados dos bancos separadamente
-        const bancosIds = [...new Set(contasData.map(c => c.banco_id).filter(id => id))];
-        let bancosMap = new Map();
-        
-        if (bancosIds.length > 0) {
-            const { data: bancosData, error: bancosError } = await supabase
-                .from('financeiro_bancos')
-                .select('id, nome')
-                .in('id', bancosIds);
-            
-            if (!bancosError && bancosData) {
-                bancosData.forEach((banco: any) => {
-                    bancosMap.set(banco.id, banco.nome);
-                });
+            if (contasError) {
+                console.error('Erro ao carregar contas:', contasError);
+                return;
             }
-        }
 
-        const contasFormatadas: ContaBancaria[] = contasData.map(c => ({
-            id: c.id,
-            nome: c.nome,
-            banco: bancosMap.get(c.banco_id) || 'Banco não informado',
-            banco_id: c.banco_id,
-            agencia: c.agencia,
-            conta_numero: c.conta_numero
-        }));
-        
-        setContas(contasFormatadas);
-        if (contasFormatadas.length > 0 && !contaSelecionada) {
-            setContaSelecionada(contasFormatadas[0].id);
+            if (!contasData || contasData.length === 0) {
+                setContas([]);
+                setLoading(false);
+                return;
+            }
+
+            // Buscar dados dos bancos separadamente
+            const bancosIds = [...new Set(contasData.map(c => c.banco_id).filter(id => id))];
+            let bancosMap = new Map();
+            
+            if (bancosIds.length > 0) {
+                const { data: bancosData, error: bancosError } = await supabase
+                    .from('financeiro_bancos')
+                    .select('id, nome')
+                    .in('id', bancosIds);
+                
+                if (!bancosError && bancosData) {
+                    bancosData.forEach((banco: any) => {
+                        bancosMap.set(banco.id, banco.nome);
+                    });
+                }
+            }
+
+            const contasFormatadas: ContaBancaria[] = contasData.map(c => ({
+                id: c.id,
+                nome: c.nome,
+                banco: bancosMap.get(c.banco_id) || 'Banco não informado',
+                banco_id: c.banco_id,
+                agencia: c.agencia,
+                conta_numero: c.conta_numero
+            }));
+            
+            setContas(contasFormatadas);
+            if (contasFormatadas.length > 0 && !contaSelecionada) {
+                setContaSelecionada(contasFormatadas[0].id);
+            }
+        } catch (err) {
+            console.error('Erro carregar contas:', err);
+        } finally {
+            setLoading(false);
         }
     }, [supabase, lojaSelecionada, contaSelecionada]);
 
@@ -230,21 +253,24 @@ export default function ConciliacaoPage() {
         }
     }, [supabase, lojaSelecionada, contaSelecionada, mesReferencia, toast]);
 
+    // Efeito para carregar lojas inicialmente
     useEffect(() => {
         carregarLojas();
     }, [carregarLojas]);
 
+    // Efeito para carregar contas quando loja for selecionada
     useEffect(() => {
-        if (lojaSelecionada) {
+        if (lojaSelecionada && !initialLoad) {
             carregarContas();
         }
-    }, [lojaSelecionada, carregarContas]);
+    }, [lojaSelecionada, initialLoad, carregarContas]);
 
+    // Efeito para carregar resumo quando todos os filtros estiverem prontos
     useEffect(() => {
-        if (lojaSelecionada && contaSelecionada && mesReferencia) {
+        if (lojaSelecionada && contaSelecionada && mesReferencia && !initialLoad) {
             buscarResumo();
         }
-    }, [lojaSelecionada, contaSelecionada, mesReferencia, buscarResumo]);
+    }, [lojaSelecionada, contaSelecionada, mesReferencia, initialLoad, buscarResumo]);
 
     const handleRegistrarSaldoInicial = async () => {
         if (!lojaSelecionada || !contaSelecionada) return;
@@ -324,7 +350,8 @@ export default function ConciliacaoPage() {
         return `${meses[parseInt(mesNum) - 1]} de ${ano}`;
     };
 
-    if (loading && !resumo) {
+    // Mostrar loading apenas no carregamento inicial
+    if (initialLoad || (loading && !resumo && lojaSelecionada && contaSelecionada)) {
         return (
             <div className="flex items-center justify-center h-64">
                 <Loader2 className="animate-spin text-primary" size={32} />
@@ -403,7 +430,7 @@ export default function ConciliacaoPage() {
             </div>
 
             {/* Cards de Resumo */}
-            {resumo && (
+            {resumo ? (
                 <>
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                         <div className="card p-4">
@@ -523,6 +550,11 @@ export default function ConciliacaoPage() {
                         </div>
                     )}
                 </>
+            ) : (
+                <div className="card p-12 text-center">
+                    <Wallet size={48} className="mx-auto mb-4 text-muted opacity-50" />
+                    <p className="text-muted">Selecione uma conta e mês para visualizar a conciliação</p>
+                </div>
             )}
 
             {/* Modal Saldo Inicial */}
