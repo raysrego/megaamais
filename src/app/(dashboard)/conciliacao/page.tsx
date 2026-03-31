@@ -65,15 +65,9 @@ export default function ConciliacaoPage() {
     
     const [resumo, setResumo] = useState<ResumoConciliacao | null>(null);
     const [depositos, setDepositos] = useState<DepositoCofre[]>([]);
-    const [showDepositoModal, setShowDepositoModal] = useState(false);
     const [showSaldoModal, setShowSaldoModal] = useState(false);
     const [saldoInicialForm, setSaldoInicialForm] = useState({
         saldo: 0,
-        observacoes: ''
-    });
-    const [depositoForm, setDepositoForm] = useState({
-        valor: 0,
-        data: new Date().toISOString().split('T')[0],
         observacoes: ''
     });
     const [processando, setProcessando] = useState(false);
@@ -349,36 +343,6 @@ export default function ConciliacaoPage() {
         }
     };
 
-    const handleRegistrarDeposito = async () => {
-        if (!lojaSelecionada || !contaSelecionada || depositoForm.valor <= 0) return;
-        
-        setProcessando(true);
-        try {
-            const { data: { user } } = await supabase.auth.getUser();
-            
-            const { data, error } = await supabase
-                .rpc('registrar_deposito_conciliacao', {
-                    p_loja_id: lojaSelecionada,
-                    p_conta_bancaria_id: contaSelecionada,
-                    p_valor: depositoForm.valor,
-                    p_data_deposito: depositoForm.data,
-                    p_observacoes: depositoForm.observacoes || null,
-                    p_usuario_id: user?.id
-                });
-
-            if (error) throw error;
-            
-            toast({ message: 'Depósito registrado com sucesso!', type: 'success' });
-            setShowDepositoModal(false);
-            setDepositoForm({ valor: 0, data: new Date().toISOString().split('T')[0], observacoes: '' });
-            buscarResumo();
-        } catch (err: any) {
-            toast({ message: err.message, type: 'error' });
-        } finally {
-            setProcessando(false);
-        }
-    };
-
     const formatarMoeda = (valor: number) => {
         return new Intl.NumberFormat('pt-BR', {
             style: 'currency',
@@ -415,21 +379,15 @@ export default function ConciliacaoPage() {
                     </div>
                     <div>
                         <h1 className="text-xl font-black">Conciliação Bancária</h1>
-                        <p className="text-xs text-muted">Controle de entradas, cofre e depósitos</p>
+                        <p className="text-xs text-muted">Visão consolidada de entradas, cofre e depósitos realizados</p>
                     </div>
                 </div>
                 <div className="flex gap-2">
-                    <button 
-                        onClick={() => setShowSaldoModal(true)} 
+                    <button
+                        onClick={() => setShowSaldoModal(true)}
                         className="btn btn-ghost btn-sm"
                     >
                         <Edit size={14} /> Saldo Inicial
-                    </button>
-                    <button 
-                        onClick={() => setShowDepositoModal(true)} 
-                        className="btn btn-primary"
-                    >
-                        <Plus size={14} /> Registrar Depósito
                     </button>
                     <button onClick={buscarResumo} className="btn btn-ghost btn-sm">
                         <RefreshCw size={14} /> Atualizar
@@ -532,7 +490,7 @@ export default function ConciliacaoPage() {
                                 <p className="text-[10px] font-bold text-warning uppercase">Depósitos Realizados</p>
                             </div>
                             <p className="text-2xl font-bold text-warning">{formatarMoeda(resumo.total_depositado)}</p>
-                            <p className="text-[10px] text-muted mt-1">Transferências do cofre para conta bancária</p>
+                            <p className="text-[10px] text-muted mt-1">Registrados na Gestão de Cofre</p>
                         </div>
 
                         <div className="card p-4 bg-info/5 border-info/20">
@@ -733,70 +691,6 @@ export default function ConciliacaoPage() {
                                 disabled={processando}
                             >
                                 {processando ? <Loader2 className="animate-spin" size={16} /> : 'Salvar'}
-                            </button>
-                        </div>
-                    </div>
-                </>
-            )}
-
-            {/* Modal Registrar Depósito */}
-            {showDepositoModal && (
-                <>
-                    <div className="fixed inset-0 bg-black/70 z-50" onClick={() => setShowDepositoModal(false)} />
-                    <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-md bg-bg-card border border-border rounded-2xl z-50 p-6 space-y-4">
-                        <div className="flex items-center justify-between">
-                            <h3 className="text-base font-black flex items-center gap-2">
-                                <ArrowDownCircle size={16} className="text-danger" />
-                                Registrar Depósito
-                            </h3>
-                            <button onClick={() => setShowDepositoModal(false)} className="p-1 hover:bg-white/5 rounded">
-                                <X size={18} />
-                            </button>
-                        </div>
-
-                        <div>
-                            <label className="text-[10px] font-bold text-muted uppercase">Valor Depositado</label>
-                            <MoneyInput 
-                                value={depositoForm.valor}
-                                onValueChange={(v) => setDepositoForm(prev => ({ ...prev, valor: v }))}
-                                className="text-xl font-bold"
-                            />
-                            <p className="text-[10px] text-muted mt-1">
-                                Valor transferido do cofre para a conta bancária
-                            </p>
-                        </div>
-
-                        <div>
-                            <label className="text-[10px] font-bold text-muted uppercase">Data do Depósito</label>
-                            <input 
-                                type="date" 
-                                className="input w-full"
-                                value={depositoForm.data}
-                                onChange={(e) => setDepositoForm(prev => ({ ...prev, data: e.target.value }))}
-                            />
-                        </div>
-
-                        <div>
-                            <label className="text-[10px] font-bold text-muted uppercase">Observações (opcional)</label>
-                            <textarea 
-                                className="input w-full text-sm"
-                                rows={2}
-                                value={depositoForm.observacoes}
-                                onChange={(e) => setDepositoForm(prev => ({ ...prev, observacoes: e.target.value }))}
-                                placeholder="Referência do depósito, comprovante, etc..."
-                            />
-                        </div>
-
-                        <div className="flex gap-3 pt-2">
-                            <button className="btn btn-ghost flex-1" onClick={() => setShowDepositoModal(false)}>
-                                Cancelar
-                            </button>
-                            <button 
-                                className="btn btn-primary flex-1 font-black"
-                                onClick={handleRegistrarDeposito}
-                                disabled={processando || depositoForm.valor <= 0}
-                            >
-                                {processando ? <Loader2 className="animate-spin" size={16} /> : 'Registrar Depósito'}
                             </button>
                         </div>
                     </div>
