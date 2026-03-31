@@ -118,27 +118,49 @@ export default function ConciliacaoPage() {
     const carregarContas = useCallback(async () => {
         if (!lojaSelecionada) return;
 
-        const { data, error } = await supabase
+        // Buscar contas bancárias
+        const { data: contasData, error: contasError } = await supabase
             .from('financeiro_contas_bancarias')
             .select(`
                 id,
                 nome,
                 banco_id,
                 agencia,
-                conta_numero,
-                financeiro_bancos!banco_id (nome)
+                conta_numero
             `)
             .eq('loja_id', lojaSelecionada);
 
-        if (error) {
-            console.error('Erro ao carregar contas:', error);
+        if (contasError) {
+            console.error('Erro ao carregar contas:', contasError);
             return;
         }
 
-        const contasFormatadas: ContaBancaria[] = (data || []).map(c => ({
+        if (!contasData || contasData.length === 0) {
+            setContas([]);
+            return;
+        }
+
+        // Buscar dados dos bancos separadamente
+        const bancosIds = [...new Set(contasData.map(c => c.banco_id).filter(id => id))];
+        let bancosMap = new Map();
+        
+        if (bancosIds.length > 0) {
+            const { data: bancosData, error: bancosError } = await supabase
+                .from('financeiro_bancos')
+                .select('id, nome')
+                .in('id', bancosIds);
+            
+            if (!bancosError && bancosData) {
+                bancosData.forEach((banco: any) => {
+                    bancosMap.set(banco.id, banco.nome);
+                });
+            }
+        }
+
+        const contasFormatadas: ContaBancaria[] = contasData.map(c => ({
             id: c.id,
             nome: c.nome,
-            banco: c.financeiro_bancos?.nome || 'Banco não informado',
+            banco: bancosMap.get(c.banco_id) || 'Banco não informado',
             banco_id: c.banco_id,
             agencia: c.agencia,
             conta_numero: c.conta_numero
