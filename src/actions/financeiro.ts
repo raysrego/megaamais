@@ -127,13 +127,11 @@ export async function getSaldoCofre(contaBancariaId?: string): Promise<number> {
         const { data, error } = await query;
         
         if (error) {
-            console.error('[getSaldoCofre] Erro na consulta:', error);
+            console.error('[getSaldoCofre] Erro:', error);
             return 0;
         }
         
-        if (!data || data.length === 0) {
-            return 0;
-        }
+        if (!data || data.length === 0) return 0;
         
         const saldo = data.reduce((acc, mov) => {
             if (mov.tipo === 'entrada_fechamento' || mov.tipo === 'ajuste_entrada') {
