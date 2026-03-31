@@ -396,11 +396,7 @@ const fecharCaixa = async (
             .eq('id', sessaoAtiva.id)
             .single();
             
-        if (sessaoError) {
-            console.error('[useCaixa] Erro ao verificar status:', sessaoError);
-            throw sessaoError;
-        }
-        
+        if (sessaoError) throw sessaoError;
         if (sessaoAtual.status !== 'aberto') {
             throw new Error('Sessão já foi fechada por outro processo');
         }
@@ -414,50 +410,42 @@ const fecharCaixa = async (
         const saldoEsperadoDinheiro = sessaoAtiva.valor_inicial + totalEntradasDinheiro - totalSaidasDinheiro;
         
         // Saldo declarado (dinheiro em mãos)
-        const dinheiroEmMaos = saldoEsperadoDinheiro;
+        let dinheiroEmMaos = saldoEsperadoDinheiro;
+        
+        // Se o saldo for negativo, definir como NULL (a constraint permite NULL)
+        let valorFinalDeclarado: number | null = dinheiroEmMaos;
+        if (dinheiroEmMaos < 0) {
+            console.warn('[useCaixa] Saldo negativo detectado:', dinheiroEmMaos);
+            valorFinalDeclarado = null;
+            dinheiroEmMaos = 0;
+        }
         
         // Calcular diferença
         const diferenca = (valorCofre || 0) + (valorPixExterno || 0) - saldoEsperadoDinheiro;
         
-        console.log('[useCaixa] Cálculos do fechamento:', {
-            valor_inicial: sessaoAtiva.valor_inicial,
-            entradas,
-            saidas,
-            saldo,
-            totalEntradasDinheiro,
-            totalSaidasDinheiro,
-            saldoEsperadoDinheiro,
-            valorCofre,
-            valorPixExterno,
-            diferenca
-        });
-
-        // Preparar dados para update com os nomes CORRETOS dos campos
+        // Preparar dados para update
         const updateData = {
             status: 'fechado',
             data_fechamento: new Date().toISOString(),
             observacoes: observacoes || null,
-            // Campos de valores
             valor_enviado_cofre: valorCofre || 0,
             pix_externo_informado: valorPixExterno || 0,
             dinheiro_em_maos: dinheiroEmMaos,
-            valor_final_declarado: dinheiroEmMaos,
+            valor_final_declarado: valorFinalDeclarado,
             valor_final_calculado: sessaoAtiva.valor_inicial + saldo,
-            // Campos de resumo
-            resumo_entradas_pix: resumo.pix,
-            resumo_entradas_dinheiro: resumo.dinheiro,
-            resumo_entradas_bolao_dinheiro: resumo.bolao_dinheiro,
-            resumo_entradas_bolao_pix: resumo.bolao_pix,
-            resumo_saidas_sangria: resumo.sangria,
-            resumo_saidas_deposito: resumo.deposito,
-            resumo_saidas_boleto: resumo.boleto,
-            resumo_saidas_trocados: resumo.trocados,
-            resumo_total_entradas: entradas,
-            resumo_total_saidas: saidas,
+            resumo_entradas_pix: resumo.pix || 0,
+            resumo_entradas_dinheiro: resumo.dinheiro || 0,
+            resumo_entradas_bolao_dinheiro: resumo.bolao_dinheiro || 0,
+            resumo_entradas_bolao_pix: resumo.bolao_pix || 0,
+            resumo_saidas_sangria: resumo.sangria || 0,
+            resumo_saidas_deposito: resumo.deposito || 0,
+            resumo_saidas_boleto: resumo.boleto || 0,
+            resumo_saidas_trocados: resumo.trocados || 0,
+            resumo_total_entradas: entradas || 0,
+            resumo_total_saidas: saidas || 0,
             saldo_esperado_dinheiro: saldoEsperadoDinheiro,
             diferenca_caixa: diferenca,
             fundo_caixa_devolvido: sessaoAtiva.tem_fundo_caixa !== false,
-            // Campos de auditoria
             auditoria_status: 'pendente'
         };
 
@@ -469,32 +457,18 @@ const fecharCaixa = async (
             .eq('id', sessaoAtiva.id)
             .select();
 
-        if (error) {
-            console.error('[useCaixa] Erro no update - DETALHES:', {
-                message: error.message,
-                code: error.code,
-                details: error.details,
-                hint: error.hint
-            });
-            throw error;
-        }
+        if (error) throw error;
 
         console.log('[useCaixa] Sessão fechada com sucesso:', data);
         setSessaoAtiva(null);
         setMovimentacoes([]);
         return data;
     } catch (err: any) {
-        console.error('[useCaixa] Erro ao fechar caixa - CATCH:', {
-            message: err?.message,
-            code: err?.code,
-            details: err?.details,
-            hint: err?.hint
-        });
+        console.error('[useCaixa] Erro ao fechar caixa:', err);
         setError('Falha ao fechar o caixa. Tente novamente.');
         throw err;
     }
 };
-
   useEffect(() => {
     sessaoAtivaRef.current = sessaoAtiva;
   }, [sessaoAtiva]);
