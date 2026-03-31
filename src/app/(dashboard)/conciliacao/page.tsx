@@ -1,4 +1,3 @@
-// src/app/(dashboard)/conciliacao/page.tsx
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -23,6 +22,8 @@ interface ContaBancaria {
     nome: string;
     banco: string;
     banco_id: number;
+    agencia?: string;
+    conta_numero?: string;
 }
 
 interface ResumoConciliacao {
@@ -77,28 +78,56 @@ export default function ConciliacaoPage() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
 
-        const { data, error } = await supabase
+        // Buscar a empresa do usuário
+        const { data: userData, error: userError } = await supabase
             .from('usuarios')
-            .select('empresa_id, empresas!inner(id, nome_fantasia)')
+            .select('empresa_id')
             .eq('id', user.id)
             .single();
 
-        if (error) {
-            console.error('Erro ao carregar lojas:', error);
+        if (userError) {
+            console.error('Erro ao buscar usuário:', userError);
             return;
         }
 
-        if (data?.empresas) {
-            setLojas([data.empresas as Loja]);
-            setLojaSelecionada(data.empresas.id);
+        if (userData?.empresa_id) {
+            // Buscar os dados da empresa
+            const { data: empresaData, error: empresaError } = await supabase
+                .from('empresas')
+                .select('id, nome_fantasia')
+                .eq('id', userData.empresa_id)
+                .single();
+
+            if (empresaError) {
+                console.error('Erro ao buscar empresa:', empresaError);
+                return;
+            }
+
+            if (empresaData) {
+                const loja: Loja = {
+                    id: empresaData.id,
+                    nome_fantasia: empresaData.nome_fantasia || 'Minha Loja'
+                };
+                setLojas([loja]);
+                setLojaSelecionada(loja.id);
+            }
         }
     }, [supabase]);
 
     // Carregar contas bancárias
     const carregarContas = useCallback(async () => {
+        if (!lojaSelecionada) return;
+
         const { data, error } = await supabase
             .from('financeiro_contas_bancarias')
-            .select('*, financeiro_bancos!banco_id(nome)')
+            .select(`
+                id,
+                nome,
+                banco_id,
+                agencia,
+                conta_numero,
+                financeiro_bancos!banco_id (nome)
+            `)
             .eq('loja_id', lojaSelecionada);
 
         if (error) {
@@ -106,11 +135,13 @@ export default function ConciliacaoPage() {
             return;
         }
 
-        const contasFormatadas = data.map(c => ({
+        const contasFormatadas: ContaBancaria[] = (data || []).map(c => ({
             id: c.id,
             nome: c.nome,
             banco: c.financeiro_bancos?.nome || 'Banco não informado',
-            banco_id: c.banco_id
+            banco_id: c.banco_id,
+            agencia: c.agencia,
+            conta_numero: c.conta_numero
         }));
         
         setContas(contasFormatadas);
@@ -137,7 +168,7 @@ export default function ConciliacaoPage() {
             if (error) throw error;
             
             if (data && data.length > 0) {
-                setResumo(data[0]);
+                setResumo(data[0] as ResumoConciliacao);
             } else {
                 setResumo(null);
             }
@@ -153,7 +184,7 @@ export default function ConciliacaoPage() {
 
             if (saldoData) {
                 setSaldoInicialForm({
-                    saldo: saldoData.saldo_inicial,
+                    saldo: saldoData.saldo_inicial || 0,
                     observacoes: saldoData.observacoes || ''
                 });
             }
