@@ -1,364 +1,586 @@
+// src/app/(dashboard)/conciliacao/page.tsx
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Building, Loader as Loader2, CircleCheck as CheckCircle2, TriangleAlert as AlertTriangle, Clock, Plus, RefreshCw, FileText, Smartphone, DollarSign, CircleArrowDown as ArrowDownCircle, TrendingUp, TrendingDown, Scale } from 'lucide-react';
-import {
-    registrarExtratoDiario,
-    getExtratosConciliacao,
-    getResumoConciliacao,
-    justificarDivergencia,
-    type ConciliacaoExtrato
-} from '@/actions/conciliacao';
-import { getContasBancarias } from '@/actions/financeiro';
-import { MoneyInput } from '@/components/ui/MoneyInput';
+import { 
+    Building, Loader2, CheckCircle2, AlertTriangle, 
+    Calendar, DollarSign, TrendingUp, TrendingDown, 
+    Smartphone, Coins, Banknote, Receipt, Plus, 
+    RefreshCw, Filter, ArrowDownCircle, ArrowUpCircle,
+    Save, Edit, X, Wallet
+} from 'lucide-react';
 import { useToast } from '@/contexts/ToastContext';
+import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
+import { MoneyInput } from '@/components/ui/MoneyInput';
 
-const STATUS_LABELS: Record<string, { label: string; cor: string; icon: any }> = {
-    conciliado: { label: 'Conciliado', cor: '#22c55e', icon: CheckCircle2 },
-    divergente: { label: 'Divergente', cor: '#ef4444', icon: AlertTriangle },
-    pendente: { label: 'Pendente', cor: '#eab308', icon: Clock },
-    justificado: { label: 'Justificado', cor: '#3b82f6', icon: FileText },
-};
+interface Loja {
+    id: string;
+    nome_fantasia: string;
+}
+
+interface ContaBancaria {
+    id: string;
+    nome: string;
+    banco: string;
+    banco_id: number;
+}
+
+interface ResumoConciliacao {
+    saldo_inicial: number;
+    total_entradas_pix: number;
+    total_entradas_dinheiro: number;
+    total_entradas_bolao_pix: number;
+    total_entradas_bolao_dinheiro: number;
+    total_entradas_geral: number;
+    total_enviado_cofre: number;
+    total_depositado: number;
+    saldo_esperado_cofre: number;
+    saldo_real_cofre: number;
+    diferenca: number;
+    total_fechamentos: number;
+    total_aprovados: number;
+    total_pendentes: number;
+}
 
 export default function ConciliacaoPage() {
+    const supabase = createBrowserSupabaseClient();
     const { toast } = useToast();
-    const [contas, setContas] = useState<any[]>([]);
+
+    const [loading, setLoading] = useState(true);
+    const [lojas, setLojas] = useState<Loja[]>([]);
+    const [contas, setContas] = useState<ContaBancaria[]>([]);
+    
+    const [lojaSelecionada, setLojaSelecionada] = useState('');
     const [contaSelecionada, setContaSelecionada] = useState('');
-    const [mesAno, setMesAno] = useState(() => {
+    const [mesReferencia, setMesReferencia] = useState(() => {
         const d = new Date();
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     });
-    const [extratos, setExtratos] = useState<ConciliacaoExtrato[]>([]);
-    const [resumo, setResumo] = useState<any>(null);
-    const [loading, setLoading] = useState(true);
-    const [showRegistrar, setShowRegistrar] = useState(false);
-    const [tab, setTab] = useState<'depositos' | 'pix' | 'pagamentos'>('depositos');
-
-    // Form do extrato
-    const [formData, setFormData] = useState({
-        data: new Date().toISOString().split('T')[0],
-        depositos: 0, pix: 0, debitos: 0, tarifas: 0, saldo: 0,
+    
+    const [resumo, setResumo] = useState<ResumoConciliacao | null>(null);
+    const [depositos, setDepositos] = useState<any[]>([]);
+    const [showDepositoModal, setShowDepositoModal] = useState(false);
+    const [showSaldoModal, setShowSaldoModal] = useState(false);
+    const [saldoInicialForm, setSaldoInicialForm] = useState({
+        saldo: 0,
+        observacoes: ''
     });
-    const [registrando, setRegistrando] = useState(false);
+    const [depositoForm, setDepositoForm] = useState({
+        valor: 0,
+        data: new Date().toISOString().split('T')[0],
+        observacoes: ''
+    });
+    const [processando, setProcessando] = useState(false);
 
-    // Justificativa
-    const [justificando, setJustificando] = useState<number | null>(null);
-    const [justificativaText, setJustificativaText] = useState('');
+    // Carregar lojas do usuário
+    const carregarLojas = useCallback(async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
 
-    const carregarDados = useCallback(async () => {
+        const { data, error } = await supabase
+            .from('usuarios')
+            .select('empresa_id, empresas!inner(id, nome_fantasia)')
+            .eq('id', user.id)
+            .single();
+
+        if (error) {
+            console.error('Erro ao carregar lojas:', error);
+            return;
+        }
+
+        if (data?.empresas) {
+            setLojas([data.empresas as Loja]);
+            setLojaSelecionada(data.empresas.id);
+        }
+    }, [supabase]);
+
+    // Carregar contas bancárias
+    const carregarContas = useCallback(async () => {
+        const { data, error } = await supabase
+            .from('financeiro_contas_bancarias')
+            .select('*, financeiro_bancos!banco_id(nome)')
+            .eq('loja_id', lojaSelecionada);
+
+        if (error) {
+            console.error('Erro ao carregar contas:', error);
+            return;
+        }
+
+        const contasFormatadas = data.map(c => ({
+            id: c.id,
+            nome: c.nome,
+            banco: c.financeiro_bancos?.nome || 'Banco não informado',
+            banco_id: c.banco_id
+        }));
+        
+        setContas(contasFormatadas);
+        if (contasFormatadas.length > 0 && !contaSelecionada) {
+            setContaSelecionada(contasFormatadas[0].id);
+        }
+    }, [supabase, lojaSelecionada, contaSelecionada]);
+
+    // Buscar resumo da conciliação
+    const buscarResumo = useCallback(async () => {
+        if (!lojaSelecionada || !contaSelecionada || !mesReferencia) return;
+
         setLoading(true);
         try {
-            const c = await getContasBancarias();
-            setContas(c);
-            if (c.length > 0 && !contaSelecionada) {
-                setContaSelecionada(c[0].id);
+            const dataInicio = `${mesReferencia}-01`;
+            
+            const { data, error } = await supabase
+                .rpc('get_resumo_conciliacao_completo', {
+                    p_loja_id: lojaSelecionada,
+                    p_conta_bancaria_id: contaSelecionada,
+                    p_mes_referencia: dataInicio
+                });
+
+            if (error) throw error;
+            
+            if (data && data.length > 0) {
+                setResumo(data[0]);
+            } else {
+                setResumo(null);
             }
+
+            // Buscar saldo inicial atual
+            const { data: saldoData } = await supabase
+                .from('conciliacao_saldo_inicial')
+                .select('saldo_inicial, observacoes')
+                .eq('loja_id', lojaSelecionada)
+                .eq('conta_bancaria_id', contaSelecionada)
+                .eq('mes_referencia', dataInicio)
+                .maybeSingle();
+
+            if (saldoData) {
+                setSaldoInicialForm({
+                    saldo: saldoData.saldo_inicial,
+                    observacoes: saldoData.observacoes || ''
+                });
+            }
+
+            // Buscar depósitos do mês
+            const { data: depositosData } = await supabase
+                .from('vw_historico_depositos')
+                .select('*')
+                .eq('loja_id', lojaSelecionada)
+                .eq('conta_bancaria_id', contaSelecionada)
+                .gte('data_movimentacao', dataInicio)
+                .lte('data_movimentacao', `${mesReferencia}-31`);
+
+            setDepositos(depositosData || []);
+
         } catch (err: any) {
+            console.error('Erro ao buscar resumo:', err);
             toast({ message: err.message, type: 'error' });
         } finally {
             setLoading(false);
         }
-    }, [toast, contaSelecionada]);
+    }, [supabase, lojaSelecionada, contaSelecionada, mesReferencia, toast]);
 
-    useEffect(() => { carregarDados(); }, [carregarDados]);
+    useEffect(() => {
+        carregarLojas();
+    }, [carregarLojas]);
 
-    const carregarExtratos = useCallback(async () => {
-        if (!contaSelecionada) return;
-        try {
-            const [e, r] = await Promise.all([
-                getExtratosConciliacao(contaSelecionada, mesAno),
-                getResumoConciliacao(contaSelecionada, mesAno),
-            ]);
-            setExtratos(e);
-            setResumo(r);
-        } catch (err: any) {
-            toast({ message: err.message, type: 'error' });
+    useEffect(() => {
+        if (lojaSelecionada) {
+            carregarContas();
         }
-    }, [contaSelecionada, mesAno, toast]);
+    }, [lojaSelecionada, carregarContas]);
 
-    useEffect(() => { carregarExtratos(); }, [carregarExtratos]);
+    useEffect(() => {
+        if (lojaSelecionada && contaSelecionada && mesReferencia) {
+            buscarResumo();
+        }
+    }, [lojaSelecionada, contaSelecionada, mesReferencia, buscarResumo]);
 
-    const handleRegistrar = async () => {
-        if (!contaSelecionada || !formData.data) return;
-        setRegistrando(true);
+    const handleRegistrarSaldoInicial = async () => {
+        if (!lojaSelecionada || !contaSelecionada) return;
+        
+        setProcessando(true);
         try {
-            const result = await registrarExtratoDiario({
-                conta_id: contaSelecionada,
-                data_extrato: formData.data,
-                depositos_confirmados: formData.depositos,
-                pix_ted_recebidos: formData.pix,
-                debitos_pagamentos: formData.debitos,
-                tarifas_bancarias: formData.tarifas,
-                saldo_extrato: formData.saldo || undefined,
-            });
-            const status = (result as any)?.status;
-            toast({
-                message: status === 'conciliado'
-                    ? 'Extrato registrado — Tudo conciliado!'
-                    : 'Extrato registrado — Verificar divergências.',
-                type: status === 'conciliado' ? 'success' : 'warning',
-            });
-            setShowRegistrar(false);
-            setFormData({ data: new Date().toISOString().split('T')[0], depositos: 0, pix: 0, debitos: 0, tarifas: 0, saldo: 0 });
-            carregarExtratos();
+            const dataInicio = `${mesReferencia}-01`;
+            const { data: { user } } = await supabase.auth.getUser();
+            
+            const { data, error } = await supabase
+                .rpc('registrar_saldo_inicial', {
+                    p_loja_id: lojaSelecionada,
+                    p_conta_bancaria_id: contaSelecionada,
+                    p_mes_referencia: dataInicio,
+                    p_saldo_inicial: saldoInicialForm.saldo,
+                    p_observacoes: saldoInicialForm.observacoes || null,
+                    p_usuario_id: user?.id
+                });
+
+            if (error) throw error;
+            
+            toast({ message: 'Saldo inicial registrado com sucesso!', type: 'success' });
+            setShowSaldoModal(false);
+            buscarResumo();
         } catch (err: any) {
             toast({ message: err.message, type: 'error' });
         } finally {
-            setRegistrando(false);
+            setProcessando(false);
         }
     };
 
-    const handleJustificar = async () => {
-        if (!justificando || !justificativaText.trim()) return;
+    const handleRegistrarDeposito = async () => {
+        if (!lojaSelecionada || !contaSelecionada || depositoForm.valor <= 0) return;
+        
+        setProcessando(true);
         try {
-            await justificarDivergencia(justificando, justificativaText);
-            toast({ message: 'Divergência justificada.', type: 'success' });
-            setJustificando(null);
-            setJustificativaText('');
-            carregarExtratos();
+            const { data: { user } } = await supabase.auth.getUser();
+            
+            const { data, error } = await supabase
+                .rpc('registrar_deposito_conciliacao', {
+                    p_loja_id: lojaSelecionada,
+                    p_conta_bancaria_id: contaSelecionada,
+                    p_valor: depositoForm.valor,
+                    p_data_deposito: depositoForm.data,
+                    p_observacoes: depositoForm.observacoes || null,
+                    p_usuario_id: user?.id
+                });
+
+            if (error) throw error;
+            
+            toast({ message: 'Depósito registrado com sucesso!', type: 'success' });
+            setShowDepositoModal(false);
+            setDepositoForm({ valor: 0, data: new Date().toISOString().split('T')[0], observacoes: '' });
+            buscarResumo();
         } catch (err: any) {
             toast({ message: err.message, type: 'error' });
+        } finally {
+            setProcessando(false);
         }
     };
 
-    const contaAtual = contas.find(c => c.id === contaSelecionada);
+    const formatarMoeda = (valor: number) => {
+        return new Intl.NumberFormat('pt-BR', {
+            style: 'currency',
+            currency: 'BRL'
+        }).format(valor);
+    };
 
-    if (loading) {
-        return <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-muted" size={32} /></div>;
+    const formatarData = (data: string) => {
+        return new Date(data).toLocaleDateString('pt-BR');
+    };
+
+    const formatarMes = (mes: string) => {
+        const [ano, mesNum] = mes.split('-');
+        const meses = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 
+                       'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+        return `${meses[parseInt(mesNum) - 1]} de ${ano}`;
+    };
+
+    if (loading && !resumo) {
+        return (
+            <div className="flex items-center justify-center h-64">
+                <Loader2 className="animate-spin text-primary" size={32} />
+            </div>
+        );
     }
 
     return (
-        <div className="space-y-6 p-4 max-w-5xl mx-auto">
+        <div className="space-y-6 p-6 max-w-7xl mx-auto">
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-xl bg-primary-blue-light/10 flex items-center justify-center">
-                        <Scale size={20} className="text-primary-blue-light" />
+                        <Wallet size={20} className="text-primary-blue-light" />
                     </div>
                     <div>
                         <h1 className="text-xl font-black">Conciliação Bancária</h1>
-                        <p className="text-xs text-muted">Compare sistema x extrato do banco</p>
+                        <p className="text-xs text-muted">Controle de entradas e depósitos</p>
                     </div>
                 </div>
-                <button onClick={() => setShowRegistrar(true)} className="btn btn-primary">
-                    <Plus size={14} /> Registrar Extrato
-                </button>
-            </div>
-
-            {/* Seletores */}
-            <div className="flex gap-3 flex-wrap">
-                <select value={contaSelecionada} onChange={e => setContaSelecionada(e.target.value)}
-                    className="input flex-1 min-w-[200px]">
-                    {contas.map(c => (
-                        <option key={c.id} value={c.id}>{c.banco} — {c.nome}</option>
-                    ))}
-                </select>
-                <input type="month" value={mesAno} onChange={e => setMesAno(e.target.value)}
-                    className="input w-40" />
-            </div>
-
-            {/* Resumo do Período */}
-            {resumo && (
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                    <div className="p-3 rounded-xl bg-success/10 border border-success/20 text-center">
-                        <p className="text-xl font-black text-success">{resumo.total_conciliados}</p>
-                        <p className="text-[10px] text-muted font-bold">Conciliados</p>
-                    </div>
-                    <div className="p-3 rounded-xl bg-danger/10 border border-danger/20 text-center">
-                        <p className="text-xl font-black text-danger">{resumo.total_divergentes}</p>
-                        <p className="text-[10px] text-muted font-bold">Divergentes</p>
-                    </div>
-                    <div className="p-3 rounded-xl bg-warning/10 border border-warning/20 text-center">
-                        <p className="text-xl font-black text-warning">{resumo.total_pendentes}</p>
-                        <p className="text-[10px] text-muted font-bold">Pendentes</p>
-                    </div>
-                    <div className="p-3 rounded-xl bg-primary-blue-light/10 border border-primary-blue-light/20 text-center">
-                        <p className="text-xl font-black text-primary-blue-light">{resumo.percentual_conciliado}%</p>
-                        <p className="text-[10px] text-muted font-bold">Conciliado</p>
-                    </div>
-                </div>
-            )}
-
-            {/* Abas */}
-            <div className="flex gap-1 bg-surface-subtle rounded-xl p-1">
-                {(['depositos', 'pix', 'pagamentos'] as const).map(t => (
-                    <button key={t} onClick={() => setTab(t)}
-                        className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${
-                            tab === t ? 'bg-bg-card text-text-primary shadow' : 'text-muted'
-                        }`}>
-                        {t === 'depositos' && <><DollarSign size={12} /> Depósitos</>}
-                        {t === 'pix' && <><Smartphone size={12} /> PIX/Digital</>}
-                        {t === 'pagamentos' && <><ArrowDownCircle size={12} /> Pagamentos</>}
+                <div className="flex gap-2">
+                    <button 
+                        onClick={() => setShowSaldoModal(true)} 
+                        className="btn btn-ghost btn-sm"
+                    >
+                        <Edit size={14} /> Saldo Inicial
                     </button>
-                ))}
+                    <button 
+                        onClick={() => setShowDepositoModal(true)} 
+                        className="btn btn-primary"
+                    >
+                        <Plus size={14} /> Registrar Depósito
+                    </button>
+                    <button onClick={buscarResumo} className="btn btn-ghost btn-sm">
+                        <RefreshCw size={14} /> Atualizar
+                    </button>
+                </div>
             </div>
 
-            {/* Lista de Extratos */}
-            <div className="space-y-2">
-                {extratos.length === 0 ? (
-                    <div className="text-center py-12 text-muted text-sm">
-                        Nenhum extrato registrado para este período.
-                        <br />
-                        <button onClick={() => setShowRegistrar(true)}
-                            className="text-primary-blue-light font-bold mt-2 hover:underline">
-                            Registrar primeiro extrato
-                        </button>
-                    </div>
-                ) : (
-                    extratos.map(e => {
-                        const config = STATUS_LABELS[e.status] || STATUS_LABELS.pendente;
-                        const Icon = config.icon;
-
-                        // Dados específicos da aba
-                        let extrato = 0, sistema = 0, diferenca = 0;
-                        if (tab === 'depositos') {
-                            extrato = e.depositos_confirmados;
-                            sistema = e.depositos_sistema;
-                            diferenca = e.diferenca_depositos;
-                        } else if (tab === 'pix') {
-                            extrato = e.pix_ted_recebidos;
-                            sistema = e.pix_sistema;
-                            diferenca = e.diferenca_pix;
-                        } else {
-                            extrato = e.debitos_pagamentos;
-                            sistema = e.pagamentos_sistema;
-                            diferenca = e.diferenca_pagamentos;
-                        }
-
-                        const temDivergencia = Math.abs(diferenca) >= 0.01;
-
-                        return (
-                            <div key={e.id} className={`p-4 rounded-xl border bg-bg-card ${
-                                temDivergencia ? 'border-danger/30' : 'border-border'
-                            }`}>
-                                <div className="flex items-center justify-between mb-3">
-                                    <div className="flex items-center gap-2">
-                                        <Icon size={14} style={{ color: config.cor }} />
-                                        <span className="text-sm font-black">
-                                            {new Date(e.data_extrato + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })}
-                                        </span>
-                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                                            style={{ backgroundColor: config.cor + '20', color: config.cor }}>
-                                            {config.label}
-                                        </span>
-                                    </div>
-                                    {e.tarifas_bancarias > 0 && (
-                                        <span className="text-[10px] text-muted">
-                                            Tarifa: R$ {e.tarifas_bancarias.toFixed(2)}
-                                        </span>
-                                    )}
-                                </div>
-
-                                <div className="grid grid-cols-3 gap-4 text-center">
-                                    <div>
-                                        <p className="text-[10px] text-muted font-bold uppercase">Extrato (banco)</p>
-                                        <p className="text-sm font-black">R$ {extrato.toFixed(2)}</p>
-                                    </div>
-                                    <div>
-                                        <p className="text-[10px] text-muted font-bold uppercase">Sistema (MegaB)</p>
-                                        <p className="text-sm font-black">R$ {sistema.toFixed(2)}</p>
-                                    </div>
-                                    <div>
-                                        <p className="text-[10px] text-muted font-bold uppercase">Diferença</p>
-                                        <p className={`text-sm font-black ${
-                                            temDivergencia ? 'text-danger' : 'text-success'
-                                        }`}>
-                                            {diferenca >= 0 ? '+' : ''}R$ {diferenca.toFixed(2)}
-                                        </p>
-                                    </div>
-                                </div>
-
-                                {/* Justificativa existente */}
-                                {e.justificativa && (
-                                    <p className="text-[10px] text-muted mt-2 italic">
-                                        Justificativa: {e.justificativa}
-                                    </p>
-                                )}
-
-                                {/* Ação de justificar divergência */}
-                                {e.status === 'divergente' && (
-                                    <div className="mt-3 pt-3 border-t border-border">
-                                        {justificando === e.id ? (
-                                            <div className="space-y-2">
-                                                <textarea className="input w-full text-xs" rows={2}
-                                                    value={justificativaText}
-                                                    onChange={ev => setJustificativaText(ev.target.value)}
-                                                    placeholder="Justificativa da divergência..." />
-                                                <div className="flex gap-2">
-                                                    <button className="btn btn-ghost text-xs flex-1"
-                                                        onClick={() => setJustificando(null)}>Cancelar</button>
-                                                    <button className="btn btn-primary text-xs flex-1"
-                                                        onClick={handleJustificar}
-                                                        disabled={!justificativaText.trim()}>Justificar</button>
-                                                </div>
-                                            </div>
-                                        ) : (
-                                            <button className="text-xs text-primary-blue-light font-bold hover:underline"
-                                                onClick={() => { setJustificando(e.id); setJustificativaText(''); }}>
-                                                Justificar divergência
-                                            </button>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        );
-                    })
-                )}
+            {/* Filtros */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                    <label className="text-[10px] font-bold text-muted uppercase">Filial</label>
+                    <select 
+                        value={lojaSelecionada} 
+                        onChange={e => setLojaSelecionada(e.target.value)}
+                        className="input w-full"
+                    >
+                        {lojas.map(loja => (
+                            <option key={loja.id} value={loja.id}>{loja.nome_fantasia}</option>
+                        ))}
+                    </select>
+                </div>
+                <div>
+                    <label className="text-[10px] font-bold text-muted uppercase">Conta Bancária</label>
+                    <select 
+                        value={contaSelecionada} 
+                        onChange={e => setContaSelecionada(e.target.value)}
+                        className="input w-full"
+                        disabled={contas.length === 0}
+                    >
+                        {contas.map(conta => (
+                            <option key={conta.id} value={conta.id}>{conta.banco} - {conta.nome}</option>
+                        ))}
+                    </select>
+                </div>
+                <div>
+                    <label className="text-[10px] font-bold text-muted uppercase">Mês de Referência</label>
+                    <input 
+                        type="month" 
+                        value={mesReferencia} 
+                        onChange={e => setMesReferencia(e.target.value)}
+                        className="input w-full"
+                    />
+                </div>
             </div>
 
-            {/* Modal Registrar Extrato */}
-            {showRegistrar && (
+            {/* Cards de Resumo */}
+            {resumo && (
                 <>
-                    <div className="fixed inset-0 bg-black/70 z-50" onClick={() => setShowRegistrar(false)} />
-                    <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-md bg-bg-card border border-border rounded-2xl z-50 p-6 space-y-4">
-                        <h3 className="text-base font-black flex items-center gap-2">
-                            <FileText size={16} className="text-primary-blue-light" />
-                            Registrar Extrato do Dia
-                        </h3>
-                        <p className="text-xs text-muted">
-                            Informe os totais do extrato bancário de {contaAtual?.banco} — {contaAtual?.nome}
-                        </p>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div className="card p-4">
+                            <div className="flex items-center justify-between mb-2">
+                                <p className="text-[10px] font-bold text-muted uppercase">Saldo Inicial</p>
+                                <button 
+                                    onClick={() => setShowSaldoModal(true)}
+                                    className="text-primary-blue-light hover:underline text-[10px]"
+                                >
+                                    editar
+                                </button>
+                            </div>
+                            <p className="text-2xl font-bold">{formatarMoeda(resumo.saldo_inicial)}</p>
+                        </div>
 
-                        <div className="space-y-3">
-                            <div>
-                                <label className="text-[10px] font-bold text-muted uppercase">Data</label>
-                                <input type="date" className="input w-full"
-                                    value={formData.data}
-                                    onChange={e => setFormData(p => ({ ...p, data: e.target.value }))} />
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-bold text-muted uppercase">Depósitos confirmados no extrato</label>
-                                <MoneyInput value={formData.depositos}
-                                    onValueChange={v => setFormData(p => ({ ...p, depositos: v }))} />
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-bold text-muted uppercase">PIX/TED recebidos</label>
-                                <MoneyInput value={formData.pix}
-                                    onValueChange={v => setFormData(p => ({ ...p, pix: v }))} />
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-bold text-muted uppercase">Débitos/Pagamentos</label>
-                                <MoneyInput value={formData.debitos}
-                                    onValueChange={v => setFormData(p => ({ ...p, debitos: v }))} />
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-bold text-muted uppercase">Tarifas bancárias</label>
-                                <MoneyInput value={formData.tarifas}
-                                    onValueChange={v => setFormData(p => ({ ...p, tarifas: v }))} />
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-bold text-muted uppercase">Saldo final no extrato (opcional)</label>
-                                <MoneyInput value={formData.saldo}
-                                    onValueChange={v => setFormData(p => ({ ...p, saldo: v }))} />
+                        <div className="card p-4 bg-success/5 border-success/20">
+                            <p className="text-[10px] font-bold text-success uppercase">Total Entradas TFL</p>
+                            <p className="text-2xl font-bold text-success">{formatarMoeda(resumo.total_entradas_geral)}</p>
+                            <div className="text-xs text-muted mt-1">
+                                <span className="inline-flex items-center gap-1 mr-3"><Smartphone size={10} /> PIX: {formatarMoeda(resumo.total_entradas_pix + resumo.total_entradas_bolao_pix)}</span>
+                                <span className="inline-flex items-center gap-1"><Banknote size={10} /> Dinheiro: {formatarMoeda(resumo.total_entradas_dinheiro + resumo.total_entradas_bolao_dinheiro)}</span>
                             </div>
                         </div>
 
+                        <div className="card p-4 bg-warning/5 border-warning/20">
+                            <p className="text-[10px] font-bold text-warning uppercase">Enviado ao Cofre</p>
+                            <p className="text-2xl font-bold text-warning">{formatarMoeda(resumo.total_enviado_cofre)}</p>
+                            <p className="text-xs text-muted mt-1">
+                                {resumo.total_aprovados} de {resumo.total_fechamentos} fechamentos aprovados
+                            </p>
+                        </div>
+
+                        <div className="card p-4 bg-primary-blue-light/5 border-primary-blue-light/20">
+                            <p className="text-[10px] font-bold text-primary-blue-light uppercase">Total Depositado</p>
+                            <p className="text-2xl font-bold text-primary-blue-light">{formatarMoeda(resumo.total_depositado)}</p>
+                        </div>
+                    </div>
+
+                    {/* Conciliação do Cofre */}
+                    <div className="card p-6">
+                        <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
+                            <Coins size={18} className="text-primary-blue-light" />
+                            Conciliação do Cofre
+                        </h2>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div className="text-center p-4 rounded-xl bg-surface-subtle">
+                                <p className="text-xs text-muted font-bold mb-1">Saldo Esperado</p>
+                                <p className="text-2xl font-bold text-primary">
+                                    {formatarMoeda(resumo.saldo_esperado_cofre)}
+                                </p>
+                                <p className="text-[10px] text-muted mt-1">
+                                    Saldo Inicial + Enviado ao Cofre
+                                </p>
+                            </div>
+                            
+                            <div className="text-center p-4 rounded-xl bg-surface-subtle">
+                                <p className="text-xs text-muted font-bold mb-1">Saldo Real</p>
+                                <p className="text-2xl font-bold text-primary">
+                                    {formatarMoeda(resumo.saldo_real_cofre)}
+                                </p>
+                                <p className="text-[10px] text-muted mt-1">
+                                    Saldo Esperado - Depósitos
+                                </p>
+                            </div>
+                            
+                            <div className={`text-center p-4 rounded-xl ${
+                                resumo.diferenca === 0 ? 'bg-success/10' : 
+                                resumo.diferenca > 0 ? 'bg-warning/10' : 'bg-danger/10'
+                            }`}>
+                                <p className="text-xs text-muted font-bold mb-1">Diferença</p>
+                                <p className={`text-2xl font-bold ${
+                                    resumo.diferenca === 0 ? 'text-success' : 
+                                    resumo.diferenca > 0 ? 'text-warning' : 'text-danger'
+                                }`}>
+                                    {resumo.diferenca > 0 ? '+' : ''}{formatarMoeda(resumo.diferenca)}
+                                </p>
+                                <p className="text-[10px] text-muted mt-1">
+                                    {resumo.diferenca === 0 ? 'Conciliado' : 
+                                      resumo.diferenca > 0 ? 'Saldo a depositar' : 'Saldo excedente'}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Histórico de Depósitos */}
+                    {depositos.length > 0 && (
+                        <div className="card p-6">
+                            <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
+                                <Receipt size={18} className="text-primary-blue-light" />
+                                Histórico de Depósitos
+                            </h2>
+                            <div className="overflow-x-auto">
+                                <table className="w-full">
+                                    <thead>
+                                        <tr className="border-b border-border">
+                                            <th className="text-left py-2 px-2">Data</th>
+                                            <th className="text-left py-2 px-2">Conta</th>
+                                            <th className="text-right py-2 px-2">Valor</th>
+                                            <th className="text-left py-2 px-2">Observações</th>
+                                            <th className="text-left py-2 px-2">Registrado por</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {depositos.map((dep) => (
+                                            <tr key={dep.id} className="border-b border-border/50 hover:bg-surface-subtle">
+                                                <td className="py-2 px-2">{formatarData(dep.data_movimentacao)}</td>
+                                                <td className="py-2 px-2">{dep.banco_nome} - {dep.conta_nome}</td>
+                                                <td className="py-2 px-2 text-right font-bold text-success">{formatarMoeda(dep.valor)}</td>
+                                                <td className="py-2 px-2 text-muted text-sm">{dep.observacoes || '-'}</td>
+                                                <td className="py-2 px-2 text-muted text-sm">{dep.operador_nome || 'Sistema'}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+                </>
+            )}
+
+            {/* Modal Saldo Inicial */}
+            {showSaldoModal && (
+                <>
+                    <div className="fixed inset-0 bg-black/70 z-50" onClick={() => setShowSaldoModal(false)} />
+                    <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-md bg-bg-card border border-border rounded-2xl z-50 p-6 space-y-4">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-base font-black flex items-center gap-2">
+                                <Wallet size={16} className="text-primary-blue-light" />
+                                Saldo Inicial - {formatarMes(mesReferencia)}
+                            </h3>
+                            <button onClick={() => setShowSaldoModal(false)} className="p-1 hover:bg-white/5 rounded">
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        <div>
+                            <label className="text-[10px] font-bold text-muted uppercase">Saldo Inicial da Conta</label>
+                            <MoneyInput 
+                                value={saldoInicialForm.saldo}
+                                onValueChange={(v) => setSaldoInicialForm(prev => ({ ...prev, saldo: v }))}
+                                className="text-xl font-bold"
+                            />
+                            <p className="text-[10px] text-muted mt-1">
+                                Saldo disponível na conta no início do mês
+                            </p>
+                        </div>
+
+                        <div>
+                            <label className="text-[10px] font-bold text-muted uppercase">Observações (opcional)</label>
+                            <textarea 
+                                className="input w-full text-sm"
+                                rows={2}
+                                value={saldoInicialForm.observacoes}
+                                onChange={(e) => setSaldoInicialForm(prev => ({ ...prev, observacoes: e.target.value }))}
+                                placeholder="Informações adicionais..."
+                            />
+                        </div>
+
                         <div className="flex gap-3 pt-2">
-                            <button className="btn btn-ghost flex-1" onClick={() => setShowRegistrar(false)} disabled={registrando}>
+                            <button className="btn btn-ghost flex-1" onClick={() => setShowSaldoModal(false)}>
                                 Cancelar
                             </button>
-                            <button className="btn btn-primary flex-1 font-black" onClick={handleRegistrar} disabled={registrando}>
-                                {registrando ? <Loader2 className="animate-spin" size={14} /> : 'Registrar'}
+                            <button 
+                                className="btn btn-primary flex-1 font-black"
+                                onClick={handleRegistrarSaldoInicial}
+                                disabled={processando}
+                            >
+                                {processando ? <Loader2 className="animate-spin" size={16} /> : 'Salvar'}
+                            </button>
+                        </div>
+                    </div>
+                </>
+            )}
+
+            {/* Modal Registrar Depósito */}
+            {showDepositoModal && (
+                <>
+                    <div className="fixed inset-0 bg-black/70 z-50" onClick={() => setShowDepositoModal(false)} />
+                    <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-md bg-bg-card border border-border rounded-2xl z-50 p-6 space-y-4">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-base font-black flex items-center gap-2">
+                                <ArrowDownCircle size={16} className="text-danger" />
+                                Registrar Depósito
+                            </h3>
+                            <button onClick={() => setShowDepositoModal(false)} className="p-1 hover:bg-white/5 rounded">
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        <div>
+                            <label className="text-[10px] font-bold text-muted uppercase">Valor Depositado</label>
+                            <MoneyInput 
+                                value={depositoForm.valor}
+                                onValueChange={(v) => setDepositoForm(prev => ({ ...prev, valor: v }))}
+                                className="text-xl font-bold"
+                            />
+                        </div>
+
+                        <div>
+                            <label className="text-[10px] font-bold text-muted uppercase">Data do Depósito</label>
+                            <input 
+                                type="date" 
+                                className="input w-full"
+                                value={depositoForm.data}
+                                onChange={(e) => setDepositoForm(prev => ({ ...prev, data: e.target.value }))}
+                            />
+                        </div>
+
+                        <div>
+                            <label className="text-[10px] font-bold text-muted uppercase">Observações (opcional)</label>
+                            <textarea 
+                                className="input w-full text-sm"
+                                rows={2}
+                                value={depositoForm.observacoes}
+                                onChange={(e) => setDepositoForm(prev => ({ ...prev, observacoes: e.target.value }))}
+                                placeholder="Referência do depósito, comprovante, etc..."
+                            />
+                        </div>
+
+                        <div className="flex gap-3 pt-2">
+                            <button className="btn btn-ghost flex-1" onClick={() => setShowDepositoModal(false)}>
+                                Cancelar
+                            </button>
+                            <button 
+                                className="btn btn-primary flex-1 font-black"
+                                onClick={handleRegistrarDeposito}
+                                disabled={processando || depositoForm.valor <= 0}
+                            >
+                                {processando ? <Loader2 className="animate-spin" size={16} /> : 'Registrar Depósito'}
                             </button>
                         </div>
                     </div>
