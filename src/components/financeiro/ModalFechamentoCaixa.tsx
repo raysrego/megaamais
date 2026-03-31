@@ -8,7 +8,6 @@ import {
     CheckCircle2,
     ArrowUpCircle,
     ArrowDownCircle,
-    ArrowRightLeft,  // ← ADICIONADO
     DollarSign
 } from 'lucide-react';
 import { MoneyInput } from '@/components/ui/MoneyInput';
@@ -39,7 +38,6 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
     const [valorCofre, setValorCofre] = useState(0);
     const [valorPixExterno, setValorPixExterno] = useState(0);
 
-    // Calcular totais
     const totalCreditos = useMemo(() => {
         return transacoes
             .filter(mov => mov.valor > 0)
@@ -58,18 +56,15 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
             .reduce((acc, mov) => acc + Math.abs(mov.valor), 0);
     }, [transacoes]);
 
-    const valorInicial = sessao?.valor_inicial ?? 0;
-    
-    // Total de lançamentos = entradas - saídas (movimentação líquida)
-    const totalLancamentos = totalCreditos - totalDebitos;
-    
-    // Saldo final calculado = valor inicial + total de lançamentos
-    const saldoFinalCalculado = valorInicial + totalLancamentos;
+    const saldoEsperado = useMemo(() => {
+        const inicial = sessao?.valor_inicial ?? 0;
+        return inicial + totalCreditos - totalDebitos;
+    }, [sessao, totalCreditos, totalDebitos]);
 
     const temFundoCaixa = sessao?.tem_fundo_caixa ?? true;
 
     const handleConfirm = async () => {
-        console.log('[Modal] handleConfirm iniciado', { confirmado, justificativa, valorCofre, valorPixExterno });
+        console.log('[Modal] handleConfirm iniciado', { confirmado, justificativa });
 
         if (confirmado === null) {
             console.warn('[Modal] confirmado é null, abortando');
@@ -121,7 +116,6 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
         <>
             <div className="fixed inset-0 bg-black/70 z-50" onClick={onClose} />
             <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-md bg-bg-card border border-border rounded-2xl z-50 shadow-2xl overflow-hidden">
-                {/* Header */}
                 <div className="p-5 border-b border-border flex items-center justify-between">
                     <div className="flex items-center gap-2">
                         <DollarSign size={18} className="text-primary-blue-light" />
@@ -132,61 +126,46 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
                     </button>
                 </div>
 
-                {/* Content */}
                 <div className="p-5 max-h-[70vh] overflow-y-auto custom-scrollbar">
                     {/* Resumo do Turno */}
                     <div className="bg-surface-subtle p-4 rounded-xl border border-border mb-6">
                         <p className="text-xs font-bold mb-3 text-muted uppercase tracking-wider">Resumo do Turno</p>
                         <div className="space-y-2 text-sm">
-                            <div className="flex justify-between">
-                                <span className="text-muted">Valor Inicial:</span>
-                                <span className="font-bold">R$ {valorInicial.toFixed(2)}</span>
-                            </div>
+                            {sessao && (
+                                <div className="flex justify-between">
+                                    <span className="text-muted">Valor Inicial:</span>
+                                    <span className="font-bold">R$ {sessao.valor_inicial.toFixed(2)}</span>
+                                </div>
+                            )}
                             <div className="flex justify-between text-success">
-                                <span className="flex items-center gap-1">
-                                    <ArrowUpCircle size={14} /> Entradas:
-                                </span>
+                                <span className="flex items-center gap-1"><ArrowUpCircle size={14} /> Entradas:</span>
                                 <span className="font-bold">R$ {totalCreditos.toFixed(2)}</span>
                             </div>
                             <div className="flex justify-between text-danger">
-                                <span className="flex items-center gap-1">
-                                    <ArrowDownCircle size={14} /> Saídas:
-                                </span>
+                                <span className="flex items-center gap-1"><ArrowDownCircle size={14} /> Saídas:</span>
                                 <span className="font-bold">R$ {totalDebitos.toFixed(2)}</span>
-                            </div>
-                            <div className="flex justify-between text-muted">
-                                <span className="flex items-center gap-1">
-                                    <ArrowRightLeft size={14} /> Total Lançamentos:
-                                </span>
-                                <span className={`font-bold ${totalLancamentos >= 0 ? 'text-success' : 'text-danger'}`}>
-                                    {totalLancamentos >= 0 ? '+' : ''}R$ {totalLancamentos.toFixed(2)}
-                                </span>
                             </div>
                             {totalSangria > 0 && (
                                 <div className="flex justify-between text-warning">
-                                    <span className="flex items-center gap-1">
-                                        <AlertTriangle size={14} /> Sangrias:
-                                    </span>
+                                    <span className="flex items-center gap-1"><AlertTriangle size={14} /> Sangria/Cofre:</span>
                                     <span className="font-bold">R$ {totalSangria.toFixed(2)}</span>
                                 </div>
                             )}
                             <div className="flex justify-between pt-2 border-t border-border font-black">
                                 <span>Saldo Final Calculado:</span>
-                                <span className={saldoFinalCalculado >= 0 ? 'text-success' : 'text-danger'}>
-                                    R$ {saldoFinalCalculado.toFixed(2)}
+                                <span className={saldoEsperado >= 0 ? 'text-success' : 'text-danger'}>
+                                    R$ {saldoEsperado.toFixed(2)}
                                 </span>
                             </div>
                             <div className="text-[10px] text-muted italic mt-2">
-                                Saldo final = Valor Inicial + (Entradas - Saídas)
+                                Saldo = Valor Inicial + Entradas - Saídas
                             </div>
                         </div>
                     </div>
 
-                    {/* Informações Adicionais (Cofre e PIX Externo) */}
+                    {/* Informações Adicionais: Cofre e PIX Externo */}
                     <div className="bg-surface-subtle p-4 rounded-xl border border-border mb-6">
-                        <p className="text-xs font-bold mb-3 text-muted uppercase tracking-wider">
-                            Informações Adicionais (opcional)
-                        </p>
+                        <p className="text-xs font-bold mb-3 text-muted uppercase tracking-wider">Informações Adicionais (opcional)</p>
                         <div className="space-y-4">
                             <div>
                                 <label className="text-xs font-medium text-muted mb-1 block">
@@ -219,11 +198,9 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
                         </div>
                     </div>
 
-                    {/* Pergunta de Confirmação */}
+                    {/* Pergunta de confirmação */}
                     <div className="space-y-4">
-                        <p className="text-sm font-bold text-center">
-                            O saldo final está correto?
-                        </p>
+                        <p className="text-sm font-bold text-center">O saldo final está correto?</p>
                         <div className="flex gap-4">
                             <button
                                 onClick={() => setConfirmado(true)}
@@ -270,8 +247,7 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
                             </div>
                         )}
 
-                        {/* Alerta de fundo de caixa ausente */}
-                        {!temFundoCaixa && (
+                        {sessao && !sessao.tem_fundo_caixa && (
                             <div className="bg-warning/10 border border-warning/30 p-3 rounded-lg">
                                 <p className="text-xs text-warning font-bold flex items-center gap-2">
                                     <AlertTriangle size={14} />
@@ -282,23 +258,14 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
                     </div>
                 </div>
 
-                {/* Footer */}
                 <div className="border-t border-border p-5 flex justify-end gap-3">
-                    <button 
-                        className="btn btn-ghost" 
-                        onClick={onClose} 
-                        disabled={isProcessing}
-                    >
+                    <button className="btn btn-ghost" onClick={onClose} disabled={isProcessing}>
                         Cancelar
                     </button>
                     <button
                         className="btn btn-primary"
                         onClick={handleConfirm}
-                        disabled={
-                            confirmado === null || 
-                            isProcessing || 
-                            (confirmado === false && !justificativa.trim())
-                        }
+                        disabled={confirmado === null || isProcessing || (confirmado === false && !justificativa.trim())}
                     >
                         {isProcessing ? <Loader2 className="animate-spin mr-2" size={18} /> : null}
                         {isProcessing ? 'Processando...' : 'Confirmar e Encerrar'}
