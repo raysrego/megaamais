@@ -9,13 +9,8 @@ import {
     ShieldCheck,
     Loader2,
     X,
-    Smartphone,
-    DollarSign,
-    Building,
-    FileText,
     TrendingUp,
-    TrendingDown,
-    ArrowRightLeft
+    TrendingDown
 } from 'lucide-react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import { useToast } from '@/contexts/ToastContext';
@@ -50,7 +45,7 @@ interface Fechamento {
     saldo_esperado?: number;
 }
 
-// Modal de auditoria simplificado
+// Modal de auditoria simplificado - VERSÃO SIMPLIFICADA
 interface ModalAuditoriaSimplificadaProps {
     fechamento: Fechamento;
     onClose: () => void;
@@ -66,8 +61,6 @@ function ModalAuditoriaSimplificada({
 }: ModalAuditoriaSimplificadaProps) {
     const [modoRejeitar, setModoRejeitar] = useState(false);
     const [justificativa, setJustificativa] = useState('');
-    const [diferenca, setDiferenca] = useState<number | undefined>();
-    const [tipoDiferenca, setTipoDiferenca] = useState<'falta' | 'sobra'>('falta');
     const [observacoes, setObservacoes] = useState('');
 
     const totalEntradas = (fechamento.total_pix || 0) + (fechamento.total_dinheiro || 0);
@@ -79,7 +72,7 @@ function ModalAuditoriaSimplificada({
     return (
         <>
             <div className="fixed inset-0 bg-black/80 z-9998" onClick={onClose} />
-            <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] max-w-2xl bg-bg-card border border-border rounded-2xl z-9999 p-6 max-h-[90vh] overflow-y-auto">
+            <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] max-w-md bg-bg-card border border-border rounded-2xl z-9999 p-6">
                 <div className="flex justify-between items-center mb-4">
                     <h2 className="text-xl font-bold">Auditoria de Fechamento</h2>
                     <button onClick={onClose} className="btn btn-ghost btn-sm">
@@ -88,228 +81,127 @@ function ModalAuditoriaSimplificada({
                 </div>
 
                 {/* Informações básicas */}
-                <div className="grid grid-cols-2 gap-4 mb-6 p-4 rounded-xl bg-surface-subtle border border-border">
+                <div className="grid grid-cols-2 gap-3 mb-6 p-3 rounded-xl bg-surface-subtle border border-border text-sm">
                     <div>
-                        <p className="text-[10px] text-muted uppercase font-bold">Terminal</p>
-                        <p className="text-sm font-bold">{fechamento.terminal_id}</p>
+                        <p className="text-[9px] text-muted uppercase font-bold">Terminal</p>
+                        <p className="font-bold">{fechamento.terminal_id}</p>
                     </div>
                     <div>
-                        <p className="text-[10px] text-muted uppercase font-bold">Operador</p>
-                        <p className="text-sm font-bold">{fechamento.operador_nome}</p>
+                        <p className="text-[9px] text-muted uppercase font-bold">Operador</p>
+                        <p className="font-bold">{fechamento.operador_nome}</p>
                     </div>
                     <div>
-                        <p className="text-[10px] text-muted uppercase font-bold">Data do turno</p>
-                        <p className="text-sm font-bold">
+                        <p className="text-[9px] text-muted uppercase font-bold">Data do turno</p>
+                        <p className="font-bold">
                             {fechamento.data_turno ? format(new Date(fechamento.data_turno), 'dd/MM/yyyy', { locale: ptBR }) : '-'}
                         </p>
                     </div>
                     <div>
-                        <p className="text-[10px] text-muted uppercase font-bold">Fechamento</p>
-                        <p className="text-sm font-bold">
+                        <p className="text-[9px] text-muted uppercase font-bold">Fechamento</p>
+                        <p className="font-bold">
                             {fechamento.data_fechamento ? format(new Date(fechamento.data_fechamento), 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '-'}
                         </p>
                     </div>
                 </div>
 
-                {/* Detalhamento de Entradas e Saídas */}
+                {/* Totais de Entrada e Saída - SIMPLIFICADO */}
                 <div className="grid grid-cols-2 gap-4 mb-6">
-                    {/* Entradas */}
-                    <div className="p-4 rounded-xl bg-success/5 border border-success/20">
-                        <div className="flex items-center gap-2 mb-3">
-                            <TrendingUp size={14} className="text-success" />
-                            <span className="text-[10px] text-success uppercase font-bold">Entradas</span>
+                    <div className="p-4 rounded-xl bg-success/10 border border-success/20 text-center">
+                        <div className="flex items-center justify-center gap-1 mb-2">
+                            <TrendingUp size={16} className="text-success" />
+                            <span className="text-[10px] text-success uppercase font-bold">ENTRADA</span>
                         </div>
-                        <div className="space-y-2">
-                            <div className="flex justify-between text-sm">
-                                <span className="flex items-center gap-1 text-muted">
-                                    <Smartphone size={12} /> PIX
-                                </span>
-                                <span className="font-bold font-mono">R$ {(fechamento.total_pix || 0).toFixed(2)}</span>
-                            </div>
-                            <div className="flex justify-between text-sm">
-                                <span className="flex items-center gap-1 text-muted">
-                                    <DollarSign size={12} /> Dinheiro
-                                </span>
-                                <span className="font-bold font-mono">R$ {(fechamento.total_dinheiro || 0).toFixed(2)}</span>
-                            </div>
-                            <div className="border-t border-success/20 my-2" />
-                            <div className="flex justify-between text-sm font-bold">
-                                <span>Total Entradas</span>
-                                <span className="text-success">R$ {totalEntradas.toFixed(2)}</span>
-                            </div>
-                        </div>
+                        <p className="text-2xl font-black text-success">
+                            R$ {totalEntradas.toFixed(2)}
+                        </p>
                     </div>
-
-                    {/* Saídas */}
-                    <div className="p-4 rounded-xl bg-danger/5 border border-danger/20">
-                        <div className="flex items-center gap-2 mb-3">
-                            <TrendingDown size={14} className="text-danger" />
-                            <span className="text-[10px] text-danger uppercase font-bold">Saídas</span>
+                    <div className="p-4 rounded-xl bg-danger/10 border border-danger/20 text-center">
+                        <div className="flex items-center justify-center gap-1 mb-2">
+                            <TrendingDown size={16} className="text-danger" />
+                            <span className="text-[10px] text-danger uppercase font-bold">SAÍDA</span>
                         </div>
-                        <div className="space-y-2">
-                            {(fechamento.total_sangrias || 0) > 0 && (
-                                <div className="flex justify-between text-sm">
-                                    <span className="flex items-center gap-1 text-muted">
-                                        <Building size={12} /> Sangrias
-                                    </span>
-                                    <span className="font-bold font-mono">R$ {(fechamento.total_sangrias || 0).toFixed(2)}</span>
-                                </div>
-                            )}
-                            {(fechamento.total_depositos || 0) > 0 && (
-                                <div className="flex justify-between text-sm">
-                                    <span className="flex items-center gap-1 text-muted">
-                                        <Building size={12} /> Depósitos
-                                    </span>
-                                    <span className="font-bold font-mono">R$ {(fechamento.total_depositos || 0).toFixed(2)}</span>
-                                </div>
-                            )}
-                            {(fechamento.total_boletos || 0) > 0 && (
-                                <div className="flex justify-between text-sm">
-                                    <span className="flex items-center gap-1 text-muted">
-                                        <FileText size={12} /> Boletos
-                                    </span>
-                                    <span className="font-bold font-mono">R$ {(fechamento.total_boletos || 0).toFixed(2)}</span>
-                                </div>
-                            )}
-                            <div className="border-t border-danger/20 my-2" />
-                            <div className="flex justify-between text-sm font-bold">
-                                <span>Total Saídas</span>
-                                <span className="text-danger">R$ {totalSaidas.toFixed(2)}</span>
-                            </div>
-                        </div>
+                        <p className="text-2xl font-black text-danger">
+                            R$ {totalSaidas.toFixed(2)}
+                        </p>
                     </div>
                 </div>
 
-                {/* Totais principais */}
-                <div className="grid grid-cols-2 gap-4 mb-6">
-                    <div className="p-4 rounded-xl bg-bg-card border border-border">
-                        <p className="text-[10px] text-muted uppercase font-bold">Valor Inicial</p>
-                        <p className="text-xl font-bold">R$ {(fechamento.valor_inicial || 0).toFixed(2)}</p>
-                    </div>
-                    <div className="p-4 rounded-xl bg-bg-card border border-border">
-                        <p className="text-[10px] text-muted uppercase font-bold">Total Lançamentos</p>
-                        <p className="text-xl font-bold">R$ {(fechamento.total_lancamentos || 0).toFixed(2)}</p>
-                        <p className="text-[8px] text-muted">Entradas - Saídas</p>
-                    </div>
-                </div>
-
-                {/* Valor na Conta (desconsidera valor inicial) */}
-                <div className={`p-4 rounded-xl mb-6 ${
-                    (fechamento.valor_na_conta || 0) >= 0 
-                        ? 'bg-primary-blue-light/10 border border-primary-blue-light/20' 
-                        : 'bg-warning/10 border border-warning/20'
-                }`}>
-                    <p className="text-[10px] font-bold uppercase mb-1 text-primary-blue-light">
+                {/* Valor na Conta */}
+                <div className="p-4 rounded-xl bg-primary-blue-light/10 border border-primary-blue-light/20 mb-6 text-center">
+                    <p className="text-[10px] font-bold text-primary-blue-light uppercase mb-1">
                         💰 VALOR NA CONTA
                     </p>
-                    <div className="flex justify-between items-center">
-                        <span className="text-sm text-muted">Total recebido (desconsidera fundo inicial)</span>
-                        <span className="text-2xl font-black text-primary-blue-light">
-                            R$ {(fechamento.valor_na_conta || 0).toFixed(2)}
-                        </span>
-                    </div>
-                    <div className="text-[10px] text-muted mt-2">
-                        Cálculo: PIX Externo + (Entradas - Saídas)
-                    </div>
+                    <p className="text-2xl font-black text-primary-blue-light">
+                        R$ {(fechamento.valor_na_conta || 0).toFixed(2)}
+                    </p>
+                    <p className="text-[9px] text-muted mt-1">
+                        PIX Externo + (Entradas - Saídas)
+                    </p>
                 </div>
 
-                {/* Saldo Esperado e Declarado */}
-                <div className="grid grid-cols-2 gap-4 mb-6">
-                    <div className="p-4 rounded-xl bg-surface-subtle border border-border">
-                        <p className="text-[10px] text-muted uppercase font-bold">Saldo Esperado</p>
-                        <p className="text-lg font-bold">
-                            R$ {(fechamento.saldo_esperado || 0).toFixed(2)}
-                        </p>
-                        <p className="text-[8px] text-muted">Inclui fundo inicial</p>
-                    </div>
-                    <div className="p-4 rounded-xl bg-surface-subtle border border-border">
-                        <p className="text-[10px] text-muted uppercase font-bold">Declarado pelo Operador</p>
-                        <p className="text-lg font-bold">
-                            R$ {(fechamento.saldo_no_caixa || 0).toFixed(2)}
-                        </p>
-                        <p className="text-[8px] text-muted">Dinheiro em mãos + cofre</p>
-                    </div>
-                </div>
-
-                {/* Informações do Fechamento */}
-                <div className="p-4 rounded-xl bg-surface-subtle border border-border mb-6">
-                    <p className="text-[10px] font-bold text-muted uppercase mb-3">Informações do Fechamento</p>
-                    <div className="space-y-2">
-                        {(fechamento.valor_cofre || 0) > 0 && (
-                            <div className="flex justify-between text-sm">
-                                <span className="text-muted">Valor no cofre</span>
-                                <span className="font-bold">R$ {(fechamento.valor_cofre || 0).toFixed(2)}</span>
-                            </div>
-                        )}
-                        {(fechamento.valor_pix_externo || 0) > 0 && (
-                            <div className="flex justify-between text-sm">
-                                <span className="text-muted">PIX externo</span>
-                                <span className="font-bold">R$ {(fechamento.valor_pix_externo || 0).toFixed(2)}</span>
-                            </div>
-                        )}
-                        {fechamento.fundo_caixa_devolvido !== undefined && (
-                            <div className="flex justify-between text-sm">
-                                <span className="text-muted">Fundo de Caixa</span>
-                                <span className={`font-bold ${fechamento.fundo_caixa_devolvido ? 'text-success' : 'text-warning'}`}>
-                                    {fechamento.fundo_caixa_devolvido ? 'Devolvido' : 'Não devolvido'}
-                                </span>
-                            </div>
-                        )}
-                        <div className="flex justify-between text-sm pt-2 border-t border-border">
-                            <span className="text-muted">Entradas totais</span>
-                            <span className="font-bold">R$ {((fechamento.total_pix || 0) + (fechamento.total_dinheiro || 0)).toFixed(2)}</span>
-                        </div>
+                {/* Informações adicionais (opcional) */}
+                {(fechamento.valor_cofre || 0) > 0 && (
+                    <div className="bg-surface-subtle p-3 rounded-lg border border-border mb-4">
                         <div className="flex justify-between text-sm">
-                            <span className="text-muted">Saídas totais</span>
-                            <span className="font-bold">R$ {((fechamento.total_sangrias || 0) + (fechamento.total_depositos || 0) + (fechamento.total_boletos || 0) + (fechamento.total_trocados || 0)).toFixed(2)}</span>
+                            <span className="text-muted">Valor no cofre</span>
+                            <span className="font-bold">R$ {(fechamento.valor_cofre || 0).toFixed(2)}</span>
                         </div>
                     </div>
-                </div>
+                )}
+
+                {(fechamento.valor_pix_externo || 0) > 0 && (
+                    <div className="bg-surface-subtle p-3 rounded-lg border border-border mb-4">
+                        <div className="flex justify-between text-sm">
+                            <span className="text-muted">PIX externo</span>
+                            <span className="font-bold">R$ {(fechamento.valor_pix_externo || 0).toFixed(2)}</span>
+                        </div>
+                    </div>
+                )}
 
                 {/* Justificativa do Operador */}
                 {fechamento.justificativa && (
                     <div className="mb-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
-                        <span className="text-[10px] text-yellow-500 font-bold uppercase">Justificativa do Operador</span>
-                        <p className="text-sm text-yellow-600 dark:text-yellow-200 mt-1 italic">"{fechamento.justificativa}"</p>
+                        <span className="text-[9px] text-yellow-500 font-bold uppercase">Justificativa do Operador</span>
+                        <p className="text-xs text-yellow-600 dark:text-yellow-200 mt-1 italic">"{fechamento.justificativa}"</p>
                     </div>
                 )}
 
                 {/* Ações */}
                 {!modoRejeitar ? (
-                    <div className="flex gap-4 justify-end">
-                        <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+                    <div className="flex gap-3 justify-end mt-4">
+                        <button className="btn btn-ghost text-sm" onClick={onClose}>Cancelar</button>
                         <button
-                            className="btn bg-danger/10 text-danger hover:bg-danger/20"
+                            className="btn bg-danger/10 text-danger hover:bg-danger/20 text-sm"
                             onClick={() => setModoRejeitar(true)}
                         >
                             Rejeitar
                         </button>
                         <button
-                            className="btn btn-success"
+                            className="btn btn-success text-sm"
                             onClick={() => onAprovar(observacoes)}
                         >
                             Aprovar
                         </button>
                     </div>
                 ) : (
-                    <div className="space-y-4">
+                    <div className="space-y-3 mt-4">
                         <div className="form-group">
-                            <label className="text-sm font-bold">Justificativa da rejeição</label>
+                            <label className="text-xs font-bold">Justificativa da rejeição</label>
                             <textarea
-                                className="input w-full"
+                                className="input w-full text-sm"
                                 rows={3}
                                 value={justificativa}
                                 onChange={(e) => setJustificativa(e.target.value)}
                                 placeholder="Descreva o motivo da rejeição"
                             />
                         </div>
-                        <div className="flex gap-4 justify-end">
-                            <button className="btn btn-ghost" onClick={() => setModoRejeitar(false)}>
+                        <div className="flex gap-3 justify-end">
+                            <button className="btn btn-ghost text-sm" onClick={() => setModoRejeitar(false)}>
                                 Voltar
                             </button>
                             <button
-                                className="btn btn-danger"
-                                onClick={() => onRejeitar({ justificativa, diferenca })}
+                                className="btn btn-danger text-sm"
+                                onClick={() => onRejeitar({ justificativa })}
                             >
                                 Confirmar Rejeição
                             </button>
@@ -443,7 +335,6 @@ export function AuditoriaFechamentos() {
             }
 
             setFechamentos(fechamentosProcessados);
-            console.log('[fetchHistorico] Fechamentos processados:', fechamentosProcessados.length);
             
         } catch (err: any) {
             console.error('Erro ao carregar histórico:', err);
@@ -622,108 +513,59 @@ export function AuditoriaFechamentos() {
                             </div>
                         </div>
 
-                        {/* Entradas e Saídas */}
+                        {/* Totais de Entrada e Saída - SIMPLIFICADO */}
                         <div className="grid grid-cols-2 gap-3 mb-4">
-                            <div className="p-3 rounded-xl bg-success/5 border border-success/20">
-                                <div className="flex items-center gap-1 mb-2">
-                                    <TrendingUp size={12} className="text-success" />
-                                    <span className="text-[9px] text-success uppercase font-bold">Entradas</span>
+                            <div className="p-4 rounded-xl bg-success/10 border border-success/20 text-center">
+                                <div className="flex items-center justify-center gap-1 mb-2">
+                                    <TrendingUp size={14} className="text-success" />
+                                    <span className="text-[9px] text-success uppercase font-bold">ENTRADA</span>
                                 </div>
-                                <div className="space-y-1">
-                                    <div className="flex justify-between text-xs">
-                                        <span className="text-muted">Total Entradas</span>
-                                        <span className="font-bold text-success">R$ {((selectedFechamento.total_pix || 0) + (selectedFechamento.total_dinheiro || 0)).toFixed(2)}</span>
-                                    </div>
-                                </div>
+                                <p className="text-xl font-black text-success">
+                                    R$ {((selectedFechamento.total_pix || 0) + (selectedFechamento.total_dinheiro || 0)).toFixed(2)}
+                                </p>
                             </div>
-
-                            <div className="p-3 rounded-xl bg-danger/5 border border-danger/20">
-                                <div className="flex items-center gap-1 mb-2">
-                                    <TrendingDown size={12} className="text-danger" />
-                                    <span className="text-[9px] text-danger uppercase font-bold">Saídas</span>
+                            <div className="p-4 rounded-xl bg-danger/10 border border-danger/20 text-center">
+                                <div className="flex items-center justify-center gap-1 mb-2">
+                                    <TrendingDown size={14} className="text-danger" />
+                                    <span className="text-[9px] text-danger uppercase font-bold">SAÍDA</span>
                                 </div>
-                                <div className="space-y-1">
-                                    <div className="flex justify-between text-xs">
-                                        <span className="text-muted">Total Saídas</span>
-                                        <span className="font-bold text-danger">R$ {((selectedFechamento.total_sangrias || 0) + (selectedFechamento.total_depositos || 0) + (selectedFechamento.total_boletos || 0) + (selectedFechamento.total_trocados || 0)).toFixed(2)}</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Totais principais */}
-                        <div className="grid grid-cols-2 gap-3 mb-4">
-                            <div className="p-3 rounded-lg bg-bg-card border border-border">
-                                <div className="text-[9px] text-muted uppercase font-bold">Valor Inicial</div>
-                                <div className="text-base font-bold">R$ {(selectedFechamento.valor_inicial || 0).toFixed(2)}</div>
-                            </div>
-                            <div className="p-3 rounded-lg bg-bg-card border border-border">
-                                <div className="text-[9px] text-muted uppercase font-bold">Total Lançamentos</div>
-                                <div className="text-base font-bold">R$ {(selectedFechamento.total_lancamentos || 0).toFixed(2)}</div>
-                                <div className="text-[8px] text-muted">Entradas - Saídas</div>
+                                <p className="text-xl font-black text-danger">
+                                    R$ {((selectedFechamento.total_sangrias || 0) + (selectedFechamento.total_depositos || 0) + (selectedFechamento.total_boletos || 0) + (selectedFechamento.total_trocados || 0)).toFixed(2)}
+                                </p>
                             </div>
                         </div>
 
                         {/* Valor na Conta */}
-                        <div className={`p-4 rounded-xl mb-4 ${
-                            (selectedFechamento.valor_na_conta || 0) >= 0 
-                                ? 'bg-primary-blue-light/10 border border-primary-blue-light/20' 
-                                : 'bg-warning/10 border border-warning/20'
-                        }`}>
-                            <p className="text-[10px] font-bold uppercase mb-1 text-primary-blue-light">
+                        <div className="p-4 rounded-xl bg-primary-blue-light/10 border border-primary-blue-light/20 mb-4 text-center">
+                            <p className="text-[9px] font-bold text-primary-blue-light uppercase mb-1">
                                 💰 VALOR NA CONTA
                             </p>
-                            <div className="flex justify-between items-center">
-                                <span className="text-xs text-muted">Total recebido (desconsidera fundo inicial)</span>
-                                <span className="text-xl font-black text-primary-blue-light">
-                                    R$ {(selectedFechamento.valor_na_conta || 0).toFixed(2)}
-                                </span>
-                            </div>
-                            <div className="text-[9px] text-muted mt-1">
+                            <p className="text-2xl font-black text-primary-blue-light">
+                                R$ {(selectedFechamento.valor_na_conta || 0).toFixed(2)}
+                            </p>
+                            <p className="text-[9px] text-muted mt-1">
                                 PIX Externo + (Entradas - Saídas)
-                            </div>
+                            </p>
                         </div>
 
-                        {/* Saldo Esperado e Declarado */}
-                        <div className="grid grid-cols-2 gap-3 mb-4">
-                            <div className="p-3 rounded-lg bg-surface-subtle border border-border">
-                                <div className="text-[9px] text-muted uppercase font-bold">Saldo Esperado</div>
-                                <div className="text-sm font-bold">R$ {(selectedFechamento.saldo_esperado || 0).toFixed(2)}</div>
-                                <div className="text-[8px] text-muted">Inclui fundo inicial</div>
+                        {/* Informações adicionais */}
+                        {(selectedFechamento.valor_cofre || 0) > 0 && (
+                            <div className="bg-surface-subtle p-3 rounded-lg border border-border mb-3">
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-muted">Valor no cofre</span>
+                                    <span className="font-bold">R$ {(selectedFechamento.valor_cofre || 0).toFixed(2)}</span>
+                                </div>
                             </div>
-                            <div className="p-3 rounded-lg bg-surface-subtle border border-border">
-                                <div className="text-[9px] text-muted uppercase font-bold">Declarado pelo Operador</div>
-                                <div className="text-sm font-bold">R$ {(selectedFechamento.saldo_no_caixa || 0).toFixed(2)}</div>
-                                <div className="text-[8px] text-muted">Dinheiro em mãos + cofre</div>
-                            </div>
-                        </div>
+                        )}
 
-                        {/* Informações do Fechamento */}
-                        <div className="border-t border-border pt-3 mb-4">
-                            <div className="text-[9px] text-muted font-bold uppercase mb-2">Informações do Fechamento</div>
-                            <div className="space-y-2">
-                                {(selectedFechamento.valor_cofre || 0) > 0 && (
-                                    <div className="flex justify-between text-xs">
-                                        <span className="text-muted">Valor no cofre</span>
-                                        <span className="font-bold">R$ {(selectedFechamento.valor_cofre || 0).toFixed(2)}</span>
-                                    </div>
-                                )}
-                                {(selectedFechamento.valor_pix_externo || 0) > 0 && (
-                                    <div className="flex justify-between text-xs">
-                                        <span className="text-muted">PIX externo</span>
-                                        <span className="font-bold">R$ {(selectedFechamento.valor_pix_externo || 0).toFixed(2)}</span>
-                                    </div>
-                                )}
-                                {selectedFechamento.fundo_caixa_devolvido !== undefined && (
-                                    <div className="flex justify-between text-xs">
-                                        <span className="text-muted">Fundo de Caixa</span>
-                                        <span className={`font-bold ${selectedFechamento.fundo_caixa_devolvido ? 'text-success' : 'text-warning'}`}>
-                                            {selectedFechamento.fundo_caixa_devolvido ? 'Devolvido' : 'Não devolvido'}
-                                        </span>
-                                    </div>
-                                )}
+                        {(selectedFechamento.valor_pix_externo || 0) > 0 && (
+                            <div className="bg-surface-subtle p-3 rounded-lg border border-border mb-3">
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-muted">PIX externo</span>
+                                    <span className="font-bold">R$ {(selectedFechamento.valor_pix_externo || 0).toFixed(2)}</span>
+                                </div>
                             </div>
-                        </div>
+                        )}
 
                         {/* Justificativa */}
                         {selectedFechamento.justificativa && (
@@ -777,13 +619,12 @@ export function AuditoriaFechamentos() {
                             setSelectedFechamento(null);
                         }
                     }}
-                    onRejeitar={async ({ justificativa, diferenca }) => {
+                    onRejeitar={async ({ justificativa }) => {
                         const { error } = await supabase
                             .from('caixa_sessoes')
                             .update({
                                 status: 'discrepante',
                                 observacoes_gerente: justificativa,
-                                diferenca_apurada: diferenca || 0,
                                 data_validacao: new Date().toISOString()
                             })
                             .eq('id', selectedFechamento.id);
