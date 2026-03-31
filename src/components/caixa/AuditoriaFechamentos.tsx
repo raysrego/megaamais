@@ -34,6 +34,7 @@ interface Fechamento {
     total_lancamentos: number;
     saldo_no_caixa: number;
     divergencia: number;
+    valor_na_conta: number; // NOVO CAMPO
     total_pix: number;
     total_dinheiro: number;
     total_sangrias: number;
@@ -47,19 +48,6 @@ interface Fechamento {
     valor_pix_externo?: number;
     fundo_caixa_devolvido?: boolean;
     saldo_esperado?: number;
-    diferenca_apurada?: number;
-    justificativa_divergencia?: string;
-    // Campos brutos para debug
-    _raw?: {
-        entradas_pix?: number;
-        entradas_dinheiro?: number;
-        entradas_bolao_dinheiro?: number;
-        entradas_bolao_pix?: number;
-        saidas_sangria?: number;
-        saidas_deposito?: number;
-        saidas_boleto?: number;
-        saidas_trocados?: number;
-    };
 }
 
 // Modal de auditoria simplificado
@@ -248,44 +236,69 @@ function ModalAuditoriaSimplificada({
                 </div>
 
                 {/* Saldo geral (final calculado + pix externo) */}
-                <div className={`p-4 rounded-xl mb-6 ${
-                    Math.abs(fechamento.divergencia) < 0.01 
-                        ? 'bg-success/10 border border-success/20' 
-                        : 'bg-warning/10 border border-warning/20'
-                }`}>
-                    <p className="text-[10px] font-bold uppercase mb-1">
-                        {Math.abs(fechamento.divergencia) < 0.01 ? '✓ VALORES CONFEREM' : '⚠ DIVERGÊNCIA DETECTADA'}
-                    </p>
-                    <div className="flex justify-between items-center">
-                        <span className="text-sm text-muted">Diferença apurada</span>
-                        <span className={`text-2xl font-black ${
-                            fechamento.divergencia > 0 ? 'text-warning' : 
-                            fechamento.divergencia < 0 ? 'text-danger' : 'text-success'
-                        }`}>
-                            {fechamento.divergencia > 0 ? '+' : ''}R$ {Math.abs(fechamento.divergencia).toFixed(2)}
-                        </span>
-                    </div>
-                    {Math.abs(fechamento.divergencia) > 0.01 && (
-                        <p className="text-xs text-muted mt-2">
-                            {fechamento.divergencia > 0 
-                                ? 'Sobra de caixa - valor maior que o esperado' 
-                                : 'Falta de caixa - valor menor que o esperado'}
-                        </p>
-                    )}
-                </div>
+               <div className={`p-4 rounded-xl mb-6 ${
+    (selectedFechamento.valor_na_conta || 0) >= 0 
+        ? 'bg-success/10 border border-success/20' 
+        : 'bg-warning/10 border border-warning/20'
+}`}>
+    <p className="text-[10px] font-bold uppercase mb-1">
+        💰 VALOR NA CONTA
+    </p>
+    <div className="flex justify-between items-center">
+        <span className="text-sm text-muted">Total recebido (desconsidera fundo inicial)</span>
+        <span className="text-2xl font-black text-primary">
+            R$ {(selectedFechamento.valor_na_conta || 0).toFixed(2)}
+        </span>
+    </div>
+    <div className="text-[10px] text-muted mt-2">
+        Cálculo: PIX Externo + (Entradas - Saídas)
+    </div>
+</div>
 
-                {/* Fundo de Caixa */}
-                {fechamento.fundo_caixa_devolvido !== undefined && (
-                    <div className="p-3 rounded-lg bg-surface-subtle border border-border mb-4">
-                        <div className="flex justify-between text-xs">
-                            <span className="text-muted">Fundo de Caixa</span>
-                            <span className={`font-bold ${fechamento.fundo_caixa_devolvido ? 'text-success' : 'text-warning'}`}>
-                                {fechamento.fundo_caixa_devolvido ? 'Devolvido (R$ 100,00)' : 'Não devolvido'}
-                            </span>
-                        </div>
-                    </div>
-                )}
+{/* Saldo Esperado (apenas para referência) */}
+<div className="grid grid-cols-2 gap-3 mb-4">
+    <div className="p-3 rounded-lg bg-bg-card border border-border">
+        <div className="text-[9px] text-muted uppercase font-bold">Saldo Esperado</div>
+        <div className="text-sm font-bold">R$ {(selectedFechamento.saldo_esperado || 0).toFixed(2)}</div>
+        <div className="text-[8px] text-muted">Inclui fundo inicial</div>
+    </div>
+    <div className="p-3 rounded-lg bg-bg-card border border-border">
+        <div className="text-[9px] text-muted uppercase font-bold">Declarado pelo Operador</div>
+        <div className="text-sm font-bold">R$ {(selectedFechamento.saldo_no_caixa || 0).toFixed(2)}</div>
+        <div className="text-[8px] text-muted">Dinheiro em mãos + cofre</div>
+    </div>
+</div>
 
+{/* Informações do Fechamento */}
+<div className="border-t border-border pt-3 mb-4">
+    <div className="text-[9px] text-muted font-bold uppercase mb-2">Informações do Fechamento</div>
+    <div className="space-y-2">
+        {(selectedFechamento.valor_cofre || 0) > 0 && (
+            <div className="flex justify-between text-xs">
+                <span className="text-muted">Valor no cofre</span>
+                <span className="font-bold">R$ {(selectedFechamento.valor_cofre || 0).toFixed(2)}</span>
+            </div>
+        )}
+        {(selectedFechamento.valor_pix_externo || 0) > 0 && (
+            <div className="flex justify-between text-xs">
+                <span className="text-muted">PIX externo</span>
+                <span className="font-bold">R$ {(selectedFechamento.valor_pix_externo || 0).toFixed(2)}</span>
+            </div>
+        )}
+        <div className="flex justify-between text-xs">
+            <span className="text-muted">Entradas totais</span>
+            <span className="font-bold">R$ {((selectedFechamento.total_pix || 0) + (selectedFechamento.total_dinheiro || 0)).toFixed(2)}</span>
+        </div>
+        <div className="flex justify-between text-xs">
+            <span className="text-muted">Saídas totais</span>
+            <span className="font-bold">R$ {((selectedFechamento.total_sangrias || 0) + (selectedFechamento.total_depositos || 0) + (selectedFechamento.total_boletos || 0)).toFixed(2)}</span>
+        </div>
+        <div className="flex justify-between text-xs pt-2 border-t border-border font-bold">
+            <span>Total de Lançamentos</span>
+            <span>R$ {(selectedFechamento.total_lancamentos || 0).toFixed(2)}</span>
+        </div>
+    </div>
+</div>
                 {/* Justificativa do Operador */}
                 {fechamento.justificativa && (
                     <div className="mb-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
@@ -380,8 +393,7 @@ export function AuditoriaFechamentos() {
    const fetchHistorico = useCallback(async () => {
     setLoading(true);
     try {
-        // ---------- QUERY TFL (caixa_sessoes) - CORRIGIDA ----------
-        let queryTFL = supabase
+        let query = supabase
             .from('caixa_sessoes')
             .select(`
                 id,
@@ -390,10 +402,12 @@ export function AuditoriaFechamentos() {
                 terminal_id,
                 operador_id,
                 valor_inicial,
-                valor_final_calculado,
                 valor_final_declarado,
                 status,
                 observacoes,
+                valor_enviado_cofre,
+                pix_externo_informado,
+                fundo_caixa_devolvido,
                 resumo_entradas_pix,
                 resumo_entradas_dinheiro,
                 resumo_entradas_bolao_dinheiro,
@@ -403,19 +417,7 @@ export function AuditoriaFechamentos() {
                 resumo_saidas_boleto,
                 resumo_saidas_trocados,
                 resumo_total_entradas,
-                resumo_total_saidas,
-                dinheiro_em_maos,
-                valor_enviado_cofre,
-                pix_externo_informado,
-                fundo_caixa_devolvido,
-                saldo_esperado_dinheiro,
-                diferenca_caixa,
-                total_sangrias,
-                total_depositos_filial,
-                valor_cofre,
-                valor_pix_externo,
-                diferenca_apurada,
-                justificativa_divergencia
+                resumo_total_saidas
             `)
             .neq('status', 'aberto')
             .order('created_at', { ascending: false });
@@ -426,85 +428,77 @@ export function AuditoriaFechamentos() {
             else if (filtroStatus === 'batido') statusFilter = 'conferido';
             else if (filtroStatus === 'divergente') statusFilter = 'discrepante';
             else statusFilter = filtroStatus;
-            queryTFL = queryTFL.eq('status', statusFilter);
+            query = query.eq('status', statusFilter);
         }
 
-        const { data: dataTFL, error: errorTFL } = await queryTFL;
-        if (errorTFL) throw errorTFL;
+        const { data: sessoes, error } = await query;
+        if (error) throw error;
 
-        // ---------- QUERY BOLÃO (caixa_bolao_sessoes) ----------
-        let queryBolao = supabase
-            .from('caixa_bolao_sessoes')
-            .select(`
-                id,
-                data_fechamento,
-                total_dinheiro,
-                total_pix,
-                total_vendido,
-                status_validacao,
-                observacoes_gerente
-            `)
-            .order('data_fechamento', { ascending: false });
+        const fechamentosProcessados: Fechamento[] = [];
 
-        if (filtroStatus !== 'todos') {
-            let statusFilter: string[] = [];
-            if (filtroStatus === 'fechado') {
-                statusFilter = ['pendente'];
-            } else if (filtroStatus === 'batido') {
-                statusFilter = ['aprovado'];
-            } else if (filtroStatus === 'divergente') {
-                statusFilter = ['rejeitado', 'discrepante'];
-            }
-            if (statusFilter.length > 0) {
-                queryBolao = queryBolao.in('status_validacao', statusFilter);
-            }
-        }
-
-        const { data: dataBolao, error: errorBolao } = await queryBolao;
-        if (errorBolao) throw errorBolao;
-
-        // ---------- Normalizar dados TFL com TODOS os campos ----------
-        const fechamentosTFL: Fechamento[] = (dataTFL || []).map((f: any) => {
-            // Calcula totais a partir dos resumos
-            const totalPix = (f.resumo_entradas_pix || 0) + (f.resumo_entradas_bolao_pix || 0);
-            const totalDinheiro = (f.resumo_entradas_dinheiro || 0) + (f.resumo_entradas_bolao_dinheiro || 0);
-            const totalEntradas = totalPix + totalDinheiro;
-            const totalSaidas = (f.resumo_saidas_sangria || 0) + 
-                                (f.resumo_saidas_deposito || 0) + 
-                                (f.resumo_saidas_boleto || 0) + 
-                                (f.resumo_saidas_trocados || 0);
+        for (const sessao of (sessoes || [])) {
+            // Totais
+            const totalPix = (sessao.resumo_entradas_pix || 0) + (sessao.resumo_entradas_bolao_pix || 0);
+            const totalDinheiro = (sessao.resumo_entradas_dinheiro || 0) + (sessao.resumo_entradas_bolao_dinheiro || 0);
+            const totalEntradas = sessao.resumo_total_entradas || (totalPix + totalDinheiro);
+            const totalSaidas = sessao.resumo_total_saidas || 0;
+            
+            // Total de lançamentos = entradas - saídas
             const totalLancamentos = totalEntradas - totalSaidas;
-            const saldoNoCaixa = f.dinheiro_em_maos || f.valor_final_declarado || 0;
-            const divergencia = f.diferenca_caixa || (saldoNoCaixa - ((f.valor_inicial || 0) + totalLancamentos));
+            
+            // Saldo esperado = valor inicial + total de lançamentos
+            const saldoEsperado = (sessao.valor_inicial || 0) + totalLancamentos;
+            
+            // Valor na conta = PIX externo + total de lançamentos (desconsidera valor inicial)
+            const valorNaConta = (sessao.pix_externo_informado || 0) + totalLancamentos;
+            
+            // Saldo declarado pelo operador = valor final declarado
+            const saldoDeclarado = sessao.valor_final_declarado || 0;
+            
+            // Divergência = valor declarado - saldo esperado (mantido para referência)
+            const divergencia = saldoDeclarado - saldoEsperado;
+            
+            // Informações do cofre
+            const valorCofre = sessao.valor_enviado_cofre || 0;
+            const pixExterno = sessao.pix_externo_informado || 0;
 
-            return {
-                id: f.id,
-                data_turno: f.data_turno,
-                data_fechamento: f.data_fechamento,
-                terminal_id: f.terminal_id || 'TFL-WEB',
-                operador_id: f.operador_id || 'Sistema',
-                operador_nome: f.operador_id ? `${f.operador_id.split('-')[0]}...` : 'Sistema',
-                valor_inicial: f.valor_inicial || 0,
+            fechamentosProcessados.push({
+                id: sessao.id,
+                data_turno: sessao.data_turno,
+                data_fechamento: sessao.data_fechamento,
+                terminal_id: sessao.terminal_id || 'TFL-WEB',
+                operador_id: sessao.operador_id || 'Sistema',
+                operador_nome: sessao.operador_id ? `${sessao.operador_id.split('-')[0]}...` : 'Sistema',
+                valor_inicial: sessao.valor_inicial || 0,
                 total_lancamentos: totalLancamentos,
-                saldo_no_caixa: saldoNoCaixa,
+                saldo_no_caixa: saldoDeclarado,
                 divergencia: divergencia,
+                valor_na_conta: valorNaConta, // NOVO CAMPO
                 total_pix: totalPix,
                 total_dinheiro: totalDinheiro,
-                total_sangrias: f.resumo_saidas_sangria || 0,
-                total_depositos: f.resumo_saidas_deposito || 0,
-                total_boletos: f.resumo_saidas_boleto || 0,
-                total_trocados: f.resumo_saidas_trocados || 0,
-                status_validacao: f.status,
+                total_sangrias: sessao.resumo_saidas_sangria || 0,
+                total_depositos: sessao.resumo_saidas_deposito || 0,
+                total_boletos: sessao.resumo_saidas_boleto || 0,
+                total_trocados: sessao.resumo_saidas_trocados || 0,
+                status_validacao: sessao.status,
                 tipo: 'tfl',
-                justificativa: f.observacoes,
-                valor_cofre: f.valor_enviado_cofre || f.valor_cofre || 0,
-                valor_pix_externo: f.pix_externo_informado || f.valor_pix_externo || 0,
-                fundo_caixa_devolvido: f.fundo_caixa_devolvido,
-                saldo_esperado: f.saldo_esperado_dinheiro,
-                diferenca_apurada: f.diferenca_apurada,
-                justificativa_divergencia: f.justificativa_divergencia
-            };
-        });
+                justificativa: sessao.observacoes,
+                valor_cofre: valorCofre,
+                valor_pix_externo: pixExterno,
+                fundo_caixa_devolvido: sessao.fundo_caixa_devolvido,
+                saldo_esperado: saldoEsperado
+            });
+        }
+
+        setFechamentos(fechamentosProcessados);
+        
+    } catch (err: any) {
+        console.error('Erro ao carregar histórico:', err);
+        toast({ message: 'Erro ao carregar fechamentos: ' + (err.message || 'Erro desconhecido'), type: 'error' });
+    } finally {
+        setLoading(false);
+    }
+}, [supabase, filtroStatus, toast]);
 
         // ---------- Normalizar dados Bolão ----------
         const fechamentosBolao: Fechamento[] = (dataBolao || []).map((f: any) => {
