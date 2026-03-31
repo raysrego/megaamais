@@ -6,7 +6,7 @@ import {
     Calendar, DollarSign, TrendingUp, TrendingDown, 
     Smartphone, Coins, Banknote, Receipt, Plus, 
     RefreshCw, Filter, ArrowDownCircle, ArrowUpCircle,
-    Save, Edit, X, Wallet
+    Save, Edit, X, Wallet, History, FileText
 } from 'lucide-react';
 import { useToast } from '@/contexts/ToastContext';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
@@ -43,6 +43,16 @@ interface ResumoConciliacao {
     total_pendentes: number;
 }
 
+interface DepositoCofre {
+    id: number;
+    valor: number;
+    data_movimentacao: string;
+    observacoes: string;
+    banco_nome: string;
+    conta_nome: string;
+    operador_nome: string;
+}
+
 export default function ConciliacaoPage() {
     const supabase = createBrowserSupabaseClient();
     const { toast } = useToast();
@@ -60,7 +70,7 @@ export default function ConciliacaoPage() {
     });
     
     const [resumo, setResumo] = useState<ResumoConciliacao | null>(null);
-    const [depositos, setDepositos] = useState<any[]>([]);
+    const [depositos, setDepositos] = useState<DepositoCofre[]>([]);
     const [showDepositoModal, setShowDepositoModal] = useState(false);
     const [showSaldoModal, setShowSaldoModal] = useState(false);
     const [saldoInicialForm, setSaldoInicialForm] = useState({
@@ -74,7 +84,7 @@ export default function ConciliacaoPage() {
     });
     const [processando, setProcessando] = useState(false);
 
-    // Carregar lojas do usuário
+    // Carregar lojas do usuário (múltiplas filiais)
     const carregarLojas = useCallback(async () => {
         try {
             const { data: { user } } = await supabase.auth.getUser();
@@ -84,10 +94,10 @@ export default function ConciliacaoPage() {
                 return;
             }
 
-            // Buscar a empresa do usuário
+            // Buscar o usuário com suas permissões de acesso às empresas
             const { data: userData, error: userError } = await supabase
                 .from('usuarios')
-                .select('empresa_id')
+                .select('empresa_id, acesso_empresas')
                 .eq('id', user.id)
                 .single();
 
@@ -98,28 +108,52 @@ export default function ConciliacaoPage() {
                 return;
             }
 
+            // Colecionar todos os IDs das lojas que o usuário tem acesso
+            let lojaIds: string[] = [];
+            
+            // Adicionar a empresa principal
             if (userData?.empresa_id) {
-                // Buscar os dados da empresa
-                const { data: empresaData, error: empresaError } = await supabase
-                    .from('empresas')
-                    .select('id, nome_fantasia')
-                    .eq('id', userData.empresa_id)
-                    .single();
+                lojaIds.push(userData.empresa_id);
+            }
+            
+            // Adicionar empresas adicionais do array acesso_empresas
+            if (userData?.acesso_empresas && Array.isArray(userData.acesso_empresas)) {
+                lojaIds.push(...userData.acesso_empresas);
+            }
+            
+            // Remover duplicatas
+            lojaIds = [...new Set(lojaIds)];
+            
+            if (lojaIds.length === 0) {
+                setInitialLoad(false);
+                setLoading(false);
+                return;
+            }
+            
+            // Buscar dados das empresas
+            const { data: empresasData, error: empresasError } = await supabase
+                .from('empresas')
+                .select('id, nome_fantasia, nome')
+                .in('id', lojaIds)
+                .eq('ativo', true);
 
-                if (empresaError) {
-                    console.error('Erro ao buscar empresa:', empresaError);
-                    setInitialLoad(false);
-                    setLoading(false);
-                    return;
-                }
+            if (empresasError) {
+                console.error('Erro ao buscar empresas:', empresasError);
+                setInitialLoad(false);
+                setLoading(false);
+                return;
+            }
 
-                if (empresaData) {
-                    const loja: Loja = {
-                        id: empresaData.id,
-                        nome_fantasia: empresaData.nome_fantasia || 'Minha Loja'
-                    };
-                    setLojas([loja]);
-                    setLojaSelecionada(loja.id);
+            if (empresasData && empresasData.length > 0) {
+                const lojasFormatadas: Loja[] = empresasData.map(emp => ({
+                    id: emp.id,
+                    nome_fantasia: emp.nome_fantasia || emp.nome || 'Loja sem nome'
+                }));
+                setLojas(lojasFormatadas);
+                
+                // Selecionar a primeira loja por padrão se ainda não tiver selecionada
+                if (!lojaSelecionada && lojasFormatadas.length > 0) {
+                    setLojaSelecionada(lojasFormatadas[0].id);
                 }
             }
             setInitialLoad(false);
@@ -128,14 +162,13 @@ export default function ConciliacaoPage() {
             setInitialLoad(false);
             setLoading(false);
         }
-    }, [supabase]);
+    }, [supabase, lojaSelecionada]);
 
     // Carregar contas bancárias
     const carregarContas = useCallback(async () => {
         if (!lojaSelecionada) return;
 
         try {
-            // Buscar contas bancárias
             const { data: contasData, error: contasError } = await supabase
                 .from('financeiro_contas_bancarias')
                 .select(`
@@ -253,19 +286,16 @@ export default function ConciliacaoPage() {
         }
     }, [supabase, lojaSelecionada, contaSelecionada, mesReferencia, toast]);
 
-    // Efeito para carregar lojas inicialmente
     useEffect(() => {
         carregarLojas();
     }, [carregarLojas]);
 
-    // Efeito para carregar contas quando loja for selecionada
     useEffect(() => {
         if (lojaSelecionada && !initialLoad) {
             carregarContas();
         }
     }, [lojaSelecionada, initialLoad, carregarContas]);
 
-    // Efeito para carregar resumo quando todos os filtros estiverem prontos
     useEffect(() => {
         if (lojaSelecionada && contaSelecionada && mesReferencia && !initialLoad) {
             buscarResumo();
@@ -350,7 +380,6 @@ export default function ConciliacaoPage() {
         return `${meses[parseInt(mesNum) - 1]} de ${ano}`;
     };
 
-    // Mostrar loading apenas no carregamento inicial
     if (initialLoad || (loading && !resumo && lojaSelecionada && contaSelecionada)) {
         return (
             <div className="flex items-center justify-center h-64">
@@ -369,7 +398,7 @@ export default function ConciliacaoPage() {
                     </div>
                     <div>
                         <h1 className="text-xl font-black">Conciliação Bancária</h1>
-                        <p className="text-xs text-muted">Controle de entradas e depósitos</p>
+                        <p className="text-xs text-muted">Controle de entradas, cofre e depósitos</p>
                     </div>
                 </div>
                 <div className="flex gap-2">
@@ -466,6 +495,66 @@ export default function ConciliacaoPage() {
                         <div className="card p-4 bg-primary-blue-light/5 border-primary-blue-light/20">
                             <p className="text-[10px] font-bold text-primary-blue-light uppercase">Total Depositado</p>
                             <p className="text-2xl font-bold text-primary-blue-light">{formatarMoeda(resumo.total_depositado)}</p>
+                            <p className="text-[10px] text-muted mt-1">
+                                Transferências do cofre para conta bancária
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Cards de Movimentação do Cofre */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Entradas Auditadas (Cofre) */}
+                        <div className="card p-4 bg-primary-blue-light/5 border border-primary-blue-light/20">
+                            <div className="flex items-center gap-2 mb-3">
+                                <ArrowUpCircle size={16} className="text-primary-blue-light" />
+                                <h3 className="text-sm font-bold text-primary-blue-light uppercase">Entradas Auditadas (Cofre)</h3>
+                            </div>
+                            <div className="space-y-3">
+                                <div>
+                                    <p className="text-[10px] text-muted">Total enviado ao cofre</p>
+                                    <p className="text-2xl font-bold text-primary-blue-light">
+                                        {formatarMoeda(resumo.total_enviado_cofre)}
+                                    </p>
+                                    <p className="text-[10px] text-muted">
+                                        Referente a {resumo.total_aprovados} fechamentos aprovados
+                                    </p>
+                                </div>
+                                <div className="border-t border-primary-blue-light/20 pt-2">
+                                    <div className="flex justify-between text-xs">
+                                        <span className="text-muted">Por PIX:</span>
+                                        <span className="font-bold">{formatarMoeda(resumo.total_entradas_pix + resumo.total_entradas_bolao_pix)}</span>
+                                    </div>
+                                    <div className="flex justify-between text-xs">
+                                        <span className="text-muted">Por Dinheiro:</span>
+                                        <span className="font-bold">{formatarMoeda(resumo.total_entradas_dinheiro + resumo.total_entradas_bolao_dinheiro)}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Depósitos Realizados */}
+                        <div className="card p-4 bg-success/5 border border-success/20">
+                            <div className="flex items-center gap-2 mb-3">
+                                <ArrowDownCircle size={16} className="text-success" />
+                                <h3 className="text-sm font-bold text-success uppercase">Depósitos Realizados</h3>
+                            </div>
+                            <div className="space-y-3">
+                                <div>
+                                    <p className="text-[10px] text-muted">Total depositado na conta</p>
+                                    <p className="text-2xl font-bold text-success">
+                                        {formatarMoeda(resumo.total_depositado)}
+                                    </p>
+                                    <p className="text-[10px] text-muted">
+                                        Transferências realizadas no período
+                                    </p>
+                                </div>
+                                <div className="border-t border-success/20 pt-2">
+                                    <div className="flex justify-between text-xs">
+                                        <span className="text-muted">Saldo restante no cofre:</span>
+                                        <span className="font-bold text-warning">{formatarMoeda(resumo.saldo_real_cofre)}</span>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -520,15 +609,15 @@ export default function ConciliacaoPage() {
                     {depositos.length > 0 && (
                         <div className="card p-6">
                             <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
-                                <Receipt size={18} className="text-primary-blue-light" />
-                                Histórico de Depósitos
+                                <History size={18} className="text-primary-blue-light" />
+                                Histórico de Depósitos do Cofre
                             </h2>
                             <div className="overflow-x-auto">
                                 <table className="w-full">
                                     <thead>
                                         <tr className="border-b border-border">
                                             <th className="text-left py-2 px-2">Data</th>
-                                            <th className="text-left py-2 px-2">Conta</th>
+                                            <th className="text-left py-2 px-2">Conta de Destino</th>
                                             <th className="text-right py-2 px-2">Valor</th>
                                             <th className="text-left py-2 px-2">Observações</th>
                                             <th className="text-left py-2 px-2">Registrado por</th>
@@ -633,6 +722,9 @@ export default function ConciliacaoPage() {
                                 onValueChange={(v) => setDepositoForm(prev => ({ ...prev, valor: v }))}
                                 className="text-xl font-bold"
                             />
+                            <p className="text-[10px] text-muted mt-1">
+                                Valor transferido do cofre para a conta bancária
+                            </p>
                         </div>
 
                         <div>
