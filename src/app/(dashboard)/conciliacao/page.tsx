@@ -1,23 +1,13 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Building, Loader as Loader2, CircleCheck as CheckCircle2, TriangleAlert as AlertTriangle, Calendar, DollarSign, TrendingUp, TrendingDown, Smartphone, Coins, Banknote, Receipt, Plus, RefreshCw, ListFilter as Filter, CircleArrowDown as ArrowDownCircle, CircleArrowUp as ArrowUpCircle, Save, CreditCard as Edit, X, Wallet, History, FileText, Briefcase } from 'lucide-react';
+import { Loader as Loader2, TrendingUp, Smartphone, Banknote, RefreshCw, ListFilter as Filter, CircleArrowDown as ArrowDownCircle, X, Wallet, History } from 'lucide-react';
 import { useToast } from '@/contexts/ToastContext';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
-import { MoneyInput } from '@/components/ui/MoneyInput';
 
 interface Loja {
     id: string;
     nome_fantasia: string;
-}
-
-interface ContaBancaria {
-    id: string;
-    nome: string;
-    banco: string;
-    banco_id: number;
-    agencia?: string;
-    conta_numero?: string;
 }
 
 interface ResumoConciliacao {
@@ -54,27 +44,21 @@ export default function ConciliacaoPage() {
     const [loading, setLoading] = useState(true);
     const [initialLoad, setInitialLoad] = useState(true);
     const [lojas, setLojas] = useState<Loja[]>([]);
-    const [contas, setContas] = useState<ContaBancaria[]>([]);
-    
+
     const [lojaSelecionada, setLojaSelecionada] = useState('');
-    const [contaSelecionada, setContaSelecionada] = useState('');
     const [mesReferencia, setMesReferencia] = useState(() => {
         const d = new Date();
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     });
-    
+
     const [resumo, setResumo] = useState<ResumoConciliacao | null>(null);
     const [depositos, setDepositos] = useState<DepositoCofre[]>([]);
-    const [showSaldoModal, setShowSaldoModal] = useState(false);
-    const [saldoInicialForm, setSaldoInicialForm] = useState({
-        saldo: 0,
-        observacoes: ''
-    });
-    const [processando, setProcessando] = useState(false);
 
     // Filtros para histórico de depósitos
     const [filtroDepositoDataInicio, setFiltroDepositoDataInicio] = useState('');
     const [filtroDepositoDataFim, setFiltroDepositoDataFim] = useState('');
+    const [filtroBanco, setFiltroBanco] = useState('');
+    const [filtroOperador, setFiltroOperador] = useState('');
     const [depositosFiltrados, setDepositosFiltrados] = useState<DepositoCofre[]>([]);
 
     // Carregar lojas do usuário (múltiplas filiais)
@@ -157,118 +141,105 @@ export default function ConciliacaoPage() {
         }
     }, [supabase, lojaSelecionada]);
 
-    // Carregar contas bancárias
-    const carregarContas = useCallback(async () => {
-        if (!lojaSelecionada) return;
 
-        try {
-            const { data: contasData, error: contasError } = await supabase
-                .from('financeiro_contas_bancarias')
-                .select(`
-                    id,
-                    nome,
-                    banco_id,
-                    agencia,
-                    conta_numero
-                `)
-                .eq('loja_id', lojaSelecionada);
-
-            if (contasError) {
-                console.error('Erro ao carregar contas:', contasError);
-                return;
-            }
-
-            if (!contasData || contasData.length === 0) {
-                setContas([]);
-                setLoading(false);
-                return;
-            }
-
-            // Buscar dados dos bancos separadamente
-            const bancosIds = [...new Set(contasData.map(c => c.banco_id).filter(id => id))];
-            let bancosMap = new Map();
-            
-            if (bancosIds.length > 0) {
-                const { data: bancosData, error: bancosError } = await supabase
-                    .from('financeiro_bancos')
-                    .select('id, nome')
-                    .in('id', bancosIds);
-                
-                if (!bancosError && bancosData) {
-                    bancosData.forEach((banco: any) => {
-                        bancosMap.set(banco.id, banco.nome);
-                    });
-                }
-            }
-
-            const contasFormatadas: ContaBancaria[] = contasData.map(c => ({
-                id: c.id,
-                nome: c.nome,
-                banco: bancosMap.get(c.banco_id) || 'Banco não informado',
-                banco_id: c.banco_id,
-                agencia: c.agencia,
-                conta_numero: c.conta_numero
-            }));
-            
-            setContas(contasFormatadas);
-            if (contasFormatadas.length > 0 && !contaSelecionada) {
-                setContaSelecionada(contasFormatadas[0].id);
-            }
-        } catch (err) {
-            console.error('Erro carregar contas:', err);
-        } finally {
-            setLoading(false);
-        }
-    }, [supabase, lojaSelecionada, contaSelecionada]);
-
-    // Buscar resumo da conciliação
+    // Buscar resumo da conciliação consolidado (todas as contas da loja)
     const buscarResumo = useCallback(async () => {
-        if (!lojaSelecionada || !contaSelecionada || !mesReferencia) return;
+        if (!lojaSelecionada || !mesReferencia) return;
 
         setLoading(true);
         try {
             const dataInicio = `${mesReferencia}-01`;
-            
-            const { data, error } = await supabase
-    .rpc('get_resumo_conciliacao_completo', {
-        p_conta_bancaria_id: contaSelecionada,
-        p_mes_referencia: dataInicio
-    });
+            const dataFim = `${mesReferencia}-31`;
 
-            if (error) throw error;
-            
-            if (data && data.length > 0) {
-                setResumo(data[0] as ResumoConciliacao);
-            } else {
-                setResumo(null);
-            }
-
-            // Buscar saldo inicial atual
-            const { data: saldoData } = await supabase
-                .from('conciliacao_saldo_inicial')
-                .select('saldo_inicial, observacoes')
+            // Buscar todas as transferências de cofre para banco do mês
+            const { data: depositosData, error: depositosError } = await supabase
+                .from('cofre_movimentacoes')
+                .select(`
+                    id,
+                    valor,
+                    data_movimentacao,
+                    observacoes,
+                    usuario_id,
+                    conta_bancaria_destino_id,
+                    financeiro_contas_bancarias!cofre_movimentacoes_conta_bancaria_destino_id_fkey (
+                        nome,
+                        banco_id,
+                        financeiro_bancos (
+                            nome
+                        )
+                    ),
+                    usuarios (
+                        nome_completo
+                    )
+                `)
                 .eq('loja_id', lojaSelecionada)
-                .eq('conta_bancaria_id', contaSelecionada)
-                .eq('mes_referencia', dataInicio)
-                .maybeSingle();
+                .eq('tipo', 'transferencia_banco')
+                .gte('data_movimentacao', dataInicio)
+                .lte('data_movimentacao', dataFim)
+                .order('data_movimentacao', { ascending: false });
 
-            if (saldoData) {
-                setSaldoInicialForm({
-                    saldo: saldoData.saldo_inicial || 0,
-                    observacoes: saldoData.observacoes || ''
+            if (depositosError) throw depositosError;
+
+            // Formatar depósitos
+            const depositosFormatados: DepositoCofre[] = (depositosData || []).map((dep: any) => ({
+                id: dep.id,
+                valor: dep.valor,
+                data_movimentacao: dep.data_movimentacao,
+                observacoes: dep.observacoes || '',
+                banco_nome: dep.financeiro_contas_bancarias?.financeiro_bancos?.nome || 'N/A',
+                conta_nome: dep.financeiro_contas_bancarias?.nome || 'N/A',
+                operador_nome: dep.usuarios?.nome_completo || 'Sistema'
+            }));
+
+            setDepositos(depositosFormatados);
+
+            // Calcular totais para o resumo
+            const totalDepositado = depositosFormatados.reduce((sum, dep) => sum + dep.valor, 0);
+
+            // Buscar total de entradas do mês (fechamentos de caixa aprovados)
+            const { data: fechamentosData } = await supabase
+                .from('caixa_fechamentos')
+                .select('total_entradas_pix, total_entradas_dinheiro, total_bolao_pix, total_bolao_dinheiro')
+                .eq('loja_id', lojaSelecionada)
+                .eq('status', 'aprovado')
+                .gte('data_fechamento', dataInicio)
+                .lte('data_fechamento', dataFim);
+
+            let totalEntradasPix = 0;
+            let totalEntradasDinheiro = 0;
+            let totalBolaPix = 0;
+            let totalBolaDinheiro = 0;
+
+            if (fechamentosData) {
+                fechamentosData.forEach(f => {
+                    totalEntradasPix += f.total_entradas_pix || 0;
+                    totalEntradasDinheiro += f.total_entradas_dinheiro || 0;
+                    totalBolaPix += f.total_bolao_pix || 0;
+                    totalBolaDinheiro += f.total_bolao_dinheiro || 0;
                 });
             }
 
-            // Buscar depósitos do mês
-            const { data: depositosData } = await supabase
-                .from('vw_historico_depositos')
-                .select('*')
-                .eq('loja_id', lojaSelecionada)
-                .eq('conta_bancaria_id', contaSelecionada)
-                .gte('data_movimentacao', dataInicio)
-                .lte('data_movimentacao', `${mesReferencia}-31`);
+            const totalEntradas = totalEntradasPix + totalEntradasDinheiro + totalBolaPix + totalBolaDinheiro;
 
-            setDepositos(depositosData || []);
+            // Montar resumo simplificado
+            const resumoCalculado: ResumoConciliacao = {
+                saldo_inicial: 0,
+                total_entradas_pix: totalEntradasPix + totalBolaPix,
+                total_entradas_dinheiro: totalEntradasDinheiro + totalBolaDinheiro,
+                total_entradas_bolao_pix: totalBolaPix,
+                total_entradas_bolao_dinheiro: totalBolaDinheiro,
+                total_entradas_geral: totalEntradas,
+                total_enviado_cofre: 0,
+                total_depositado: totalDepositado,
+                saldo_esperado_cofre: 0,
+                saldo_real_cofre: 0,
+                diferenca: 0,
+                total_fechamentos: fechamentosData?.length || 0,
+                total_aprovados: fechamentosData?.length || 0,
+                total_pendentes: 0
+            };
+
+            setResumo(resumoCalculado);
 
         } catch (err: any) {
             console.error('Erro ao buscar resumo:', err);
@@ -276,23 +247,17 @@ export default function ConciliacaoPage() {
         } finally {
             setLoading(false);
         }
-    }, [supabase, lojaSelecionada, contaSelecionada, mesReferencia, toast]);
+    }, [supabase, lojaSelecionada, mesReferencia, toast]);
 
     useEffect(() => {
         carregarLojas();
     }, [carregarLojas]);
 
     useEffect(() => {
-        if (lojaSelecionada && !initialLoad) {
-            carregarContas();
-        }
-    }, [lojaSelecionada, initialLoad, carregarContas]);
-
-    useEffect(() => {
-        if (lojaSelecionada && contaSelecionada && mesReferencia && !initialLoad) {
+        if (lojaSelecionada && mesReferencia && !initialLoad) {
             buscarResumo();
         }
-    }, [lojaSelecionada, contaSelecionada, mesReferencia, initialLoad, buscarResumo]);
+    }, [lojaSelecionada, mesReferencia, initialLoad, buscarResumo]);
 
     // Aplicar filtros nos depósitos
     useEffect(() => {
@@ -310,38 +275,21 @@ export default function ConciliacaoPage() {
             });
         }
 
-        setDepositosFiltrados(filtered);
-    }, [depositos, filtroDepositoDataInicio, filtroDepositoDataFim]);
-
-    const handleRegistrarSaldoInicial = async () => {
-        if (!lojaSelecionada || !contaSelecionada) return;
-        
-        setProcessando(true);
-        try {
-            const dataInicio = `${mesReferencia}-01`;
-            const { data: { user } } = await supabase.auth.getUser();
-            
-            const { data, error } = await supabase
-                .rpc('registrar_saldo_inicial', {
-                    p_loja_id: lojaSelecionada,
-                    p_conta_bancaria_id: contaSelecionada,
-                    p_mes_referencia: dataInicio,
-                    p_saldo_inicial: saldoInicialForm.saldo,
-                    p_observacoes: saldoInicialForm.observacoes || null,
-                    p_usuario_id: user?.id
-                });
-
-            if (error) throw error;
-            
-            toast({ message: 'Saldo inicial registrado com sucesso!', type: 'success' });
-            setShowSaldoModal(false);
-            buscarResumo();
-        } catch (err: any) {
-            toast({ message: err.message, type: 'error' });
-        } finally {
-            setProcessando(false);
+        if (filtroBanco) {
+            filtered = filtered.filter(d =>
+                d.banco_nome.toLowerCase().includes(filtroBanco.toLowerCase())
+            );
         }
-    };
+
+        if (filtroOperador) {
+            filtered = filtered.filter(d =>
+                d.operador_nome.toLowerCase().includes(filtroOperador.toLowerCase())
+            );
+        }
+
+        setDepositosFiltrados(filtered);
+    }, [depositos, filtroDepositoDataInicio, filtroDepositoDataFim, filtroBanco, filtroOperador]);
+
 
     const formatarMoeda = (valor: number) => {
         return new Intl.NumberFormat('pt-BR', {
@@ -361,7 +309,7 @@ export default function ConciliacaoPage() {
         return `${meses[parseInt(mesNum) - 1]} de ${ano}`;
     };
 
-    if (initialLoad || (loading && !resumo && lojaSelecionada && contaSelecionada)) {
+    if (initialLoad || (loading && !resumo && lojaSelecionada)) {
         return (
             <div className="flex items-center justify-center h-64">
                 <Loader2 className="animate-spin text-primary" size={32} />
@@ -383,12 +331,6 @@ export default function ConciliacaoPage() {
                     </div>
                 </div>
                 <div className="flex gap-2">
-                    <button
-                        onClick={() => setShowSaldoModal(true)}
-                        className="btn btn-ghost btn-sm"
-                    >
-                        <Edit size={14} /> Saldo Inicial
-                    </button>
                     <button onClick={buscarResumo} className="btn btn-ghost btn-sm">
                         <RefreshCw size={14} /> Atualizar
                     </button>
@@ -396,11 +338,11 @@ export default function ConciliacaoPage() {
             </div>
 
             {/* Filtros */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                     <label className="text-[10px] font-bold text-muted uppercase">Filial</label>
-                    <select 
-                        value={lojaSelecionada} 
+                    <select
+                        value={lojaSelecionada}
                         onChange={e => setLojaSelecionada(e.target.value)}
                         className="input w-full"
                     >
@@ -410,23 +352,10 @@ export default function ConciliacaoPage() {
                     </select>
                 </div>
                 <div>
-                    <label className="text-[10px] font-bold text-muted uppercase">Conta Bancária</label>
-                    <select 
-                        value={contaSelecionada} 
-                        onChange={e => setContaSelecionada(e.target.value)}
-                        className="input w-full"
-                        disabled={contas.length === 0}
-                    >
-                        {contas.map(conta => (
-                            <option key={conta.id} value={conta.id}>{conta.banco} - {conta.nome}</option>
-                        ))}
-                    </select>
-                </div>
-                <div>
                     <label className="text-[10px] font-bold text-muted uppercase">Mês de Referência</label>
-                    <input 
-                        type="month" 
-                        value={mesReferencia} 
+                    <input
+                        type="month"
+                        value={mesReferencia}
                         onChange={e => setMesReferencia(e.target.value)}
                         className="input w-full"
                     />
@@ -436,126 +365,50 @@ export default function ConciliacaoPage() {
             {/* Cards de Resumo */}
             {resumo ? (
                 <>
-                    {/* Primeira linha: Saldo Inicial e Total de Entradas TFL */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="card p-4">
-                            <div className="flex items-center justify-between mb-2">
-                                <p className="text-[10px] font-bold text-muted uppercase">Saldo Inicial</p>
-                                <button 
-                                    onClick={() => setShowSaldoModal(true)}
-                                    className="text-primary-blue-light hover:underline text-[10px]"
-                                >
-                                    editar
-                                </button>
-                            </div>
-                            <p className="text-2xl font-bold">{formatarMoeda(resumo.saldo_inicial)}</p>
-                            <p className="text-[10px] text-muted mt-1">Saldo da conta no início do mês</p>
-                        </div>
-
+                    {/* Cards Principais */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="card p-4 bg-success/5 border-success/20">
                             <div className="flex items-center gap-2 mb-2">
                                 <TrendingUp size={16} className="text-success" />
-                                <p className="text-[10px] font-bold text-success uppercase">Total Entradas TFL</p>
+                                <p className="text-[10px] font-bold text-success uppercase">Total de Entradas Auditadas (TFL)</p>
                             </div>
                             <p className="text-2xl font-bold text-success">{formatarMoeda(resumo.total_entradas_geral)}</p>
                             <div className="text-xs text-muted mt-2">
                                 <div className="flex justify-between">
                                     <span className="inline-flex items-center gap-1"><Smartphone size={10} /> PIX:</span>
-                                    <span className="font-bold">{formatarMoeda(resumo.total_entradas_pix + resumo.total_entradas_bolao_pix)}</span>
+                                    <span className="font-bold">{formatarMoeda(resumo.total_entradas_pix)}</span>
                                 </div>
                                 <div className="flex justify-between">
                                     <span className="inline-flex items-center gap-1"><Banknote size={10} /> Dinheiro:</span>
-                                    <span className="font-bold">{formatarMoeda(resumo.total_entradas_dinheiro + resumo.total_entradas_bolao_dinheiro)}</span>
+                                    <span className="font-bold">{formatarMoeda(resumo.total_entradas_dinheiro)}</span>
                                 </div>
                             </div>
+                            <p className="text-[10px] text-muted mt-2">
+                                {resumo.total_aprovados} fechamentos aprovados
+                            </p>
                         </div>
 
                         <div className="card p-4 bg-primary-blue-light/5 border-primary-blue-light/20">
                             <div className="flex items-center gap-2 mb-2">
-                                <Building size={16} className="text-primary-blue-light" />
-                                <p className="text-[10px] font-bold text-primary-blue-light uppercase">Total Enviado ao Cofre</p>
+                                <ArrowDownCircle size={16} className="text-primary-blue-light" />
+                                <p className="text-[10px] font-bold text-primary-blue-light uppercase">Depósitos Recebidos</p>
                             </div>
-                            <p className="text-2xl font-bold text-primary-blue-light">{formatarMoeda(resumo.total_enviado_cofre)}</p>
+                            <p className="text-2xl font-bold text-primary-blue-light">{formatarMoeda(resumo.total_depositado)}</p>
+                            <p className="text-[10px] text-muted mt-2">
+                                {depositos.length} {depositos.length === 1 ? 'depósito registrado' : 'depósitos registrados'} no mês
+                            </p>
                             <p className="text-[10px] text-muted mt-1">
-                                {resumo.total_aprovados} de {resumo.total_fechamentos} fechamentos aprovados
+                                Valores debitados do cofre e depositados em contas bancárias
                             </p>
                         </div>
                     </div>
 
-                    {/* Segunda linha: Depósitos Realizados e Saldo no Cofre */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="card p-4 bg-warning/5 border-warning/20">
-                            <div className="flex items-center gap-2 mb-2">
-                                <ArrowDownCircle size={16} className="text-warning" />
-                                <p className="text-[10px] font-bold text-warning uppercase">Depósitos Realizados</p>
-                            </div>
-                            <p className="text-2xl font-bold text-warning">{formatarMoeda(resumo.total_depositado)}</p>
-                            <p className="text-[10px] text-muted mt-1">Registrados na Gestão de Cofre</p>
-                        </div>
-
-                        <div className="card p-4 bg-info/5 border-info/20">
-                            <div className="flex items-center gap-2 mb-2">
-                                <Coins size={16} className="text-info" />
-                                <p className="text-[10px] font-bold text-info uppercase">Saldo Atual no Cofre</p>
-                            </div>
-                            <p className="text-2xl font-bold text-info">{formatarMoeda(resumo.saldo_real_cofre)}</p>
-                            <p className="text-[10px] text-muted mt-1">Saldo esperado: {formatarMoeda(resumo.saldo_esperado_cofre)}</p>
-                        </div>
-                    </div>
-
-                    {/* Terceira linha: Conciliação do Cofre */}
-                    <div className="card p-6">
-                        <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
-                            <Coins size={18} className="text-primary-blue-light" />
-                            Conciliação do Cofre
-                        </h2>
-                        
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <div className="text-center p-4 rounded-xl bg-surface-subtle">
-                                <p className="text-xs text-muted font-bold mb-1">Saldo Esperado</p>
-                                <p className="text-2xl font-bold text-primary">
-                                    {formatarMoeda(resumo.saldo_esperado_cofre)}
-                                </p>
-                                <p className="text-[10px] text-muted mt-1">
-                                    Saldo Inicial + Enviado ao Cofre
-                                </p>
-                            </div>
-                            
-                            <div className="text-center p-4 rounded-xl bg-surface-subtle">
-                                <p className="text-xs text-muted font-bold mb-1">Saldo Real</p>
-                                <p className="text-2xl font-bold text-primary">
-                                    {formatarMoeda(resumo.saldo_real_cofre)}
-                                </p>
-                                <p className="text-[10px] text-muted mt-1">
-                                    Saldo Esperado - Depósitos
-                                </p>
-                            </div>
-                            
-                            <div className={`text-center p-4 rounded-xl ${
-                                resumo.diferenca === 0 ? 'bg-success/10' : 
-                                resumo.diferenca > 0 ? 'bg-warning/10' : 'bg-danger/10'
-                            }`}>
-                                <p className="text-xs text-muted font-bold mb-1">Diferença</p>
-                                <p className={`text-2xl font-bold ${
-                                    resumo.diferenca === 0 ? 'text-success' : 
-                                    resumo.diferenca > 0 ? 'text-warning' : 'text-danger'
-                                }`}>
-                                    {resumo.diferenca > 0 ? '+' : ''}{formatarMoeda(resumo.diferenca)}
-                                </p>
-                                <p className="text-[10px] text-muted mt-1">
-                                    {resumo.diferenca === 0 ? 'Conciliado' : 
-                                      resumo.diferenca > 0 ? 'Saldo a depositar' : 'Saldo excedente'}
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Histórico de Depósitos */}
+                    {/* Histórico de Depósitos Recebidos */}
                     {depositos.length > 0 && (
                         <div className="card p-6">
                             <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
                                 <History size={18} className="text-primary-blue-light" />
-                                Histórico de Depósitos do Cofre
+                                Histórico de Depósitos Recebidos
                             </h2>
 
                             {/* Filtros do Histórico */}
@@ -564,7 +417,7 @@ export default function ConciliacaoPage() {
                                     <Filter size={16} className="text-primary-blue-light" />
                                     <h3 className="text-sm font-bold">Filtrar Depósitos</h3>
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                                     <div>
                                         <label className="text-[10px] font-bold text-muted uppercase block mb-1">Data Início</label>
                                         <input
@@ -583,21 +436,43 @@ export default function ConciliacaoPage() {
                                             className="input w-full text-sm"
                                         />
                                     </div>
-                                    <div className="flex items-end">
-                                        <button
-                                            onClick={() => {
-                                                setFiltroDepositoDataInicio('');
-                                                setFiltroDepositoDataFim('');
-                                            }}
-                                            className="btn btn-ghost w-full text-sm"
-                                        >
-                                            Limpar Filtros
-                                        </button>
+                                    <div>
+                                        <label className="text-[10px] font-bold text-muted uppercase block mb-1">Banco</label>
+                                        <input
+                                            type="text"
+                                            value={filtroBanco}
+                                            onChange={e => setFiltroBanco(e.target.value)}
+                                            placeholder="Filtrar por banco..."
+                                            className="input w-full text-sm"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] font-bold text-muted uppercase block mb-1">Operador</label>
+                                        <input
+                                            type="text"
+                                            value={filtroOperador}
+                                            onChange={e => setFiltroOperador(e.target.value)}
+                                            placeholder="Filtrar por operador..."
+                                            className="input w-full text-sm"
+                                        />
                                     </div>
                                 </div>
-                                <p className="text-[10px] text-muted mt-2">
-                                    {depositosFiltrados.length} de {depositos.length} depósitos
-                                </p>
+                                <div className="flex items-center justify-between mt-3">
+                                    <p className="text-[10px] text-muted">
+                                        Exibindo {depositosFiltrados.length} de {depositos.length} depósitos
+                                    </p>
+                                    <button
+                                        onClick={() => {
+                                            setFiltroDepositoDataInicio('');
+                                            setFiltroDepositoDataFim('');
+                                            setFiltroBanco('');
+                                            setFiltroOperador('');
+                                        }}
+                                        className="btn btn-ghost btn-sm text-xs"
+                                    >
+                                        <X size={12} /> Limpar Filtros
+                                    </button>
+                                </div>
                             </div>
 
                             {/* Tabela de Depósitos */}
@@ -639,62 +514,8 @@ export default function ConciliacaoPage() {
             ) : (
                 <div className="card p-12 text-center">
                     <Wallet size={48} className="mx-auto mb-4 text-muted opacity-50" />
-                    <p className="text-muted">Selecione uma conta e mês para visualizar a conciliação</p>
+                    <p className="text-muted">Selecione uma filial e mês para visualizar a conciliação</p>
                 </div>
-            )}
-
-            {/* Modal Saldo Inicial */}
-            {showSaldoModal && (
-                <>
-                    <div className="fixed inset-0 bg-black/70 z-50" onClick={() => setShowSaldoModal(false)} />
-                    <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-md bg-bg-card border border-border rounded-2xl z-50 p-6 space-y-4">
-                        <div className="flex items-center justify-between">
-                            <h3 className="text-base font-black flex items-center gap-2">
-                                <Wallet size={16} className="text-primary-blue-light" />
-                                Saldo Inicial - {formatarMes(mesReferencia)}
-                            </h3>
-                            <button onClick={() => setShowSaldoModal(false)} className="p-1 hover:bg-white/5 rounded">
-                                <X size={18} />
-                            </button>
-                        </div>
-
-                        <div>
-                            <label className="text-[10px] font-bold text-muted uppercase">Saldo Inicial da Conta</label>
-                            <MoneyInput 
-                                value={saldoInicialForm.saldo}
-                                onValueChange={(v) => setSaldoInicialForm(prev => ({ ...prev, saldo: v }))}
-                                className="text-xl font-bold"
-                            />
-                            <p className="text-[10px] text-muted mt-1">
-                                Saldo disponível na conta no início do mês
-                            </p>
-                        </div>
-
-                        <div>
-                            <label className="text-[10px] font-bold text-muted uppercase">Observações (opcional)</label>
-                            <textarea 
-                                className="input w-full text-sm"
-                                rows={2}
-                                value={saldoInicialForm.observacoes}
-                                onChange={(e) => setSaldoInicialForm(prev => ({ ...prev, observacoes: e.target.value }))}
-                                placeholder="Informações adicionais..."
-                            />
-                        </div>
-
-                        <div className="flex gap-3 pt-2">
-                            <button className="btn btn-ghost flex-1" onClick={() => setShowSaldoModal(false)}>
-                                Cancelar
-                            </button>
-                            <button 
-                                className="btn btn-primary flex-1 font-black"
-                                onClick={handleRegistrarSaldoInicial}
-                                disabled={processando}
-                            >
-                                {processando ? <Loader2 className="animate-spin" size={16} /> : 'Salvar'}
-                            </button>
-                        </div>
-                    </div>
-                </>
             )}
         </div>
     );
