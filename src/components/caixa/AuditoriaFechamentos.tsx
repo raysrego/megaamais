@@ -14,6 +14,13 @@ import {
 } from 'lucide-react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import { useToast } from '@/contexts/ToastContext';
+import {
+    getFechamentosAuditoria,
+    aprovarFechamento,
+    rejeitarFechamento,
+    getMovimentacoesSessao,
+    type FechamentoAuditoria
+} from '@/actions/auditoria';
 
 interface Fechamento {
     id: string;
@@ -42,15 +49,13 @@ interface Fechamento {
     saldo_esperado?: number;
 }
 
-// Funções de formatação de data sem timezone
+// Funções de formatação de data
 const formatarDataLocal = (dataStr: string) => {
     if (!dataStr) return '-';
-    // Se já está no formato YYYY-MM-DD
     if (dataStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
         const [ano, mes, dia] = dataStr.split('-');
         return `${dia}/${mes}/${ano}`;
     }
-    // Se for ISO com hora
     if (dataStr.includes('T')) {
         const [data] = dataStr.split('T');
         const [ano, mes, dia] = data.split('-');
@@ -125,7 +130,7 @@ function ModalAuditoriaSimplificada({
                     </div>
                 </div>
 
-                {/* Totais de Entrada e Saída - SIMPLIFICADO */}
+                {/* Totais de Entrada e Saída */}
                 <div className="grid grid-cols-2 gap-4 mb-6">
                     <div className="p-4 rounded-xl bg-success/10 border border-success/20 text-center">
                         <div className="flex items-center justify-center gap-1 mb-2">
@@ -160,7 +165,7 @@ function ModalAuditoriaSimplificada({
                     </p>
                 </div>
 
-                {/* Informações adicionais (opcional) */}
+                {/* Informações adicionais */}
                 {(fechamento.valor_cofre || 0) > 0 && (
                     <div className="bg-surface-subtle p-3 rounded-lg border border-border mb-4">
                         <div className="flex justify-between text-sm">
@@ -179,7 +184,7 @@ function ModalAuditoriaSimplificada({
                     </div>
                 )}
 
-                {/* Justificativa do Operador */}
+                {/* Justificativa */}
                 {fechamento.justificativa && (
                     <div className="mb-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
                         <span className="text-[9px] text-yellow-500 font-bold uppercase">Justificativa do Operador</span>
@@ -247,112 +252,58 @@ export function AuditoriaFechamentos() {
     const fetchHistorico = useCallback(async () => {
         setLoading(true);
         try {
-            let query = supabase
-                .from('caixa_sessoes')
-                .select(`
-                    id,
-                    data_turno,
-                    data_fechamento,
-                    terminal_id,
-                    operador_id,
-                    valor_inicial,
-                    valor_final_declarado,
-                    status,
-                    observacoes,
-                    valor_enviado_cofre,
-                    pix_externo_informado,
-                    fundo_caixa_devolvido,
-                    resumo_entradas_pix,
-                    resumo_entradas_dinheiro,
-                    resumo_entradas_bolao_dinheiro,
-                    resumo_entradas_bolao_pix,
-                    resumo_saidas_sangria,
-                    resumo_saidas_deposito,
-                    resumo_saidas_boleto,
-                    resumo_saidas_trocados,
-                    resumo_total_entradas,
-                    resumo_total_saidas
-                `)
-                .neq('status', 'aberto')
-                .order('created_at', { ascending: false });
+            const data = await getFechamentosAuditoria({
+                status: filtroStatus !== 'todos' ? filtroStatus : undefined,
+            });
 
-            if (filtroStatus !== 'todos') {
-                let statusFilter: string;
-                if (filtroStatus === 'fechado') statusFilter = 'fechado';
-                else if (filtroStatus === 'batido') statusFilter = 'conferido';
-                else if (filtroStatus === 'divergente') statusFilter = 'discrepante';
-                else statusFilter = filtroStatus;
-                query = query.eq('status', statusFilter);
-            }
-
-            const { data: sessoes, error } = await query;
-            if (error) throw error;
-
-            const fechamentosProcessados: Fechamento[] = [];
-
-            for (const sessao of (sessoes || [])) {
-                // Buscar operador nome
-                let operadorNome = 'Sistema';
-                if (sessao.operador_id) {
-                    const { data: userData } = await supabase
-                        .from('usuarios')
-                        .select('nome')
-                        .eq('id', sessao.operador_id)
-                        .single();
-                    if (userData) operadorNome = userData.nome;
-                }
-
-                // Totais
-                const totalPix = (sessao.resumo_entradas_pix || 0) + (sessao.resumo_entradas_bolao_pix || 0);
-                const totalDinheiro = (sessao.resumo_entradas_dinheiro || 0) + (sessao.resumo_entradas_bolao_dinheiro || 0);
-                const totalEntradas = sessao.resumo_total_entradas || (totalPix + totalDinheiro);
-                const totalSaidas = sessao.resumo_total_saidas || 0;
-                
+            const fechamentosProcessados: Fechamento[] = data.map((f: any) => {
+                const totalPix = (f.resumo_entradas_pix || 0) + (f.resumo_entradas_bolao_pix || 0);
+                const totalDinheiro = (f.resumo_entradas_dinheiro || 0) + (f.resumo_entradas_bolao_dinheiro || 0);
+                const totalEntradas = totalPix + totalDinheiro;
+                const totalSaidas = (f.resumo_saidas_sangria || 0) + 
+                                    (f.resumo_saidas_deposito || 0) + 
+                                    (f.resumo_saidas_boleto || 0) + 
+                                    (f.resumo_saidas_trocados || 0);
                 const totalLancamentos = totalEntradas - totalSaidas;
-                const saldoEsperado = (sessao.valor_inicial || 0) + totalLancamentos;
-                const valorNaConta = (sessao.pix_externo_informado || 0) + totalLancamentos;
-                const saldoDeclarado = sessao.valor_final_declarado || 0;
-                const divergencia = saldoDeclarado - saldoEsperado;
-                const valorCofre = sessao.valor_enviado_cofre || 0;
-                const pixExterno = sessao.pix_externo_informado || 0;
+                const valorNaConta = (f.pix_externo_informado || 0) + totalLancamentos;
+                const saldoEsperado = (f.valor_inicial || 0) + totalLancamentos;
 
-                fechamentosProcessados.push({
-                    id: sessao.id,
-                    data_turno: sessao.data_turno || '',
-                    data_fechamento: sessao.data_fechamento,
-                    terminal_id: sessao.terminal_id || 'TFL-WEB',
-                    operador_id: sessao.operador_id || 'Sistema',
-                    operador_nome: operadorNome,
-                    valor_inicial: sessao.valor_inicial || 0,
+                return {
+                    id: f.id,
+                    data_turno: f.data_turno || '',
+                    data_fechamento: f.data_fechamento,
+                    terminal_id: f.terminal_id || 'TFL-WEB',
+                    operador_id: f.operador_id || 'Sistema',
+                    operador_nome: f.operador_nome || 'Sistema',
+                    valor_inicial: f.valor_inicial || 0,
                     total_lancamentos: totalLancamentos,
-                    saldo_no_caixa: saldoDeclarado,
-                    divergencia: divergencia,
+                    saldo_no_caixa: f.valor_final_declarado || 0,
+                    divergencia: f.diferenca_caixa || 0,
                     valor_na_conta: valorNaConta,
                     total_pix: totalPix,
                     total_dinheiro: totalDinheiro,
-                    total_sangrias: sessao.resumo_saidas_sangria || 0,
-                    total_depositos: sessao.resumo_saidas_deposito || 0,
-                    total_boletos: sessao.resumo_saidas_boleto || 0,
-                    total_trocados: sessao.resumo_saidas_trocados || 0,
-                    status_validacao: sessao.status,
+                    total_sangrias: f.resumo_saidas_sangria || 0,
+                    total_depositos: f.resumo_saidas_deposito || 0,
+                    total_boletos: f.resumo_saidas_boleto || 0,
+                    total_trocados: f.resumo_saidas_trocados || 0,
+                    status_validacao: f.auditoria_status || f.status,
                     tipo: 'tfl',
-                    justificativa: sessao.observacoes,
-                    valor_cofre: valorCofre,
-                    valor_pix_externo: pixExterno,
-                    fundo_caixa_devolvido: sessao.fundo_caixa_devolvido,
+                    justificativa: f.observacoes_operador,
+                    valor_cofre: f.valor_enviado_cofre || 0,
+                    valor_pix_externo: f.pix_externo_informado || 0,
+                    fundo_caixa_devolvido: f.fundo_caixa_devolvido,
                     saldo_esperado: saldoEsperado
-                });
-            }
+                };
+            });
 
             setFechamentos(fechamentosProcessados);
-            
         } catch (err: any) {
             console.error('Erro ao carregar histórico:', err);
             toast({ message: 'Erro ao carregar fechamentos: ' + (err.message || 'Erro desconhecido'), type: 'error' });
         } finally {
             setLoading(false);
         }
-    }, [supabase, filtroStatus, toast]);
+    }, [filtroStatus, toast]);
 
     useEffect(() => {
         fetchHistorico();
@@ -362,33 +313,57 @@ export function AuditoriaFechamentos() {
         setShowValidationModal(false);
     };
 
-    const getStatusBadge = (status: string) => {
-        const styles: Record<string, string> = {
-            pendente: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-            fechado: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-            discrepante: 'bg-red-500/10 text-red-400 border-red-500/20',
-            divergente: 'bg-red-500/10 text-red-400 border-red-500/20',
-            aprovado: 'bg-green-500/10 text-green-400 border-green-500/20',
-            batido: 'bg-green-500/10 text-green-400 border-green-500/20',
-            rejeitado: 'bg-gray-500/10 text-gray-400 border-gray-500/20',
-            conferido: 'bg-green-500/10 text-green-400 border-green-500/20',
-            correcao_solicitada: 'bg-orange-500/10 text-orange-400 border-orange-500/20'
-        };
+    const handleAprovar = async (sessaoId: number, observacoes: string) => {
+        console.log('[Auditoria] Aprovando:', sessaoId, observacoes);
+        try {
+            const result = await aprovarFechamento(sessaoId, observacoes);
+            if (result.success) {
+                toast({ message: 'Fechamento aprovado com sucesso!', type: 'success' });
+                await fetchHistorico();
+                setSelectedFechamento(null);
+            } else {
+                toast({ message: result.error || 'Erro ao aprovar', type: 'error' });
+            }
+        } catch (error: any) {
+            console.error('[Auditoria] Erro:', error);
+            toast({ message: error.message || 'Erro ao aprovar', type: 'error' });
+        }
+        handleCloseModal();
+    };
 
+    const handleRejeitar = async (sessaoId: number, justificativa: string) => {
+        console.log('[Auditoria] Rejeitando:', sessaoId, justificativa);
+        try {
+            const result = await rejeitarFechamento(sessaoId, justificativa, false);
+            if (result.success) {
+                toast({ message: 'Fechamento rejeitado!', type: 'warning' });
+                await fetchHistorico();
+                setSelectedFechamento(null);
+            } else {
+                toast({ message: result.error || 'Erro ao rejeitar', type: 'error' });
+            }
+        } catch (error: any) {
+            console.error('[Auditoria] Erro:', error);
+            toast({ message: error.message || 'Erro ao rejeitar', type: 'error' });
+        }
+        handleCloseModal();
+    };
+
+    const getStatusBadge = (status: string) => {
         const labels: Record<string, string> = {
-            fechado: 'AGUARDANDO',
-            batido: 'APROVADO',
-            divergente: 'REPROVADO',
             pendente: 'PENDENTE',
-            discrepante: 'DIVERGENTE',
             aprovado: 'APROVADO',
             rejeitado: 'REJEITADO',
-            conferido: 'CONFERIDO',
             correcao_solicitada: 'CORREÇÃO'
         };
-
+        const colors: Record<string, string> = {
+            pendente: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
+            aprovado: 'bg-green-500/10 text-green-400 border-green-500/20',
+            rejeitado: 'bg-red-500/10 text-red-400 border-red-500/20',
+            correcao_solicitada: 'bg-orange-500/10 text-orange-400 border-orange-500/20'
+        };
         return (
-            <span className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase border ${styles[status] || ''}`}>
+            <span className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase border ${colors[status] || colors.pendente}`}>
                 {labels[status] || status}
             </span>
         );
@@ -420,10 +395,10 @@ export function AuditoriaFechamentos() {
                         value={filtroStatus}
                         onChange={(e) => setFiltroStatus(e.target.value as any)}
                     >
-                        <option value="todos">Todos os Encerramentos</option>
-                        <option value="fechado">Pendentes</option>
-                        <option value="batido">Aprovados</option>
-                        <option value="divergente">Divergentes</option>
+                        <option value="todos">Todos</option>
+                        <option value="pendente">Pendentes</option>
+                        <option value="aprovado">Aprovados</option>
+                        <option value="rejeitado">Rejeitados</option>
                     </select>
                     <button onClick={fetchHistorico} className="btn btn-ghost btn-sm">
                         <RefreshCw size={14} /> Atualizar
@@ -431,8 +406,8 @@ export function AuditoriaFechamentos() {
                 </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: selectedFechamento ? '1fr 480px' : '1fr', gap: '1.5rem', transition: 'all 0.3s ease' }}>
-                {/* Tabela de Fechamentos */}
+            <div style={{ display: 'grid', gridTemplateColumns: selectedFechamento ? '1fr 480px' : '1fr', gap: '1.5rem' }}>
+                {/* Tabela */}
                 <div className="card p-0 overflow-hidden">
                     {fechamentos.length === 0 ? (
                         <div className="p-12 text-center border-dashed">
@@ -462,24 +437,16 @@ export function AuditoriaFechamentos() {
                                                 selectedFechamento?.id === f.id ? 'bg-primary/5 border-l-4 border-primary' : ''
                                             }`}
                                         >
-                                            <td className="text-xs">
-                                                {formatarDataLocal(f.data_turno)}
-                                            </td>
-                                            <td className="text-xs">
-                                                {formatarDataHoraLocal(f.data_fechamento)}
-                                            </td>
+                                            <td className="text-xs">{formatarDataLocal(f.data_turno)}</td>
+                                            <td className="text-xs">{formatarDataHoraLocal(f.data_fechamento)}</td>
                                             <td>
-                                                <span className={`px-2 py-1 rounded-lg text-xs font-black ${
-                                                    f.tipo === 'tfl' ? 'bg-blue-500/10 text-blue-400' : 'bg-purple-500/10 text-purple-400'
-                                                }`}>
+                                                <span className={`px-2 py-1 rounded-lg text-xs font-black bg-blue-500/10 text-blue-400`}>
                                                     {f.terminal_id}
                                                 </span>
                                             </td>
                                             <td className="text-xs opacity-60">{f.operador_nome}</td>
                                             <td>{getStatusBadge(f.status_validacao)}</td>
-                                            <td className={`font-bold text-right ${
-                                                (f.valor_na_conta || 0) >= 0 ? 'text-success' : 'text-danger'
-                                            }`}>
+                                            <td className={`font-bold text-right ${(f.valor_na_conta || 0) >= 0 ? 'text-success' : 'text-danger'}`}>
                                                 R$ {(f.valor_na_conta || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                             </td>
                                             <td className="text-right">
@@ -495,7 +462,7 @@ export function AuditoriaFechamentos() {
 
                 {/* Card de Detalhes */}
                 {selectedFechamento && (
-                    <div className="card flex flex-col h-full animate-in slide-in-from-right duration-300 overflow-y-auto max-h-[80vh]">
+                    <div className="card flex flex-col h-full overflow-y-auto max-h-[80vh]">
                         <div className="flex items-center justify-between mb-6">
                             <h3 className="text-sm font-bold uppercase tracking-wider text-muted">Detalhes do Turno</h3>
                             <button onClick={() => setSelectedFechamento(null)} className="btn btn-ghost btn-sm px-2">
@@ -504,28 +471,16 @@ export function AuditoriaFechamentos() {
                         </div>
 
                         <div className="flex items-center gap-4 mb-6 p-4 rounded-xl bg-surface-subtle border border-border">
-                            <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
-                                selectedFechamento.status_validacao === 'batido' || selectedFechamento.status_validacao === 'aprovado' || selectedFechamento.status_validacao === 'conferido'
-                                    ? 'bg-success/10 text-success'
-                                    : selectedFechamento.status_validacao === 'fechado' || selectedFechamento.status_validacao === 'pendente'
-                                        ? 'bg-warning/10 text-warning'
-                                        : 'bg-danger/10 text-danger'
-                            }`}>
-                                {selectedFechamento.status_validacao === 'batido' || selectedFechamento.status_validacao === 'aprovado' || selectedFechamento.status_validacao === 'conferido'
-                                    ? <CheckCircle2 size={24} />
-                                    : selectedFechamento.status_validacao === 'fechado' || selectedFechamento.status_validacao === 'pendente'
-                                        ? <ShieldCheck size={24} />
-                                        : <AlertTriangle size={24} />}
+                            <div className="w-12 h-12 rounded-full flex items-center justify-center bg-warning/10 text-warning">
+                                <ShieldCheck size={24} />
                             </div>
                             <div>
                                 <div className="text-lg font-bold">{selectedFechamento.terminal_id}</div>
-                                <div className="text-xs text-muted">
-                                    {selectedFechamento.operador_nome} • {formatarDataLocal(selectedFechamento.data_turno)}
-                                </div>
+                                <div className="text-xs text-muted">{selectedFechamento.operador_nome} • {formatarDataLocal(selectedFechamento.data_turno)}</div>
                             </div>
                         </div>
 
-                        {/* Totais de Entrada e Saída - SIMPLIFICADO */}
+                        {/* Totais */}
                         <div className="grid grid-cols-2 gap-3 mb-4">
                             <div className="p-4 rounded-xl bg-success/10 border border-success/20 text-center">
                                 <div className="flex items-center justify-center gap-1 mb-2">
@@ -542,22 +497,16 @@ export function AuditoriaFechamentos() {
                                     <span className="text-[9px] text-danger uppercase font-bold">SAÍDA</span>
                                 </div>
                                 <p className="text-xl font-black text-danger">
-                                    R$ {((selectedFechamento.total_sangrias || 0) + (selectedFechamento.total_depositos || 0) + (selectedFechamento.total_boletos || 0) + (selectedFechamento.total_trocados || 0)).toFixed(2)}
+                                    R$ {((selectedFechamento.total_sangrias || 0) + (selectedFechamento.total_depositos || 0) + (selectedFechamento.total_boletos || 0)).toFixed(2)}
                                 </p>
                             </div>
                         </div>
 
                         {/* Valor na Conta */}
                         <div className="p-4 rounded-xl bg-primary-blue-light/10 border border-primary-blue-light/20 mb-4 text-center">
-                            <p className="text-[9px] font-bold text-primary-blue-light uppercase mb-1">
-                                💰 VALOR NA CONTA
-                            </p>
-                            <p className="text-2xl font-black text-primary-blue-light">
-                                R$ {(selectedFechamento.valor_na_conta || 0).toFixed(2)}
-                            </p>
-                            <p className="text-[9px] text-muted mt-1">
-                                PIX Externo + (Entradas - Saídas)
-                            </p>
+                            <p className="text-[9px] font-bold text-primary-blue-light uppercase mb-1">💰 VALOR NA CONTA</p>
+                            <p className="text-2xl font-black text-primary-blue-light">R$ {(selectedFechamento.valor_na_conta || 0).toFixed(2)}</p>
+                            <p className="text-[9px] text-muted mt-1">PIX Externo + (Entradas - Saídas)</p>
                         </div>
 
                         {/* Informações adicionais */}
@@ -566,15 +515,6 @@ export function AuditoriaFechamentos() {
                                 <div className="flex justify-between text-sm">
                                     <span className="text-muted">Valor no cofre</span>
                                     <span className="font-bold">R$ {(selectedFechamento.valor_cofre || 0).toFixed(2)}</span>
-                                </div>
-                            </div>
-                        )}
-
-                        {(selectedFechamento.valor_pix_externo || 0) > 0 && (
-                            <div className="bg-surface-subtle p-3 rounded-lg border border-border mb-3">
-                                <div className="flex justify-between text-sm">
-                                    <span className="text-muted">PIX externo</span>
-                                    <span className="font-bold">R$ {(selectedFechamento.valor_pix_externo || 0).toFixed(2)}</span>
                                 </div>
                             </div>
                         )}
@@ -588,18 +528,14 @@ export function AuditoriaFechamentos() {
                         )}
 
                         {/* Botão de auditoria */}
-                        {['fechado', 'divergente', 'pendente', 'discrepante', 'correcao_solicitada'].includes(selectedFechamento.status_validacao) && (
+                        {selectedFechamento.status_validacao === 'pendente' && (
                             <div className="mt-auto">
                                 <button
                                     className="btn btn-primary w-full py-4 text-lg font-bold"
                                     onClick={() => setShowValidationModal(true)}
                                 >
                                     <ShieldCheck className="mr-2" />
-                                    {selectedFechamento.status_validacao === 'divergente' || selectedFechamento.status_validacao === 'discrepante'
-                                        ? 'Revalidar Fechamento'
-                                        : selectedFechamento.status_validacao === 'correcao_solicitada'
-                                            ? 'Avaliar Correção'
-                                            : 'Auditar Agora'}
+                                    Auditar Agora
                                 </button>
                             </div>
                         )}
@@ -607,90 +543,15 @@ export function AuditoriaFechamentos() {
                 )}
             </div>
 
-            {/* Modal de Auditoria */}
-           {showValidationModal && selectedFechamento && (
-    <ModalAuditoriaSimplificada
-        fechamento={selectedFechamento}
-        onClose={handleCloseModal}
-        onAprovar={async (obs) => {
-            console.log('[Auditoria] ====== INICIANDO APROVAÇÃO ======');
-            console.log('[Auditoria] Sessão ID:', selectedFechamento.id);
-            console.log('[Auditoria] Observações:', obs);
-            
-            // Buscar conta bancária padrão se necessário
-            let contaId = null;
-            try {
-                const { data: contas } = await supabase
-                    .from('financeiro_contas_bancarias')
-                    .select('id')
-                    .eq('is_padrao_pix', true)
-                    .limit(1);
-                
-                if (contas && contas.length > 0) {
-                    contaId = contas[0].id;
-                    console.log('[Auditoria] Conta padrão encontrada:', contaId);
-                }
-            } catch (err) {
-                console.warn('[Auditoria] Erro ao buscar conta padrão:', err);
-            }
-            
-            try {
-                // Chamar a server action
-                const result = await aprovarFechamento(
-                    selectedFechamento.id, 
-                    obs, 
-                    contaId || undefined
-                );
-                
-                console.log('[Auditoria] Resultado da aprovação:', result);
-                
-                if (result && result.success) {
-                    toast({ 
-                        message: `✅ Sessão ${selectedFechamento.terminal_id} validada com sucesso!`, 
-                        type: 'success' 
-                    });
-                    handleCloseModal();
-                    await fetchHistorico();
-                    setSelectedFechamento(null);
-                } else {
-                    const errorMsg = result?.error || 'Erro desconhecido ao aprovar';
-                    console.error('[Auditoria] Erro na aprovação:', errorMsg);
-                    toast({ message: `❌ Erro ao aprovar: ${errorMsg}`, type: 'error' });
-                }
-            } catch (error: any) {
-                console.error('[Auditoria] Exceção na aprovação:', error);
-                toast({ 
-                    message: `❌ Erro ao aprovar: ${error.message || 'Erro desconhecido'}`, 
-                    type: 'error' 
-                });
-            }
-        }}
-        onRejeitar={async ({ justificativa }) => {
-            console.log('[Auditoria] ====== INICIANDO REJEIÇÃO ======');
-            console.log('[Auditoria] Sessão ID:', selectedFechamento.id);
-            console.log('[Auditoria] Justificativa:', justificativa);
-            
-            try {
-                const result = await rejeitarFechamento(
-                    selectedFechamento.id, 
-                    justificativa, 
-                    false
-                );
-                
-                console.log('[Auditoria] Resultado da rejeição:', result);
-                
-                if (result && result.success) {
-                    toast({ message: '❌ Fechamento reprovado.', type: 'warning' });
-                    handleCloseModal();
-                    await fetchHistorico();
-                    setSelectedFechamento(null);
-                } else {
-                    toast({ message: 'Erro ao rejeitar', type: 'error' });
-                }
-            } catch (error: any) {
-                console.error('[Auditoria] Erro na rejeição:', error);
-                toast({ message: `Erro ao rejeitar: ${error.message}`, type: 'error' });
-            }
-        }}
-    />
-)}
+            {/* Modal */}
+            {showValidationModal && selectedFechamento && (
+                <ModalAuditoriaSimplificada
+                    fechamento={selectedFechamento}
+                    onClose={handleCloseModal}
+                    onAprovar={(obs) => handleAprovar(parseInt(selectedFechamento.id), obs)}
+                    onRejeitar={({ justificativa }) => handleRejeitar(parseInt(selectedFechamento.id), justificativa)}
+                />
+            )}
+        </div>
+    );
+}
