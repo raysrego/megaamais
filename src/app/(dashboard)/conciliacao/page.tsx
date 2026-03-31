@@ -154,42 +154,76 @@ export default function ConciliacaoPage() {
             // Buscar todas as transferências de cofre para banco do mês
             const { data: depositosData, error: depositosError } = await supabase
                 .from('cofre_movimentacoes')
-                .select(`
-                    id,
-                    valor,
-                    data_movimentacao,
-                    observacoes,
-                    usuario_id,
-                    conta_bancaria_destino_id,
-                    financeiro_contas_bancarias!cofre_movimentacoes_conta_bancaria_destino_id_fkey (
-                        nome,
-                        banco_id,
-                        financeiro_bancos (
-                            nome
-                        )
-                    ),
-                    usuarios (
-                        nome_completo
-                    )
-                `)
+                .select('*')
                 .eq('loja_id', lojaSelecionada)
                 .eq('tipo', 'transferencia_banco')
                 .gte('data_movimentacao', dataInicio)
                 .lte('data_movimentacao', dataFim)
                 .order('data_movimentacao', { ascending: false });
 
-            if (depositosError) throw depositosError;
+            if (depositosError) {
+                console.error('Erro ao buscar depósitos:', depositosError);
+            }
 
-            // Formatar depósitos
-            const depositosFormatados: DepositoCofre[] = (depositosData || []).map((dep: any) => ({
-                id: dep.id,
-                valor: dep.valor,
-                data_movimentacao: dep.data_movimentacao,
-                observacoes: dep.observacoes || '',
-                banco_nome: dep.financeiro_contas_bancarias?.financeiro_bancos?.nome || 'N/A',
-                conta_nome: dep.financeiro_contas_bancarias?.nome || 'N/A',
-                operador_nome: dep.usuarios?.nome_completo || 'Sistema'
-            }));
+            // Buscar informações adicionais para cada depósito
+            const depositosFormatados: DepositoCofre[] = [];
+
+            if (depositosData && depositosData.length > 0) {
+                for (const dep of depositosData) {
+                    let bancoNome = 'N/A';
+                    let contaNome = 'N/A';
+                    let operadorNome = 'Sistema';
+
+                    // Buscar conta bancária
+                    if (dep.conta_bancaria_destino_id) {
+                        const { data: contaData } = await supabase
+                            .from('financeiro_contas_bancarias')
+                            .select('nome, banco_id')
+                            .eq('id', dep.conta_bancaria_destino_id)
+                            .maybeSingle();
+
+                        if (contaData) {
+                            contaNome = contaData.nome;
+
+                            // Buscar banco
+                            if (contaData.banco_id) {
+                                const { data: bancoData } = await supabase
+                                    .from('financeiro_bancos')
+                                    .select('nome')
+                                    .eq('id', contaData.banco_id)
+                                    .maybeSingle();
+
+                                if (bancoData) {
+                                    bancoNome = bancoData.nome;
+                                }
+                            }
+                        }
+                    }
+
+                    // Buscar operador
+                    if (dep.usuario_id) {
+                        const { data: usuarioData } = await supabase
+                            .from('usuarios')
+                            .select('nome_completo')
+                            .eq('id', dep.usuario_id)
+                            .maybeSingle();
+
+                        if (usuarioData) {
+                            operadorNome = usuarioData.nome_completo;
+                        }
+                    }
+
+                    depositosFormatados.push({
+                        id: dep.id,
+                        valor: dep.valor,
+                        data_movimentacao: dep.data_movimentacao,
+                        observacoes: dep.observacoes || '',
+                        banco_nome: bancoNome,
+                        conta_nome: contaNome,
+                        operador_nome: operadorNome
+                    });
+                }
+            }
 
             setDepositos(depositosFormatados);
 
@@ -362,8 +396,8 @@ export default function ConciliacaoPage() {
                 </div>
             </div>
 
-            {/* Cards de Resumo */}
-            {resumo ? (
+            {/* Cards de Resumo - Sempre visíveis */}
+            {lojaSelecionada && mesReferencia ? (
                 <>
                     {/* Cards Principais */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -372,19 +406,19 @@ export default function ConciliacaoPage() {
                                 <TrendingUp size={16} className="text-success" />
                                 <p className="text-[10px] font-bold text-success uppercase">Total de Entradas Auditadas (TFL)</p>
                             </div>
-                            <p className="text-2xl font-bold text-success">{formatarMoeda(resumo.total_entradas_geral)}</p>
+                            <p className="text-2xl font-bold text-success">{formatarMoeda(resumo?.total_entradas_geral || 0)}</p>
                             <div className="text-xs text-muted mt-2">
                                 <div className="flex justify-between">
                                     <span className="inline-flex items-center gap-1"><Smartphone size={10} /> PIX:</span>
-                                    <span className="font-bold">{formatarMoeda(resumo.total_entradas_pix)}</span>
+                                    <span className="font-bold">{formatarMoeda(resumo?.total_entradas_pix || 0)}</span>
                                 </div>
                                 <div className="flex justify-between">
                                     <span className="inline-flex items-center gap-1"><Banknote size={10} /> Dinheiro:</span>
-                                    <span className="font-bold">{formatarMoeda(resumo.total_entradas_dinheiro)}</span>
+                                    <span className="font-bold">{formatarMoeda(resumo?.total_entradas_dinheiro || 0)}</span>
                                 </div>
                             </div>
                             <p className="text-[10px] text-muted mt-2">
-                                {resumo.total_aprovados} fechamentos aprovados
+                                {resumo?.total_aprovados || 0} fechamentos aprovados
                             </p>
                         </div>
 
@@ -393,7 +427,7 @@ export default function ConciliacaoPage() {
                                 <ArrowDownCircle size={16} className="text-primary-blue-light" />
                                 <p className="text-[10px] font-bold text-primary-blue-light uppercase">Depósitos Recebidos</p>
                             </div>
-                            <p className="text-2xl font-bold text-primary-blue-light">{formatarMoeda(resumo.total_depositado)}</p>
+                            <p className="text-2xl font-bold text-primary-blue-light">{formatarMoeda(resumo?.total_depositado || 0)}</p>
                             <p className="text-[10px] text-muted mt-2">
                                 {depositos.length} {depositos.length === 1 ? 'depósito registrado' : 'depósitos registrados'} no mês
                             </p>
