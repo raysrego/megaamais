@@ -85,17 +85,32 @@ export async function getFechamentosAuditoria(
 // ─── Aprovar fechamento (cria entrada no cofre automaticamente) ───
 export async function aprovarFechamento(
     sessaoId: number,
-    observacoes?: string
+    observacoes?: string,
+    contaBancariaId?: string  // NOVO: conta bancária padrão para depósito
 ) {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) throw new Error('Não autenticado');
 
+    // Se não informou conta bancária, busca a conta padrão
+    let contaId = contaBancariaId;
+    if (!contaId) {
+        const { data: contaPadrao, error: contaError } = await supabase
+            .from('financeiro_contas_bancarias')
+            .select('id')
+            .eq('is_padrao_pix', true)
+            .maybeSingle();
+
+        if (contaError) throw new Error(`Erro ao buscar conta padrão: ${contaError.message}`);
+        if (contaPadrao) contaId = contaPadrao.id;
+    }
+
     const { data, error } = await supabase.rpc('aprovar_fechamento_caixa', {
         p_sessao_id: sessaoId,
         p_gerente_id: user.id,
         p_observacoes: observacoes ?? null,
+        p_conta_bancaria_id: contaId ?? null,
     });
 
     if (error) throw new Error(`Erro ao aprovar: ${error.message}`);
@@ -107,6 +122,7 @@ export async function aprovarFechamento(
 
     revalidatePath('/auditoria');
     revalidatePath('/cofre');
+    revalidatePath('/conciliacao');
     return resultado;
 }
 
@@ -167,7 +183,6 @@ export async function getResumoAuditoria(lojaId?: string) {
         query = query.eq('loja_id', lojaId);
     }
 
-    // Últimos 7 dias
     const seteDiasAtras = new Date();
     seteDiasAtras.setDate(seteDiasAtras.getDate() - 7);
     query = query.gte('data_turno', seteDiasAtras.toISOString().split('T')[0]);
@@ -197,4 +212,93 @@ export async function getResumoAuditoria(lojaId?: string) {
     }
 
     return resumo;
+}
+
+// ─── Registrar depósito bancário a partir do cofre ───
+export async function registrarDepositoCofre(
+    valor: number,
+    contaBancariaId: string,
+    observacoes?: string
+) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) throw new Error('Não autenticado');
+    if (valor <= 0) throw new Error('Valor deve ser positivo');
+
+    const { data, error } = await supabase.rpc('registrar_deposito_cofre', {
+        p_valor: valor,
+        p_conta_id: contaBancariaId,
+        p_usuario_id: user.id,
+        p_observacoes: observacoes ?? null,
+    });
+
+    if (error) throw new Error(`Erro ao registrar depósito: ${error.message}`);
+
+    const resultado = data as { success: boolean; error?: string };
+    if (!resultado.success) {
+        throw new Error(resultado.error || 'Erro ao registrar depósito');
+    }
+
+    revalidatePath('/cofre');
+    revalidatePath('/conciliacao');
+    return resultado;
+}
+
+// ─── Buscar entradas do cofre por fechamento aprovado ───
+export async function getEntradasCofrePorFechamento() {
+    const supabase = await createClient();
+
+    const { data, error } = await supabase
+        .from('cofre_entradas_por_fechamento')
+        .select('*')
+        .order('data_turno', { ascending: false })
+        .limit(50);
+
+    if (error) throw new Error(`Erro: ${error.message}`);
+    return data ?? [];
+}
+
+// ─── Buscar saldo atual do cofre ───
+export async function getSaldoCofre(): Promise<number> {
+    const supabase = await createClient();
+
+    const { data, error } = await supabase
+        .from('cofre_saldo_atual')
+        .select('saldo')
+        .single();
+
+    if (error) return 0;
+    return data?.saldo ?? 0;
+}
+
+// ─── Buscar histórico do cofre com rastreio ───
+export async function getHistoricoCofre(limite: number = 30) {
+    const supabase = await createClient();
+
+    const { data, error } = await supabase
+        .from('cofre_movimentacoes')
+        .select(`
+            id, tipo, valor, observacoes, data_movimentacao, created_at,
+            operador_id, origem_sessao_id, conta_bancaria_id
+        `)
+        .order('data_movimentacao', { ascending: false })
+        .limit(limite);
+
+    if (error) throw new Error(`Erro: ${error.message}`);
+    return data ?? [];
+}
+
+// ─── Buscar depósitos pendentes de conciliação ───
+export async function getDepositosPendentes() {
+    const supabase = await createClient();
+
+    const { data, error } = await supabase
+        .from('vw_cofre_depositos_rastreio')
+        .select('*')
+        .eq('status_conciliacao', 'pendente')
+        .order('data_movimentacao', { ascending: false });
+
+    if (error) throw new Error(`Erro: ${error.message}`);
+    return data ?? [];
 }
