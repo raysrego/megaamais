@@ -608,50 +608,89 @@ export function AuditoriaFechamentos() {
             </div>
 
             {/* Modal de Auditoria */}
-            {showValidationModal && selectedFechamento && (
-                <ModalAuditoriaSimplificada
-                    fechamento={selectedFechamento}
-                    onClose={handleCloseModal}
-                    onAprovar={async (obs) => {
-                        const { error } = await supabase
-                            .from('caixa_sessoes')
-                            .update({
-                                status: 'conferido',
-                                observacoes_gerente: obs,
-                                data_validacao: new Date().toISOString()
-                            })
-                            .eq('id', selectedFechamento.id);
-
-                        if (error) {
-                            toast({ message: 'Erro ao aprovar: ' + error.message, type: 'error' });
-                        } else {
-                            toast({ message: `Sessão ${selectedFechamento.terminal_id} validada com sucesso!`, type: 'success' });
-                            handleCloseModal();
-                            fetchHistorico();
-                            setSelectedFechamento(null);
-                        }
-                    }}
-                    onRejeitar={async ({ justificativa }) => {
-                        const { error } = await supabase
-                            .from('caixa_sessoes')
-                            .update({
-                                status: 'discrepante',
-                                observacoes_gerente: justificativa,
-                                data_validacao: new Date().toISOString()
-                            })
-                            .eq('id', selectedFechamento.id);
-
-                        if (error) {
-                            toast({ message: 'Erro ao rejeitar: ' + error.message, type: 'error' });
-                        } else {
-                            toast({ message: 'Fechamento reprovado.', type: 'warning' });
-                            handleCloseModal();
-                            fetchHistorico();
-                            setSelectedFechamento(null);
-                        }
-                    }}
-                />
-            )}
-        </div>
-    );
-}
+           {showValidationModal && selectedFechamento && (
+    <ModalAuditoriaSimplificada
+        fechamento={selectedFechamento}
+        onClose={handleCloseModal}
+        onAprovar={async (obs) => {
+            console.log('[Auditoria] ====== INICIANDO APROVAÇÃO ======');
+            console.log('[Auditoria] Sessão ID:', selectedFechamento.id);
+            console.log('[Auditoria] Observações:', obs);
+            
+            // Buscar conta bancária padrão se necessário
+            let contaId = null;
+            try {
+                const { data: contas } = await supabase
+                    .from('financeiro_contas_bancarias')
+                    .select('id')
+                    .eq('is_padrao_pix', true)
+                    .limit(1);
+                
+                if (contas && contas.length > 0) {
+                    contaId = contas[0].id;
+                    console.log('[Auditoria] Conta padrão encontrada:', contaId);
+                }
+            } catch (err) {
+                console.warn('[Auditoria] Erro ao buscar conta padrão:', err);
+            }
+            
+            try {
+                // Chamar a server action
+                const result = await aprovarFechamento(
+                    selectedFechamento.id, 
+                    obs, 
+                    contaId || undefined
+                );
+                
+                console.log('[Auditoria] Resultado da aprovação:', result);
+                
+                if (result && result.success) {
+                    toast({ 
+                        message: `✅ Sessão ${selectedFechamento.terminal_id} validada com sucesso!`, 
+                        type: 'success' 
+                    });
+                    handleCloseModal();
+                    await fetchHistorico();
+                    setSelectedFechamento(null);
+                } else {
+                    const errorMsg = result?.error || 'Erro desconhecido ao aprovar';
+                    console.error('[Auditoria] Erro na aprovação:', errorMsg);
+                    toast({ message: `❌ Erro ao aprovar: ${errorMsg}`, type: 'error' });
+                }
+            } catch (error: any) {
+                console.error('[Auditoria] Exceção na aprovação:', error);
+                toast({ 
+                    message: `❌ Erro ao aprovar: ${error.message || 'Erro desconhecido'}`, 
+                    type: 'error' 
+                });
+            }
+        }}
+        onRejeitar={async ({ justificativa }) => {
+            console.log('[Auditoria] ====== INICIANDO REJEIÇÃO ======');
+            console.log('[Auditoria] Sessão ID:', selectedFechamento.id);
+            console.log('[Auditoria] Justificativa:', justificativa);
+            
+            try {
+                const result = await rejeitarFechamento(
+                    selectedFechamento.id, 
+                    justificativa, 
+                    false
+                );
+                
+                console.log('[Auditoria] Resultado da rejeição:', result);
+                
+                if (result && result.success) {
+                    toast({ message: '❌ Fechamento reprovado.', type: 'warning' });
+                    handleCloseModal();
+                    await fetchHistorico();
+                    setSelectedFechamento(null);
+                } else {
+                    toast({ message: 'Erro ao rejeitar', type: 'error' });
+                }
+            } catch (error: any) {
+                console.error('[Auditoria] Erro na rejeição:', error);
+                toast({ message: `Erro ao rejeitar: ${error.message}`, type: 'error' });
+            }
+        }}
+    />
+)}
