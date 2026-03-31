@@ -86,44 +86,45 @@ export async function getFechamentosAuditoria(
 export async function aprovarFechamento(
     sessaoId: number,
     observacoes?: string,
-    contaBancariaId?: string  // NOVO: conta bancária padrão para depósito
+    contaBancariaId?: string
 ) {
+    console.log('[Server Action] aprovarFechamento chamado:', { sessaoId, observacoes, contaBancariaId });
+    
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-    if (!user) throw new Error('Não autenticado');
-
-    // Se não informou conta bancária, busca a conta padrão
-    let contaId = contaBancariaId;
-    if (!contaId) {
-        const { data: contaPadrao, error: contaError } = await supabase
-            .from('financeiro_contas_bancarias')
-            .select('id')
-            .eq('is_padrao_pix', true)
-            .maybeSingle();
-
-        if (contaError) throw new Error(`Erro ao buscar conta padrão: ${contaError.message}`);
-        if (contaPadrao) contaId = contaPadrao.id;
+    if (authError) {
+        console.error('[Server Action] Erro de autenticação:', authError);
+        throw new Error(`Erro de autenticação: ${authError.message}`);
     }
+
+    if (!user) {
+        console.error('[Server Action] Usuário não autenticado');
+        throw new Error('Não autenticado');
+    }
+
+    console.log('[Server Action] Usuário autenticado:', user.id);
 
     const { data, error } = await supabase.rpc('aprovar_fechamento_caixa', {
         p_sessao_id: sessaoId,
         p_gerente_id: user.id,
         p_observacoes: observacoes ?? null,
-        p_conta_bancaria_id: contaId ?? null,
+        p_conta_bancaria_id: contaBancariaId ?? null,
     });
 
-    if (error) throw new Error(`Erro ao aprovar: ${error.message}`);
-
-    const resultado = data as { success: boolean; error?: string };
-    if (!resultado.success) {
-        throw new Error(resultado.error || 'Erro desconhecido');
+    if (error) {
+        console.error('[Server Action] Erro na RPC:', error);
+        throw new Error(`Erro ao aprovar: ${error.message}`);
     }
 
+    console.log('[Server Action] Resultado da RPC:', data);
+    
+    // Revalidar os paths
     revalidatePath('/auditoria');
     revalidatePath('/cofre');
     revalidatePath('/conciliacao');
-    return resultado;
+    
+    return data as { success: boolean; error?: string; movimentacao_id?: number; valor?: number };
 }
 
 // ─── Rejeitar fechamento ───
