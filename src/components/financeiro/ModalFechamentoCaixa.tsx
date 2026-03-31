@@ -8,6 +8,7 @@ import {
     CheckCircle2,
     ArrowUpCircle,
     ArrowDownCircle,
+    ArrowRightLeft,  // ← ADICIONADO
     DollarSign
 } from 'lucide-react';
 import { MoneyInput } from '@/components/ui/MoneyInput';
