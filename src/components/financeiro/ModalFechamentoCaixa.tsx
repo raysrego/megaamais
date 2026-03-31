@@ -57,10 +57,13 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
             .reduce((acc, mov) => acc + Math.abs(mov.valor), 0);
     }, [transacoes]);
 
-    const saldoFinal = useMemo(() => {
-        const inicial = sessao?.valor_inicial ?? 0;
-        return inicial + totalCreditos - totalDebitos;
-    }, [sessao, totalCreditos, totalDebitos]);
+    const valorInicial = sessao?.valor_inicial ?? 0;
+    
+    // Total de lançamentos = entradas - saídas (movimentação líquida)
+    const totalLancamentos = totalCreditos - totalDebitos;
+    
+    // Saldo final calculado = valor inicial + total de lançamentos
+    const saldoFinalCalculado = valorInicial + totalLancamentos;
 
     const temFundoCaixa = sessao?.tem_fundo_caixa ?? true;
 
@@ -134,12 +137,10 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
                     <div className="bg-surface-subtle p-4 rounded-xl border border-border mb-6">
                         <p className="text-xs font-bold mb-3 text-muted uppercase tracking-wider">Resumo do Turno</p>
                         <div className="space-y-2 text-sm">
-                            {sessao && (
-                                <div className="flex justify-between">
-                                    <span className="text-muted">Valor Inicial:</span>
-                                    <span className="font-bold">R$ {sessao.valor_inicial.toFixed(2)}</span>
-                                </div>
-                            )}
+                            <div className="flex justify-between">
+                                <span className="text-muted">Valor Inicial:</span>
+                                <span className="font-bold">R$ {valorInicial.toFixed(2)}</span>
+                            </div>
                             <div className="flex justify-between text-success">
                                 <span className="flex items-center gap-1">
                                     <ArrowUpCircle size={14} /> Entradas:
@@ -152,6 +153,14 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
                                 </span>
                                 <span className="font-bold">R$ {totalDebitos.toFixed(2)}</span>
                             </div>
+                            <div className="flex justify-between text-muted">
+                                <span className="flex items-center gap-1">
+                                    <ArrowRightLeft size={14} /> Total Lançamentos:
+                                </span>
+                                <span className={`font-bold ${totalLancamentos >= 0 ? 'text-success' : 'text-danger'}`}>
+                                    {totalLancamentos >= 0 ? '+' : ''}R$ {totalLancamentos.toFixed(2)}
+                                </span>
+                            </div>
                             {totalSangria > 0 && (
                                 <div className="flex justify-between text-warning">
                                     <span className="flex items-center gap-1">
@@ -162,9 +171,12 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
                             )}
                             <div className="flex justify-between pt-2 border-t border-border font-black">
                                 <span>Saldo Final Calculado:</span>
-                                <span className={saldoFinal >= 0 ? 'text-success' : 'text-danger'}>
-                                    R$ {saldoFinal.toFixed(2)}
+                                <span className={saldoFinalCalculado >= 0 ? 'text-success' : 'text-danger'}>
+                                    R$ {saldoFinalCalculado.toFixed(2)}
                                 </span>
+                            </div>
+                            <div className="text-[10px] text-muted italic mt-2">
+                                Saldo final = Valor Inicial + (Entradas - Saídas)
                             </div>
                         </div>
                     </div>
