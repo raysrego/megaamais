@@ -413,31 +413,59 @@ const fecharCaixa = async (
         const totalSaidasDinheiro = resumo.sangria + resumo.deposito + resumo.boleto + resumo.trocados;
         const saldoEsperadoDinheiro = sessaoAtiva.valor_inicial + totalEntradasDinheiro - totalSaidasDinheiro;
         
-        // Saldo declarado
+        // Saldo declarado (dinheiro em mãos)
         const dinheiroEmMaos = saldoEsperadoDinheiro;
         
-        console.log('[useCaixa] Dados para update:', {
-            sessaoId: sessaoAtiva.id,
-            status: 'fechado',
-            data_fechamento: new Date().toISOString(),
-            valor_enviado_cofre: valorCofre || 0,
-            pix_externo_informado: valorPixExterno || 0,
-            valor_final_declarado: dinheiroEmMaos,
-            valor_final_calculado: sessaoAtiva.valor_inicial + saldo
+        // Calcular diferença
+        const diferenca = (valorCofre || 0) + (valorPixExterno || 0) - saldoEsperadoDinheiro;
+        
+        console.log('[useCaixa] Cálculos do fechamento:', {
+            valor_inicial: sessaoAtiva.valor_inicial,
+            entradas,
+            saidas,
+            saldo,
+            totalEntradasDinheiro,
+            totalSaidasDinheiro,
+            saldoEsperadoDinheiro,
+            valorCofre,
+            valorPixExterno,
+            diferenca
         });
 
-        // Atualização SIMPLES - apenas os campos essenciais
+        // Preparar dados para update com os nomes CORRETOS dos campos
+        const updateData = {
+            status: 'fechado',
+            data_fechamento: new Date().toISOString(),
+            observacoes: observacoes || null,
+            // Campos de valores
+            valor_enviado_cofre: valorCofre || 0,
+            pix_externo_informado: valorPixExterno || 0,
+            dinheiro_em_maos: dinheiroEmMaos,
+            valor_final_declarado: dinheiroEmMaos,
+            valor_final_calculado: sessaoAtiva.valor_inicial + saldo,
+            // Campos de resumo
+            resumo_entradas_pix: resumo.pix,
+            resumo_entradas_dinheiro: resumo.dinheiro,
+            resumo_entradas_bolao_dinheiro: resumo.bolao_dinheiro,
+            resumo_entradas_bolao_pix: resumo.bolao_pix,
+            resumo_saidas_sangria: resumo.sangria,
+            resumo_saidas_deposito: resumo.deposito,
+            resumo_saidas_boleto: resumo.boleto,
+            resumo_saidas_trocados: resumo.trocados,
+            resumo_total_entradas: entradas,
+            resumo_total_saidas: saidas,
+            saldo_esperado_dinheiro: saldoEsperadoDinheiro,
+            diferenca_caixa: diferenca,
+            fundo_caixa_devolvido: sessaoAtiva.tem_fundo_caixa !== false,
+            // Campos de auditoria
+            auditoria_status: 'pendente'
+        };
+
+        console.log('[useCaixa] Dados enviados para update:', updateData);
+
         const { data, error } = await supabase
             .from('caixa_sessoes')
-            .update({
-                status: 'fechado',
-                data_fechamento: new Date().toISOString(),
-                observacoes: observacoes || null,
-                valor_enviado_cofre: valorCofre || 0,
-                pix_externo_informado: valorPixExterno || 0,
-                valor_final_declarado: dinheiroEmMaos,
-                valor_final_calculado: sessaoAtiva.valor_inicial + saldo
-            })
+            .update(updateData)
             .eq('id', sessaoAtiva.id)
             .select();
 
@@ -460,8 +488,7 @@ const fecharCaixa = async (
             message: err?.message,
             code: err?.code,
             details: err?.details,
-            hint: err?.hint,
-            name: err?.name
+            hint: err?.hint
         });
         setError('Falha ao fechar o caixa. Tente novamente.');
         throw err;
