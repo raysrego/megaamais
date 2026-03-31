@@ -374,7 +374,7 @@ export function useCaixa() {
   };
 
   // Fechar caixa - VERSÃO SIMPLIFICADA
- const fecharCaixa = async (
+const fecharCaixa = async (
     observacoes?: string,
     tflData?: any,
     valorCofre?: number,
@@ -442,13 +442,11 @@ export function useCaixa() {
             .select();
 
         if (error) {
-            console.error('[useCaixa] Erro no update - DETALHES COMPLETOS:', {
+            console.error('[useCaixa] Erro no update - DETALHES:', {
                 message: error.message,
                 code: error.code,
                 details: error.details,
-                hint: error.hint,
-                status: error.status,
-                statusText: error.statusText
+                hint: error.hint
             });
             throw error;
         }
@@ -463,7 +461,7 @@ export function useCaixa() {
             code: err?.code,
             details: err?.details,
             hint: err?.hint,
-            fullError: err
+            name: err?.name
         });
         setError('Falha ao fechar o caixa. Tente novamente.');
         throw err;
