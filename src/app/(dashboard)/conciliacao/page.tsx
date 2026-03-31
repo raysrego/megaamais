@@ -6,7 +6,7 @@ import {
     Calendar, DollarSign, TrendingUp, TrendingDown, 
     Smartphone, Coins, Banknote, Receipt, Plus, 
     RefreshCw, Filter, ArrowDownCircle, ArrowUpCircle,
-    Save, Edit, X, Wallet, History, FileText
+    Save, Edit, X, Wallet, History, FileText, Briefcase
 } from 'lucide-react';
 import { useToast } from '@/contexts/ToastContext';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
@@ -461,7 +461,8 @@ export default function ConciliacaoPage() {
             {/* Cards de Resumo */}
             {resumo ? (
                 <>
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    {/* Primeira linha: Saldo Inicial e Total de Entradas TFL */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="card p-4">
                             <div className="flex items-center justify-between mb-2">
                                 <p className="text-[10px] font-bold text-muted uppercase">Saldo Inicial</p>
@@ -473,92 +474,61 @@ export default function ConciliacaoPage() {
                                 </button>
                             </div>
                             <p className="text-2xl font-bold">{formatarMoeda(resumo.saldo_inicial)}</p>
+                            <p className="text-[10px] text-muted mt-1">Saldo da conta no início do mês</p>
                         </div>
 
                         <div className="card p-4 bg-success/5 border-success/20">
-                            <p className="text-[10px] font-bold text-success uppercase">Total Entradas TFL</p>
-                            <p className="text-2xl font-bold text-success">{formatarMoeda(resumo.total_entradas_geral)}</p>
-                            <div className="text-xs text-muted mt-1">
-                                <span className="inline-flex items-center gap-1 mr-3"><Smartphone size={10} /> PIX: {formatarMoeda(resumo.total_entradas_pix + resumo.total_entradas_bolao_pix)}</span>
-                                <span className="inline-flex items-center gap-1"><Banknote size={10} /> Dinheiro: {formatarMoeda(resumo.total_entradas_dinheiro + resumo.total_entradas_bolao_dinheiro)}</span>
+                            <div className="flex items-center gap-2 mb-2">
+                                <TrendingUp size={16} className="text-success" />
+                                <p className="text-[10px] font-bold text-success uppercase">Total Entradas TFL</p>
                             </div>
-                        </div>
-
-                        <div className="card p-4 bg-warning/5 border-warning/20">
-                            <p className="text-[10px] font-bold text-warning uppercase">Enviado ao Cofre</p>
-                            <p className="text-2xl font-bold text-warning">{formatarMoeda(resumo.total_enviado_cofre)}</p>
-                            <p className="text-xs text-muted mt-1">
-                                {resumo.total_aprovados} de {resumo.total_fechamentos} fechamentos aprovados
-                            </p>
+                            <p className="text-2xl font-bold text-success">{formatarMoeda(resumo.total_entradas_geral)}</p>
+                            <div className="text-xs text-muted mt-2">
+                                <div className="flex justify-between">
+                                    <span className="inline-flex items-center gap-1"><Smartphone size={10} /> PIX:</span>
+                                    <span className="font-bold">{formatarMoeda(resumo.total_entradas_pix + resumo.total_entradas_bolao_pix)}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span className="inline-flex items-center gap-1"><Banknote size={10} /> Dinheiro:</span>
+                                    <span className="font-bold">{formatarMoeda(resumo.total_entradas_dinheiro + resumo.total_entradas_bolao_dinheiro)}</span>
+                                </div>
+                            </div>
                         </div>
 
                         <div className="card p-4 bg-primary-blue-light/5 border-primary-blue-light/20">
-                            <p className="text-[10px] font-bold text-primary-blue-light uppercase">Total Depositado</p>
-                            <p className="text-2xl font-bold text-primary-blue-light">{formatarMoeda(resumo.total_depositado)}</p>
+                            <div className="flex items-center gap-2 mb-2">
+                                <Building size={16} className="text-primary-blue-light" />
+                                <p className="text-[10px] font-bold text-primary-blue-light uppercase">Total Enviado ao Cofre</p>
+                            </div>
+                            <p className="text-2xl font-bold text-primary-blue-light">{formatarMoeda(resumo.total_enviado_cofre)}</p>
                             <p className="text-[10px] text-muted mt-1">
-                                Transferências do cofre para conta bancária
+                                {resumo.total_aprovados} de {resumo.total_fechamentos} fechamentos aprovados
                             </p>
                         </div>
                     </div>
 
-                    {/* Cards de Movimentação do Cofre */}
+                    {/* Segunda linha: Depósitos Realizados e Saldo no Cofre */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {/* Entradas Auditadas (Cofre) */}
-                        <div className="card p-4 bg-primary-blue-light/5 border border-primary-blue-light/20">
-                            <div className="flex items-center gap-2 mb-3">
-                                <ArrowUpCircle size={16} className="text-primary-blue-light" />
-                                <h3 className="text-sm font-bold text-primary-blue-light uppercase">Entradas Auditadas (Cofre)</h3>
+                        <div className="card p-4 bg-warning/5 border-warning/20">
+                            <div className="flex items-center gap-2 mb-2">
+                                <ArrowDownCircle size={16} className="text-warning" />
+                                <p className="text-[10px] font-bold text-warning uppercase">Depósitos Realizados</p>
                             </div>
-                            <div className="space-y-3">
-                                <div>
-                                    <p className="text-[10px] text-muted">Total enviado ao cofre</p>
-                                    <p className="text-2xl font-bold text-primary-blue-light">
-                                        {formatarMoeda(resumo.total_enviado_cofre)}
-                                    </p>
-                                    <p className="text-[10px] text-muted">
-                                        Referente a {resumo.total_aprovados} fechamentos aprovados
-                                    </p>
-                                </div>
-                                <div className="border-t border-primary-blue-light/20 pt-2">
-                                    <div className="flex justify-between text-xs">
-                                        <span className="text-muted">Por PIX:</span>
-                                        <span className="font-bold">{formatarMoeda(resumo.total_entradas_pix + resumo.total_entradas_bolao_pix)}</span>
-                                    </div>
-                                    <div className="flex justify-between text-xs">
-                                        <span className="text-muted">Por Dinheiro:</span>
-                                        <span className="font-bold">{formatarMoeda(resumo.total_entradas_dinheiro + resumo.total_entradas_bolao_dinheiro)}</span>
-                                    </div>
-                                </div>
-                            </div>
+                            <p className="text-2xl font-bold text-warning">{formatarMoeda(resumo.total_depositado)}</p>
+                            <p className="text-[10px] text-muted mt-1">Transferências do cofre para conta bancária</p>
                         </div>
 
-                        {/* Depósitos Realizados */}
-                        <div className="card p-4 bg-success/5 border border-success/20">
-                            <div className="flex items-center gap-2 mb-3">
-                                <ArrowDownCircle size={16} className="text-success" />
-                                <h3 className="text-sm font-bold text-success uppercase">Depósitos Realizados</h3>
+                        <div className="card p-4 bg-info/5 border-info/20">
+                            <div className="flex items-center gap-2 mb-2">
+                                <Coins size={16} className="text-info" />
+                                <p className="text-[10px] font-bold text-info uppercase">Saldo Atual no Cofre</p>
                             </div>
-                            <div className="space-y-3">
-                                <div>
-                                    <p className="text-[10px] text-muted">Total depositado na conta</p>
-                                    <p className="text-2xl font-bold text-success">
-                                        {formatarMoeda(resumo.total_depositado)}
-                                    </p>
-                                    <p className="text-[10px] text-muted">
-                                        Transferências realizadas no período
-                                    </p>
-                                </div>
-                                <div className="border-t border-success/20 pt-2">
-                                    <div className="flex justify-between text-xs">
-                                        <span className="text-muted">Saldo restante no cofre:</span>
-                                        <span className="font-bold text-warning">{formatarMoeda(resumo.saldo_real_cofre)}</span>
-                                    </div>
-                                </div>
-                            </div>
+                            <p className="text-2xl font-bold text-info">{formatarMoeda(resumo.saldo_real_cofre)}</p>
+                            <p className="text-[10px] text-muted mt-1">Saldo esperado: {formatarMoeda(resumo.saldo_esperado_cofre)}</p>
                         </div>
                     </div>
 
-                    {/* Conciliação do Cofre */}
+                    {/* Terceira linha: Conciliação do Cofre */}
                     <div className="card p-6">
                         <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
                             <Coins size={18} className="text-primary-blue-light" />
