@@ -396,7 +396,11 @@ export function useCaixa() {
             .eq('id', sessaoAtiva.id)
             .single();
             
-        if (sessaoError) throw sessaoError;
+        if (sessaoError) {
+            console.error('[useCaixa] Erro ao verificar status:', sessaoError);
+            throw sessaoError;
+        }
+        
         if (sessaoAtual.status !== 'aberto') {
             throw new Error('Sessão já foi fechada por outro processo');
         }
@@ -409,74 +413,42 @@ export function useCaixa() {
         const totalSaidasDinheiro = resumo.sangria + resumo.deposito + resumo.boleto + resumo.trocados;
         const saldoEsperadoDinheiro = sessaoAtiva.valor_inicial + totalEntradasDinheiro - totalSaidasDinheiro;
         
-        // Saldo declarado (usar o saldo esperado)
+        // Saldo declarado
         const dinheiroEmMaos = saldoEsperadoDinheiro;
         
-        // Calcular diferença
-        const diferenca = (valorCofre || 0) + (valorPixExterno || 0) - saldoEsperadoDinheiro;
-        
-        console.log('[useCaixa] Cálculos do fechamento:', {
-            valor_inicial: sessaoAtiva.valor_inicial,
-            resumo,
-            totalEntradas: entradas,
-            totalSaidas: saidas,
-            saldoCalculado: saldo,
-            totalEntradasDinheiro,
-            totalSaidasDinheiro,
-            saldoEsperadoDinheiro,
-            valorCofre,
-            valorPixExterno,
-            diferenca
-        });
-
-        // Preparar os dados para update - APENAS OS CAMPOS QUE EXISTEM NA TABELA
-        const updateData: any = {
+        console.log('[useCaixa] Dados para update:', {
+            sessaoId: sessaoAtiva.id,
             status: 'fechado',
             data_fechamento: new Date().toISOString(),
-            observacoes: observacoes || null,
             valor_enviado_cofre: valorCofre || 0,
             pix_externo_informado: valorPixExterno || 0,
-            dinheiro_em_maos: dinheiroEmMaos,
             valor_final_declarado: dinheiroEmMaos,
-            valor_final_calculado: sessaoAtiva.valor_inicial + saldo,
-            auditoria_status: 'pendente'
-        };
+            valor_final_calculado: sessaoAtiva.valor_inicial + saldo
+        });
 
-        // Adicionar campos de resumo apenas se existirem na tabela
-        // Vamos verificar se os campos existem, se não existir, não incluir
-        try {
-            updateData.resumo_entradas_pix = resumo.pix;
-            updateData.resumo_entradas_dinheiro = resumo.dinheiro;
-            updateData.resumo_entradas_bolao_dinheiro = resumo.bolao_dinheiro;
-            updateData.resumo_entradas_bolao_pix = resumo.bolao_pix;
-            updateData.resumo_saidas_sangria = resumo.sangria;
-            updateData.resumo_saidas_deposito = resumo.deposito;
-            updateData.resumo_saidas_boleto = resumo.boleto;
-            updateData.resumo_saidas_trocados = resumo.trocados;
-            updateData.resumo_total_entradas = entradas;
-            updateData.resumo_total_saidas = saidas;
-            updateData.saldo_esperado_dinheiro = saldoEsperadoDinheiro;
-            updateData.diferenca_caixa = diferenca;
-            updateData.fundo_caixa_devolvido = sessaoAtiva.tem_fundo_caixa !== false;
-        } catch (err) {
-            console.warn('[useCaixa] Alguns campos de resumo não existem na tabela:', err);
-        }
-
-        console.log('[useCaixa] Dados enviados para update:', updateData);
-
+        // Atualização SIMPLES - apenas os campos essenciais
         const { data, error } = await supabase
             .from('caixa_sessoes')
-            .update(updateData)
+            .update({
+                status: 'fechado',
+                data_fechamento: new Date().toISOString(),
+                observacoes: observacoes || null,
+                valor_enviado_cofre: valorCofre || 0,
+                pix_externo_informado: valorPixExterno || 0,
+                valor_final_declarado: dinheiroEmMaos,
+                valor_final_calculado: sessaoAtiva.valor_inicial + saldo
+            })
             .eq('id', sessaoAtiva.id)
-            .select()
-            .single();
+            .select();
 
         if (error) {
-            console.error('[useCaixa] Erro no update - detalhes:', {
+            console.error('[useCaixa] Erro no update - DETALHES COMPLETOS:', {
                 message: error.message,
                 code: error.code,
                 details: error.details,
-                hint: error.hint
+                hint: error.hint,
+                status: error.status,
+                statusText: error.statusText
             });
             throw error;
         }
@@ -485,8 +457,14 @@ export function useCaixa() {
         setSessaoAtiva(null);
         setMovimentacoes([]);
         return data;
-    } catch (err) {
-        console.error('[useCaixa] Erro ao fechar caixa:', err);
+    } catch (err: any) {
+        console.error('[useCaixa] Erro ao fechar caixa - CATCH:', {
+            message: err?.message,
+            code: err?.code,
+            details: err?.details,
+            hint: err?.hint,
+            fullError: err
+        });
         setError('Falha ao fechar o caixa. Tente novamente.');
         throw err;
     }
