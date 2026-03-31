@@ -13,9 +13,9 @@ import {
     DollarSign,
     Building,
     FileText,
-    ArrowRightLeft,
     TrendingUp,
-    TrendingDown
+    TrendingDown,
+    ArrowRightLeft
 } from 'lucide-react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import { useToast } from '@/contexts/ToastContext';
@@ -34,7 +34,7 @@ interface Fechamento {
     total_lancamentos: number;
     saldo_no_caixa: number;
     divergencia: number;
-    valor_na_conta: number; // NOVO CAMPO
+    valor_na_conta: number;
     total_pix: number;
     total_dinheiro: number;
     total_sangrias: number;
@@ -70,13 +70,6 @@ function ModalAuditoriaSimplificada({
     const [tipoDiferenca, setTipoDiferenca] = useState<'falta' | 'sobra'>('falta');
     const [observacoes, setObservacoes] = useState('');
 
-    // Cálculos baseados na interface Fechamento
-    const valorInicial = fechamento.valor_inicial;
-    const totalLancamentos = fechamento.total_lancamentos;
-    const valorFinalCalculado = valorInicial + totalLancamentos;
-    const totalCofre = fechamento.valor_cofre || 0;
-    const totalPixExterno = fechamento.valor_pix_externo || 0;
-    const saldoGeral = valorFinalCalculado + totalPixExterno;
     const totalEntradas = (fechamento.total_pix || 0) + (fechamento.total_dinheiro || 0);
     const totalSaidas = (fechamento.total_sangrias || 0) + 
                         (fechamento.total_depositos || 0) + 
@@ -94,7 +87,7 @@ function ModalAuditoriaSimplificada({
                     </button>
                 </div>
 
-                {/* Informações básicas em grid */}
+                {/* Informações básicas */}
                 <div className="grid grid-cols-2 gap-4 mb-6 p-4 rounded-xl bg-surface-subtle border border-border">
                     <div>
                         <p className="text-[10px] text-muted uppercase font-bold">Terminal</p>
@@ -178,14 +171,6 @@ function ModalAuditoriaSimplificada({
                                     <span className="font-bold font-mono">R$ {(fechamento.total_boletos || 0).toFixed(2)}</span>
                                 </div>
                             )}
-                            {(fechamento.total_trocados || 0) > 0 && (
-                                <div className="flex justify-between text-sm">
-                                    <span className="flex items-center gap-1 text-muted">
-                                        <ArrowRightLeft size={12} /> Trocados
-                                    </span>
-                                    <span className="font-bold font-mono">R$ {(fechamento.total_trocados || 0).toFixed(2)}</span>
-                                </div>
-                            )}
                             <div className="border-t border-danger/20 my-2" />
                             <div className="flex justify-between text-sm font-bold">
                                 <span>Total Saídas</span>
@@ -199,23 +184,32 @@ function ModalAuditoriaSimplificada({
                 <div className="grid grid-cols-2 gap-4 mb-6">
                     <div className="p-4 rounded-xl bg-bg-card border border-border">
                         <p className="text-[10px] text-muted uppercase font-bold">Valor Inicial</p>
-                        <p className="text-xl font-bold text-text-primary">R$ {valorInicial.toFixed(2)}</p>
+                        <p className="text-xl font-bold">R$ {(fechamento.valor_inicial || 0).toFixed(2)}</p>
                     </div>
                     <div className="p-4 rounded-xl bg-bg-card border border-border">
-                        <p className="text-[10px] text-muted uppercase font-bold">Total de Lançamentos</p>
-                        <p className="text-xl font-bold text-text-primary">R$ {totalLancamentos.toFixed(2)}</p>
+                        <p className="text-[10px] text-muted uppercase font-bold">Total Lançamentos</p>
+                        <p className="text-xl font-bold">R$ {(fechamento.total_lancamentos || 0).toFixed(2)}</p>
+                        <p className="text-[8px] text-muted">Entradas - Saídas</p>
                     </div>
                 </div>
 
-                {/* Informações do cofre e pix externo */}
-                <div className="grid grid-cols-2 gap-4 mb-6">
-                    <div className="p-4 rounded-xl bg-bg-card border border-border">
-                        <p className="text-[10px] text-muted uppercase font-bold">Total Cofre</p>
-                        <p className="text-xl font-bold text-primary">R$ {totalCofre.toFixed(2)}</p>
+                {/* Valor na Conta (desconsidera valor inicial) */}
+                <div className={`p-4 rounded-xl mb-6 ${
+                    (fechamento.valor_na_conta || 0) >= 0 
+                        ? 'bg-primary-blue-light/10 border border-primary-blue-light/20' 
+                        : 'bg-warning/10 border border-warning/20'
+                }`}>
+                    <p className="text-[10px] font-bold uppercase mb-1 text-primary-blue-light">
+                        💰 VALOR NA CONTA
+                    </p>
+                    <div className="flex justify-between items-center">
+                        <span className="text-sm text-muted">Total recebido (desconsidera fundo inicial)</span>
+                        <span className="text-2xl font-black text-primary-blue-light">
+                            R$ {(fechamento.valor_na_conta || 0).toFixed(2)}
+                        </span>
                     </div>
-                    <div className="p-4 rounded-xl bg-bg-card border border-border">
-                        <p className="text-[10px] text-muted uppercase font-bold">PIX Externo</p>
-                        <p className="text-xl font-bold text-primary">R$ {totalPixExterno.toFixed(2)}</p>
+                    <div className="text-[10px] text-muted mt-2">
+                        Cálculo: PIX Externo + (Entradas - Saídas)
                     </div>
                 </div>
 
@@ -223,82 +217,55 @@ function ModalAuditoriaSimplificada({
                 <div className="grid grid-cols-2 gap-4 mb-6">
                     <div className="p-4 rounded-xl bg-surface-subtle border border-border">
                         <p className="text-[10px] text-muted uppercase font-bold">Saldo Esperado</p>
-                        <p className="text-lg font-bold font-mono">
+                        <p className="text-lg font-bold">
                             R$ {(fechamento.saldo_esperado || 0).toFixed(2)}
                         </p>
+                        <p className="text-[8px] text-muted">Inclui fundo inicial</p>
                     </div>
                     <div className="p-4 rounded-xl bg-surface-subtle border border-border">
                         <p className="text-[10px] text-muted uppercase font-bold">Declarado pelo Operador</p>
-                        <p className="text-lg font-bold font-mono">
+                        <p className="text-lg font-bold">
                             R$ {(fechamento.saldo_no_caixa || 0).toFixed(2)}
                         </p>
+                        <p className="text-[8px] text-muted">Dinheiro em mãos + cofre</p>
                     </div>
                 </div>
 
-                {/* Saldo geral (final calculado + pix externo) */}
-               <div className={`p-4 rounded-xl mb-6 ${
-    (selectedFechamento.valor_na_conta || 0) >= 0 
-        ? 'bg-success/10 border border-success/20' 
-        : 'bg-warning/10 border border-warning/20'
-}`}>
-    <p className="text-[10px] font-bold uppercase mb-1">
-        💰 VALOR NA CONTA
-    </p>
-    <div className="flex justify-between items-center">
-        <span className="text-sm text-muted">Total recebido (desconsidera fundo inicial)</span>
-        <span className="text-2xl font-black text-primary">
-            R$ {(selectedFechamento.valor_na_conta || 0).toFixed(2)}
-        </span>
-    </div>
-    <div className="text-[10px] text-muted mt-2">
-        Cálculo: PIX Externo + (Entradas - Saídas)
-    </div>
-</div>
+                {/* Informações do Fechamento */}
+                <div className="p-4 rounded-xl bg-surface-subtle border border-border mb-6">
+                    <p className="text-[10px] font-bold text-muted uppercase mb-3">Informações do Fechamento</p>
+                    <div className="space-y-2">
+                        {(fechamento.valor_cofre || 0) > 0 && (
+                            <div className="flex justify-between text-sm">
+                                <span className="text-muted">Valor no cofre</span>
+                                <span className="font-bold">R$ {(fechamento.valor_cofre || 0).toFixed(2)}</span>
+                            </div>
+                        )}
+                        {(fechamento.valor_pix_externo || 0) > 0 && (
+                            <div className="flex justify-between text-sm">
+                                <span className="text-muted">PIX externo</span>
+                                <span className="font-bold">R$ {(fechamento.valor_pix_externo || 0).toFixed(2)}</span>
+                            </div>
+                        )}
+                        {fechamento.fundo_caixa_devolvido !== undefined && (
+                            <div className="flex justify-between text-sm">
+                                <span className="text-muted">Fundo de Caixa</span>
+                                <span className={`font-bold ${fechamento.fundo_caixa_devolvido ? 'text-success' : 'text-warning'}`}>
+                                    {fechamento.fundo_caixa_devolvido ? 'Devolvido' : 'Não devolvido'}
+                                </span>
+                            </div>
+                        )}
+                        <div className="flex justify-between text-sm pt-2 border-t border-border">
+                            <span className="text-muted">Entradas totais</span>
+                            <span className="font-bold">R$ {((fechamento.total_pix || 0) + (fechamento.total_dinheiro || 0)).toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                            <span className="text-muted">Saídas totais</span>
+                            <span className="font-bold">R$ {((fechamento.total_sangrias || 0) + (fechamento.total_depositos || 0) + (fechamento.total_boletos || 0) + (fechamento.total_trocados || 0)).toFixed(2)}</span>
+                        </div>
+                    </div>
+                </div>
 
-{/* Saldo Esperado (apenas para referência) */}
-<div className="grid grid-cols-2 gap-3 mb-4">
-    <div className="p-3 rounded-lg bg-bg-card border border-border">
-        <div className="text-[9px] text-muted uppercase font-bold">Saldo Esperado</div>
-        <div className="text-sm font-bold">R$ {(selectedFechamento.saldo_esperado || 0).toFixed(2)}</div>
-        <div className="text-[8px] text-muted">Inclui fundo inicial</div>
-    </div>
-    <div className="p-3 rounded-lg bg-bg-card border border-border">
-        <div className="text-[9px] text-muted uppercase font-bold">Declarado pelo Operador</div>
-        <div className="text-sm font-bold">R$ {(selectedFechamento.saldo_no_caixa || 0).toFixed(2)}</div>
-        <div className="text-[8px] text-muted">Dinheiro em mãos + cofre</div>
-    </div>
-</div>
-
-{/* Informações do Fechamento */}
-<div className="border-t border-border pt-3 mb-4">
-    <div className="text-[9px] text-muted font-bold uppercase mb-2">Informações do Fechamento</div>
-    <div className="space-y-2">
-        {(selectedFechamento.valor_cofre || 0) > 0 && (
-            <div className="flex justify-between text-xs">
-                <span className="text-muted">Valor no cofre</span>
-                <span className="font-bold">R$ {(selectedFechamento.valor_cofre || 0).toFixed(2)}</span>
-            </div>
-        )}
-        {(selectedFechamento.valor_pix_externo || 0) > 0 && (
-            <div className="flex justify-between text-xs">
-                <span className="text-muted">PIX externo</span>
-                <span className="font-bold">R$ {(selectedFechamento.valor_pix_externo || 0).toFixed(2)}</span>
-            </div>
-        )}
-        <div className="flex justify-between text-xs">
-            <span className="text-muted">Entradas totais</span>
-            <span className="font-bold">R$ {((selectedFechamento.total_pix || 0) + (selectedFechamento.total_dinheiro || 0)).toFixed(2)}</span>
-        </div>
-        <div className="flex justify-between text-xs">
-            <span className="text-muted">Saídas totais</span>
-            <span className="font-bold">R$ {((selectedFechamento.total_sangrias || 0) + (selectedFechamento.total_depositos || 0) + (selectedFechamento.total_boletos || 0)).toFixed(2)}</span>
-        </div>
-        <div className="flex justify-between text-xs pt-2 border-t border-border font-bold">
-            <span>Total de Lançamentos</span>
-            <span>R$ {(selectedFechamento.total_lancamentos || 0).toFixed(2)}</span>
-        </div>
-    </div>
-</div>
                 {/* Justificativa do Operador */}
                 {fechamento.justificativa && (
                     <div className="mb-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
@@ -307,7 +274,7 @@ function ModalAuditoriaSimplificada({
                     </div>
                 )}
 
-                {/* Ações (aprovar/rejeitar) */}
+                {/* Ações */}
                 {!modoRejeitar ? (
                     <div className="flex gap-4 justify-end">
                         <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
@@ -336,39 +303,13 @@ function ModalAuditoriaSimplificada({
                                 placeholder="Descreva o motivo da rejeição"
                             />
                         </div>
-
-                        <div className="form-group">
-                            <label className="text-sm font-bold">Diferença apurada (opcional)</label>
-                            <div className="flex gap-2 items-center">
-                                <select
-                                    className="input w-24"
-                                    value={tipoDiferenca}
-                                    onChange={(e) => setTipoDiferenca(e.target.value as any)}
-                                >
-                                    <option value="falta">Falta</option>
-                                    <option value="sobra">Sobra</option>
-                                </select>
-                                <MoneyInput
-                                    value={diferenca || 0}
-                                    onValueChange={(val) => setDiferenca(val)}
-                                    placeholder="0,00"
-                                    className="flex-1"
-                                />
-                            </div>
-                        </div>
-
                         <div className="flex gap-4 justify-end">
                             <button className="btn btn-ghost" onClick={() => setModoRejeitar(false)}>
                                 Voltar
                             </button>
                             <button
                                 className="btn btn-danger"
-                                onClick={() => {
-                                    const valorDiferenca = diferenca
-                                        ? (tipoDiferenca === 'falta' ? -diferenca : diferenca)
-                                        : undefined;
-                                    onRejeitar({ justificativa, diferenca: valorDiferenca });
-                                }}
+                                onClick={() => onRejeitar({ justificativa, diferenca })}
                             >
                                 Confirmar Rejeição
                             </button>
@@ -390,177 +331,127 @@ export function AuditoriaFechamentos() {
     const [showValidationModal, setShowValidationModal] = useState(false);
     const [filtroStatus, setFiltroStatus] = useState<'todos' | 'fechado' | 'divergente' | 'batido'>('todos');
 
-   const fetchHistorico = useCallback(async () => {
-    setLoading(true);
-    try {
-        let query = supabase
-            .from('caixa_sessoes')
-            .select(`
-                id,
-                data_turno,
-                data_fechamento,
-                terminal_id,
-                operador_id,
-                valor_inicial,
-                valor_final_declarado,
-                status,
-                observacoes,
-                valor_enviado_cofre,
-                pix_externo_informado,
-                fundo_caixa_devolvido,
-                resumo_entradas_pix,
-                resumo_entradas_dinheiro,
-                resumo_entradas_bolao_dinheiro,
-                resumo_entradas_bolao_pix,
-                resumo_saidas_sangria,
-                resumo_saidas_deposito,
-                resumo_saidas_boleto,
-                resumo_saidas_trocados,
-                resumo_total_entradas,
-                resumo_total_saidas
-            `)
-            .neq('status', 'aberto')
-            .order('created_at', { ascending: false });
+    const fetchHistorico = useCallback(async () => {
+        setLoading(true);
+        try {
+            let query = supabase
+                .from('caixa_sessoes')
+                .select(`
+                    id,
+                    data_turno,
+                    data_fechamento,
+                    terminal_id,
+                    operador_id,
+                    valor_inicial,
+                    valor_final_declarado,
+                    status,
+                    observacoes,
+                    valor_enviado_cofre,
+                    pix_externo_informado,
+                    fundo_caixa_devolvido,
+                    resumo_entradas_pix,
+                    resumo_entradas_dinheiro,
+                    resumo_entradas_bolao_dinheiro,
+                    resumo_entradas_bolao_pix,
+                    resumo_saidas_sangria,
+                    resumo_saidas_deposito,
+                    resumo_saidas_boleto,
+                    resumo_saidas_trocados,
+                    resumo_total_entradas,
+                    resumo_total_saidas
+                `)
+                .neq('status', 'aberto')
+                .order('created_at', { ascending: false });
 
-        if (filtroStatus !== 'todos') {
-            let statusFilter: string;
-            if (filtroStatus === 'fechado') statusFilter = 'fechado';
-            else if (filtroStatus === 'batido') statusFilter = 'conferido';
-            else if (filtroStatus === 'divergente') statusFilter = 'discrepante';
-            else statusFilter = filtroStatus;
-            query = query.eq('status', statusFilter);
+            if (filtroStatus !== 'todos') {
+                let statusFilter: string;
+                if (filtroStatus === 'fechado') statusFilter = 'fechado';
+                else if (filtroStatus === 'batido') statusFilter = 'conferido';
+                else if (filtroStatus === 'divergente') statusFilter = 'discrepante';
+                else statusFilter = filtroStatus;
+                query = query.eq('status', statusFilter);
+            }
+
+            const { data: sessoes, error } = await query;
+            if (error) throw error;
+
+            const fechamentosProcessados: Fechamento[] = [];
+
+            for (const sessao of (sessoes || [])) {
+                // Buscar operador nome
+                let operadorNome = 'Sistema';
+                if (sessao.operador_id) {
+                    const { data: userData } = await supabase
+                        .from('usuarios')
+                        .select('nome')
+                        .eq('id', sessao.operador_id)
+                        .single();
+                    if (userData) operadorNome = userData.nome;
+                }
+
+                // Totais
+                const totalPix = (sessao.resumo_entradas_pix || 0) + (sessao.resumo_entradas_bolao_pix || 0);
+                const totalDinheiro = (sessao.resumo_entradas_dinheiro || 0) + (sessao.resumo_entradas_bolao_dinheiro || 0);
+                const totalEntradas = sessao.resumo_total_entradas || (totalPix + totalDinheiro);
+                const totalSaidas = sessao.resumo_total_saidas || 0;
+                
+                // Total de lançamentos = entradas - saídas
+                const totalLancamentos = totalEntradas - totalSaidas;
+                
+                // Saldo esperado = valor inicial + total de lançamentos
+                const saldoEsperado = (sessao.valor_inicial || 0) + totalLancamentos;
+                
+                // Valor na conta = PIX externo + total de lançamentos (desconsidera valor inicial)
+                const valorNaConta = (sessao.pix_externo_informado || 0) + totalLancamentos;
+                
+                // Saldo declarado pelo operador
+                const saldoDeclarado = sessao.valor_final_declarado || 0;
+                
+                // Divergência (mantida para referência)
+                const divergencia = saldoDeclarado - saldoEsperado;
+                
+                // Informações do cofre
+                const valorCofre = sessao.valor_enviado_cofre || 0;
+                const pixExterno = sessao.pix_externo_informado || 0;
+
+                fechamentosProcessados.push({
+                    id: sessao.id,
+                    data_turno: sessao.data_turno,
+                    data_fechamento: sessao.data_fechamento,
+                    terminal_id: sessao.terminal_id || 'TFL-WEB',
+                    operador_id: sessao.operador_id || 'Sistema',
+                    operador_nome: operadorNome,
+                    valor_inicial: sessao.valor_inicial || 0,
+                    total_lancamentos: totalLancamentos,
+                    saldo_no_caixa: saldoDeclarado,
+                    divergencia: divergencia,
+                    valor_na_conta: valorNaConta,
+                    total_pix: totalPix,
+                    total_dinheiro: totalDinheiro,
+                    total_sangrias: sessao.resumo_saidas_sangria || 0,
+                    total_depositos: sessao.resumo_saidas_deposito || 0,
+                    total_boletos: sessao.resumo_saidas_boleto || 0,
+                    total_trocados: sessao.resumo_saidas_trocados || 0,
+                    status_validacao: sessao.status,
+                    tipo: 'tfl',
+                    justificativa: sessao.observacoes,
+                    valor_cofre: valorCofre,
+                    valor_pix_externo: pixExterno,
+                    fundo_caixa_devolvido: sessao.fundo_caixa_devolvido,
+                    saldo_esperado: saldoEsperado
+                });
+            }
+
+            setFechamentos(fechamentosProcessados);
+            console.log('[fetchHistorico] Fechamentos processados:', fechamentosProcessados.length);
+            
+        } catch (err: any) {
+            console.error('Erro ao carregar histórico:', err);
+            toast({ message: 'Erro ao carregar fechamentos: ' + (err.message || 'Erro desconhecido'), type: 'error' });
+        } finally {
+            setLoading(false);
         }
-
-        const { data: sessoes, error } = await query;
-        if (error) throw error;
-
-        const fechamentosProcessados: Fechamento[] = [];
-
-        for (const sessao of (sessoes || [])) {
-            // Totais
-            const totalPix = (sessao.resumo_entradas_pix || 0) + (sessao.resumo_entradas_bolao_pix || 0);
-            const totalDinheiro = (sessao.resumo_entradas_dinheiro || 0) + (sessao.resumo_entradas_bolao_dinheiro || 0);
-            const totalEntradas = sessao.resumo_total_entradas || (totalPix + totalDinheiro);
-            const totalSaidas = sessao.resumo_total_saidas || 0;
-            
-            // Total de lançamentos = entradas - saídas
-            const totalLancamentos = totalEntradas - totalSaidas;
-            
-            // Saldo esperado = valor inicial + total de lançamentos
-            const saldoEsperado = (sessao.valor_inicial || 0) + totalLancamentos;
-            
-            // Valor na conta = PIX externo + total de lançamentos (desconsidera valor inicial)
-            const valorNaConta = (sessao.pix_externo_informado || 0) + totalLancamentos;
-            
-            // Saldo declarado pelo operador = valor final declarado
-            const saldoDeclarado = sessao.valor_final_declarado || 0;
-            
-            // Divergência = valor declarado - saldo esperado (mantido para referência)
-            const divergencia = saldoDeclarado - saldoEsperado;
-            
-            // Informações do cofre
-            const valorCofre = sessao.valor_enviado_cofre || 0;
-            const pixExterno = sessao.pix_externo_informado || 0;
-
-            fechamentosProcessados.push({
-                id: sessao.id,
-                data_turno: sessao.data_turno,
-                data_fechamento: sessao.data_fechamento,
-                terminal_id: sessao.terminal_id || 'TFL-WEB',
-                operador_id: sessao.operador_id || 'Sistema',
-                operador_nome: sessao.operador_id ? `${sessao.operador_id.split('-')[0]}...` : 'Sistema',
-                valor_inicial: sessao.valor_inicial || 0,
-                total_lancamentos: totalLancamentos,
-                saldo_no_caixa: saldoDeclarado,
-                divergencia: divergencia,
-                valor_na_conta: valorNaConta, // NOVO CAMPO
-                total_pix: totalPix,
-                total_dinheiro: totalDinheiro,
-                total_sangrias: sessao.resumo_saidas_sangria || 0,
-                total_depositos: sessao.resumo_saidas_deposito || 0,
-                total_boletos: sessao.resumo_saidas_boleto || 0,
-                total_trocados: sessao.resumo_saidas_trocados || 0,
-                status_validacao: sessao.status,
-                tipo: 'tfl',
-                justificativa: sessao.observacoes,
-                valor_cofre: valorCofre,
-                valor_pix_externo: pixExterno,
-                fundo_caixa_devolvido: sessao.fundo_caixa_devolvido,
-                saldo_esperado: saldoEsperado
-            });
-        }
-
-        setFechamentos(fechamentosProcessados);
-        
-    } catch (err: any) {
-        console.error('Erro ao carregar histórico:', err);
-        toast({ message: 'Erro ao carregar fechamentos: ' + (err.message || 'Erro desconhecido'), type: 'error' });
-    } finally {
-        setLoading(false);
-    }
-}, [supabase, filtroStatus, toast]);
-
-        // ---------- Normalizar dados Bolão ----------
-        const fechamentosBolao: Fechamento[] = (dataBolao || []).map((f: any) => {
-            const totalLancamentos = f.total_vendido || 0;
-            const saldoNoCaixa = (f.total_dinheiro || 0) + (f.total_pix || 0);
-            const divergencia = totalLancamentos - saldoNoCaixa;
-            return {
-                id: f.id,
-                data_turno: f.data_fechamento,
-                data_fechamento: f.data_fechamento,
-                terminal_id: 'Bolão',
-                operador_id: '',
-                operador_nome: 'Sistema Bolão',
-                valor_inicial: 0,
-                total_lancamentos: totalLancamentos,
-                saldo_no_caixa: saldoNoCaixa,
-                divergencia: divergencia,
-                total_pix: f.total_pix || 0,
-                total_dinheiro: f.total_dinheiro || 0,
-                total_sangrias: 0,
-                total_depositos: 0,
-                total_boletos: 0,
-                total_trocados: 0,
-                status_validacao: f.status_validacao || 'pendente',
-                tipo: 'bolao',
-                justificativa: f.observacoes_gerente,
-                valor_cofre: undefined,
-                valor_pix_externo: undefined,
-                fundo_caixa_devolvido: undefined,
-                saldo_esperado: undefined,
-                diferenca_apurada: undefined,
-                justificativa_divergencia: undefined
-            };
-        });
-
-        const todosFechamentos = [...fechamentosTFL, ...fechamentosBolao];
-        setFechamentos(todosFechamentos);
-        
-        // Log para debug
-        console.log('[fetchHistorico] Fechamentos carregados:', fechamentosTFL.length, 'TFL,', fechamentosBolao.length, 'Bolão');
-        if (fechamentosTFL.length > 0) {
-            console.log('[fetchHistorico] Primeiro fechamento TFL:', {
-                id: fechamentosTFL[0].id,
-                total_pix: fechamentosTFL[0].total_pix,
-                total_dinheiro: fechamentosTFL[0].total_dinheiro,
-                total_sangrias: fechamentosTFL[0].total_sangrias,
-                total_boletos: fechamentosTFL[0].total_boletos,
-                total_lancamentos: fechamentosTFL[0].total_lancamentos,
-                saldo_esperado: fechamentosTFL[0].saldo_esperado,
-                saldo_no_caixa: fechamentosTFL[0].saldo_no_caixa,
-                divergencia: fechamentosTFL[0].divergencia
-            });
-        }
-        
-    } catch (err: any) {
-        console.error('Erro ao carregar histórico:', err);
-        const errorMsg = err?.message || err?.error_description || err?.details || 'Erro desconhecido';
-        toast({ message: 'Erro ao carregar fechamentos: ' + errorMsg, type: 'error' });
-    } finally {
-        setLoading(false);
-    }
-}, [supabase, filtroStatus, toast]);
+    }, [supabase, filtroStatus, toast]);
 
     useEffect(() => {
         fetchHistorico();
@@ -619,7 +510,7 @@ export function AuditoriaFechamentos() {
                     </div>
                     <div>
                         <h3 className="text-lg font-bold">Auditoria de Fechamentos</h3>
-                        <p className="text-xs text-muted">Validação de encerramentos de turno (TFL + Bolão)</p>
+                        <p className="text-xs text-muted">Validação de encerramentos de turno</p>
                     </div>
                 </div>
                 <div className="flex gap-2">
@@ -629,9 +520,9 @@ export function AuditoriaFechamentos() {
                         onChange={(e) => setFiltroStatus(e.target.value as any)}
                     >
                         <option value="todos">Todos os Encerramentos</option>
-                        <option value="fechado">Pendentes (Aguardando Auditoria)</option>
-                        <option value="batido">Batidos (Aprovados)</option>
-                        <option value="divergente">Divergentes (Reprovados)</option>
+                        <option value="fechado">Pendentes</option>
+                        <option value="batido">Aprovados</option>
+                        <option value="divergente">Divergentes</option>
                     </select>
                     <button onClick={fetchHistorico} className="btn btn-ghost btn-sm">
                         <RefreshCw size={14} /> Atualizar
@@ -657,7 +548,7 @@ export function AuditoriaFechamentos() {
                                         <th>Terminal</th>
                                         <th>Operador</th>
                                         <th>Status</th>
-                                        <th className="text-right">Diferença</th>
+                                        <th className="text-right">Valor na Conta</th>
                                         <th style={{ width: '50px' }}></th>
                                     </tr>
                                 </thead>
@@ -686,9 +577,9 @@ export function AuditoriaFechamentos() {
                                             <td className="text-xs opacity-60">{f.operador_nome}</td>
                                             <td>{getStatusBadge(f.status_validacao)}</td>
                                             <td className={`font-bold text-right ${
-                                                Math.abs(f.divergencia) < 0.01 ? 'text-success' : 'text-danger'
+                                                (f.valor_na_conta || 0) >= 0 ? 'text-success' : 'text-danger'
                                             }`}>
-                                                {f.divergencia > 0 ? '+' : ''}R$ {f.divergencia.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                R$ {(f.valor_na_conta || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                             </td>
                                             <td className="text-right">
                                                 <ChevronRight size={16} className="text-muted" />
@@ -731,9 +622,8 @@ export function AuditoriaFechamentos() {
                             </div>
                         </div>
 
-                        {/* Detalhamento de Entradas e Saídas */}
+                        {/* Entradas e Saídas */}
                         <div className="grid grid-cols-2 gap-3 mb-4">
-                            {/* Entradas */}
                             <div className="p-3 rounded-xl bg-success/5 border border-success/20">
                                 <div className="flex items-center gap-1 mb-2">
                                     <TrendingUp size={12} className="text-success" />
@@ -741,50 +631,21 @@ export function AuditoriaFechamentos() {
                                 </div>
                                 <div className="space-y-1">
                                     <div className="flex justify-between text-xs">
-                                        <span className="flex items-center gap-1 text-muted"><Smartphone size={10} /> PIX</span>
-                                        <span className="font-bold">R$ {(selectedFechamento.total_pix || 0).toFixed(2)}</span>
-                                    </div>
-                                    <div className="flex justify-between text-xs">
-                                        <span className="flex items-center gap-1 text-muted"><DollarSign size={10} /> Dinheiro</span>
-                                        <span className="font-bold">R$ {(selectedFechamento.total_dinheiro || 0).toFixed(2)}</span>
-                                    </div>
-                                    <div className="border-t border-success/20 my-1" />
-                                    <div className="flex justify-between text-xs font-bold">
-                                        <span>Total</span>
-                                        <span className="text-success">R$ {((selectedFechamento.total_pix || 0) + (selectedFechamento.total_dinheiro || 0)).toFixed(2)}</span>
+                                        <span className="text-muted">Total Entradas</span>
+                                        <span className="font-bold text-success">R$ {((selectedFechamento.total_pix || 0) + (selectedFechamento.total_dinheiro || 0)).toFixed(2)}</span>
                                     </div>
                                 </div>
                             </div>
 
-                            {/* Saídas */}
                             <div className="p-3 rounded-xl bg-danger/5 border border-danger/20">
                                 <div className="flex items-center gap-1 mb-2">
                                     <TrendingDown size={12} className="text-danger" />
                                     <span className="text-[9px] text-danger uppercase font-bold">Saídas</span>
                                 </div>
                                 <div className="space-y-1">
-                                    {(selectedFechamento.total_sangrias || 0) > 0 && (
-                                        <div className="flex justify-between text-xs">
-                                            <span className="flex items-center gap-1 text-muted"><Building size={10} /> Sangria</span>
-                                            <span className="font-bold">R$ {(selectedFechamento.total_sangrias || 0).toFixed(2)}</span>
-                                        </div>
-                                    )}
-                                    {(selectedFechamento.total_depositos || 0) > 0 && (
-                                        <div className="flex justify-between text-xs">
-                                            <span className="flex items-center gap-1 text-muted"><Building size={10} /> Depósito</span>
-                                            <span className="font-bold">R$ {(selectedFechamento.total_depositos || 0).toFixed(2)}</span>
-                                        </div>
-                                    )}
-                                    {(selectedFechamento.total_boletos || 0) > 0 && (
-                                        <div className="flex justify-between text-xs">
-                                            <span className="flex items-center gap-1 text-muted"><FileText size={10} /> Boleto</span>
-                                            <span className="font-bold">R$ {(selectedFechamento.total_boletos || 0).toFixed(2)}</span>
-                                        </div>
-                                    )}
-                                    <div className="border-t border-danger/20 my-1" />
-                                    <div className="flex justify-between text-xs font-bold">
-                                        <span>Total</span>
-                                        <span className="text-danger">R$ {((selectedFechamento.total_sangrias || 0) + (selectedFechamento.total_depositos || 0) + (selectedFechamento.total_boletos || 0) + (selectedFechamento.total_trocados || 0)).toFixed(2)}</span>
+                                    <div className="flex justify-between text-xs">
+                                        <span className="text-muted">Total Saídas</span>
+                                        <span className="font-bold text-danger">R$ {((selectedFechamento.total_sangrias || 0) + (selectedFechamento.total_depositos || 0) + (selectedFechamento.total_boletos || 0) + (selectedFechamento.total_trocados || 0)).toFixed(2)}</span>
                                     </div>
                                 </div>
                             </div>
@@ -799,6 +660,41 @@ export function AuditoriaFechamentos() {
                             <div className="p-3 rounded-lg bg-bg-card border border-border">
                                 <div className="text-[9px] text-muted uppercase font-bold">Total Lançamentos</div>
                                 <div className="text-base font-bold">R$ {(selectedFechamento.total_lancamentos || 0).toFixed(2)}</div>
+                                <div className="text-[8px] text-muted">Entradas - Saídas</div>
+                            </div>
+                        </div>
+
+                        {/* Valor na Conta */}
+                        <div className={`p-4 rounded-xl mb-4 ${
+                            (selectedFechamento.valor_na_conta || 0) >= 0 
+                                ? 'bg-primary-blue-light/10 border border-primary-blue-light/20' 
+                                : 'bg-warning/10 border border-warning/20'
+                        }`}>
+                            <p className="text-[10px] font-bold uppercase mb-1 text-primary-blue-light">
+                                💰 VALOR NA CONTA
+                            </p>
+                            <div className="flex justify-between items-center">
+                                <span className="text-xs text-muted">Total recebido (desconsidera fundo inicial)</span>
+                                <span className="text-xl font-black text-primary-blue-light">
+                                    R$ {(selectedFechamento.valor_na_conta || 0).toFixed(2)}
+                                </span>
+                            </div>
+                            <div className="text-[9px] text-muted mt-1">
+                                PIX Externo + (Entradas - Saídas)
+                            </div>
+                        </div>
+
+                        {/* Saldo Esperado e Declarado */}
+                        <div className="grid grid-cols-2 gap-3 mb-4">
+                            <div className="p-3 rounded-lg bg-surface-subtle border border-border">
+                                <div className="text-[9px] text-muted uppercase font-bold">Saldo Esperado</div>
+                                <div className="text-sm font-bold">R$ {(selectedFechamento.saldo_esperado || 0).toFixed(2)}</div>
+                                <div className="text-[8px] text-muted">Inclui fundo inicial</div>
+                            </div>
+                            <div className="p-3 rounded-lg bg-surface-subtle border border-border">
+                                <div className="text-[9px] text-muted uppercase font-bold">Declarado pelo Operador</div>
+                                <div className="text-sm font-bold">R$ {(selectedFechamento.saldo_no_caixa || 0).toFixed(2)}</div>
+                                <div className="text-[8px] text-muted">Dinheiro em mãos + cofre</div>
                             </div>
                         </div>
 
@@ -826,32 +722,10 @@ export function AuditoriaFechamentos() {
                                         </span>
                                     </div>
                                 )}
-                                <div className="flex justify-between text-xs pt-2 border-t border-border">
-                                    <span className="text-muted font-bold">Saldo Esperado</span>
-                                    <span className="font-bold">R$ {(selectedFechamento.saldo_esperado || 0).toFixed(2)}</span>
-                                </div>
-                                <div className="flex justify-between text-xs">
-                                    <span className="text-muted">Declarado pelo Operador</span>
-                                    <span className="font-bold">R$ {(selectedFechamento.saldo_no_caixa || 0).toFixed(2)}</span>
-                                </div>
                             </div>
                         </div>
 
-                        {/* Divergência */}
-                        {Math.abs(selectedFechamento.divergencia) > 0.01 && (
-                            <div className="bg-danger/10 border border-danger/20 p-3 rounded-lg flex items-start gap-2 mb-4">
-                                <AlertTriangle className="text-danger shrink-0" size={16} />
-                                <div>
-                                    <div className="text-xs font-bold text-danger">Divergência Detectada</div>
-                                    <div className="text-[10px] text-muted mt-1">
-                                        Diferença de R$ {Math.abs(selectedFechamento.divergencia).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                        {selectedFechamento.divergencia > 0 ? ' (sobra)' : ' (falta)'}
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Justificativa do Operador */}
+                        {/* Justificativa */}
                         {selectedFechamento.justificativa && (
                             <div className="mb-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
                                 <span className="text-[9px] text-yellow-500 font-bold uppercase">Justificativa do Operador</span>
@@ -873,27 +747,22 @@ export function AuditoriaFechamentos() {
                                             ? 'Avaliar Correção'
                                             : 'Auditar Agora'}
                                 </button>
-                                <p className="text-xs text-center text-muted mt-2">Valide os valores informados</p>
                             </div>
                         )}
                     </div>
                 )}
             </div>
 
-            {/* Modal de Auditoria Simplificada */}
+            {/* Modal de Auditoria */}
             {showValidationModal && selectedFechamento && (
                 <ModalAuditoriaSimplificada
                     fechamento={selectedFechamento}
                     onClose={handleCloseModal}
                     onAprovar={async (obs) => {
-                        const tabela = selectedFechamento.tipo === 'tfl' ? 'caixa_sessoes' : 'caixa_bolao_sessoes';
-                        const statusField = selectedFechamento.tipo === 'tfl' ? 'status' : 'status_validacao';
-                        const novoStatus = selectedFechamento.tipo === 'tfl' ? 'conferido' : 'aprovado';
-
                         const { error } = await supabase
-                            .from(tabela)
+                            .from('caixa_sessoes')
                             .update({
-                                [statusField]: novoStatus,
+                                status: 'conferido',
                                 observacoes_gerente: obs,
                                 data_validacao: new Date().toISOString()
                             })
@@ -909,14 +778,10 @@ export function AuditoriaFechamentos() {
                         }
                     }}
                     onRejeitar={async ({ justificativa, diferenca }) => {
-                        const tabela = selectedFechamento.tipo === 'tfl' ? 'caixa_sessoes' : 'caixa_bolao_sessoes';
-                        const statusField = selectedFechamento.tipo === 'tfl' ? 'status' : 'status_validacao';
-                        const novoStatus = selectedFechamento.tipo === 'tfl' ? 'discrepante' : 'rejeitado';
-
                         const { error } = await supabase
-                            .from(tabela)
+                            .from('caixa_sessoes')
                             .update({
-                                [statusField]: novoStatus,
+                                status: 'discrepante',
                                 observacoes_gerente: justificativa,
                                 diferenca_apurada: diferenca || 0,
                                 data_validacao: new Date().toISOString()
