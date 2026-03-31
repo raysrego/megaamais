@@ -8,7 +8,8 @@ import { revalidatePath } from 'next/cache';
 export async function registrarDepositoCofre(
     valor: number,
     contaBancariaId: string,
-    observacoes?: string
+    observacoes?: string,
+    dataDeposito?: string
 ) {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -21,6 +22,7 @@ export async function registrarDepositoCofre(
         p_conta_id: contaBancariaId,
         p_usuario_id: user.id,
         p_observacoes: observacoes ?? null,
+        p_data_deposito: dataDeposito ?? null,
     });
 
     if (error) throw new Error(`Erro ao registrar depósito: ${error.message}`);

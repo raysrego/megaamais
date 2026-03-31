@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Vault, CircleArrowUp as ArrowUpCircle, CircleArrowDown as ArrowDownCircle, Building, Loader as Loader2, DollarSign, CircleCheck as CheckCircle2, Clock, ExternalLink, Plus } from 'lucide-react';
+import { Vault, CircleArrowUp as ArrowUpCircle, CircleArrowDown as ArrowDownCircle, Building, Loader as Loader2, DollarSign, CircleCheck as CheckCircle2, Clock, ExternalLink, Plus, ListFilter as Filter, Calendar } from 'lucide-react';
 import {
     getSaldoCofre,
     getEntradasCofrePorFechamento,
@@ -17,14 +17,21 @@ export default function CofrePage() {
     const [saldo, setSaldo] = useState(0);
     const [entradas, setEntradas] = useState<any[]>([]);
     const [historico, setHistorico] = useState<any[]>([]);
+    const [historicoFiltrado, setHistoricoFiltrado] = useState<any[]>([]);
     const [contas, setContas] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [showDeposito, setShowDeposito] = useState(false);
     const [depositoValor, setDepositoValor] = useState(0);
     const [depositoConta, setDepositoConta] = useState('');
+    const [depositoData, setDepositoData] = useState(new Date().toISOString().split('T')[0]);
     const [depositoObs, setDepositoObs] = useState('');
     const [depositing, setDepositing] = useState(false);
     const [tab, setTab] = useState<'entradas' | 'historico'>('entradas');
+
+    // Filtros do histórico
+    const [filtroTipo, setFiltroTipo] = useState('todos');
+    const [filtroDataInicio, setFiltroDataInicio] = useState('');
+    const [filtroDataFim, setFiltroDataFim] = useState('');
 
     const carregarDados = useCallback(async () => {
         setLoading(true);
@@ -48,18 +55,53 @@ export default function CofrePage() {
 
     useEffect(() => { carregarDados(); }, [carregarDados]);
 
+    // Aplicar filtros no histórico
+    useEffect(() => {
+        let filtered = [...historico];
+
+        // Filtro por tipo
+        if (filtroTipo !== 'todos') {
+            if (filtroTipo === 'entrada') {
+                filtered = filtered.filter(m => m.tipo.includes('entrada'));
+            } else if (filtroTipo === 'saida') {
+                filtered = filtered.filter(m => m.tipo.includes('saida'));
+            } else {
+                filtered = filtered.filter(m => m.tipo === filtroTipo);
+            }
+        }
+
+        // Filtro por data início
+        if (filtroDataInicio) {
+            filtered = filtered.filter(m => {
+                const dataMovimentacao = new Date(m.data_movimentacao || m.created_at);
+                return dataMovimentacao >= new Date(filtroDataInicio);
+            });
+        }
+
+        // Filtro por data fim
+        if (filtroDataFim) {
+            filtered = filtered.filter(m => {
+                const dataMovimentacao = new Date(m.data_movimentacao || m.created_at);
+                return dataMovimentacao <= new Date(filtroDataFim + 'T23:59:59');
+            });
+        }
+
+        setHistoricoFiltrado(filtered);
+    }, [historico, filtroTipo, filtroDataInicio, filtroDataFim]);
+
     const handleDeposito = async () => {
-        if (depositoValor <= 0 || !depositoConta) {
-            toast({ message: 'Informe valor e conta destino', type: 'warning' });
+        if (depositoValor <= 0 || !depositoConta || !depositoData) {
+            toast({ message: 'Informe valor, data e conta destino', type: 'warning' });
             return;
         }
         setDepositing(true);
         try {
-            await registrarDepositoCofre(depositoValor, depositoConta, depositoObs || undefined);
-            toast({ message: 'Depósito registrado!', type: 'success' });
+            await registrarDepositoCofre(depositoValor, depositoConta, depositoObs || undefined, depositoData);
+            toast({ message: 'Depósito registrado com sucesso!', type: 'success' });
             setShowDeposito(false);
             setDepositoValor(0);
             setDepositoConta('');
+            setDepositoData(new Date().toISOString().split('T')[0]);
             setDepositoObs('');
             carregarDados();
         } catch (err: any) {
@@ -67,6 +109,12 @@ export default function CofrePage() {
         } finally {
             setDepositing(false);
         }
+    };
+
+    const limparFiltros = () => {
+        setFiltroTipo('todos');
+        setFiltroDataInicio('');
+        setFiltroDataFim('');
     };
 
     if (loading) {
@@ -176,44 +224,108 @@ export default function CofrePage() {
 
             {/* Tab: Histórico */}
             {tab === 'historico' && (
-                <div className="space-y-2">
-                    {historico.length === 0 ? (
-                        <p className="text-center text-muted text-sm py-8">Nenhuma movimentação.</p>
-                    ) : (
-                        historico.map((m: any) => {
-                            const isEntrada = m.tipo.includes('entrada');
-                            return (
-                                <div key={m.id} className="p-3 rounded-xl border border-border bg-bg-card flex items-center justify-between">
-                                    <div className="flex items-center gap-3">
-                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                                            isEntrada ? 'bg-success/10' : 'bg-danger/10'
-                                        }`}>
-                                            {isEntrada ? (
-                                                <ArrowUpCircle size={14} className="text-success" />
-                                            ) : (
-                                                <ArrowDownCircle size={14} className="text-danger" />
-                                            )}
+                <div className="space-y-4">
+                    {/* Filtros */}
+                    <div className="p-4 rounded-xl border border-border bg-bg-card">
+                        <div className="flex items-center gap-2 mb-3">
+                            <Filter size={16} className="text-primary-blue-light" />
+                            <h3 className="text-sm font-bold">Filtros</h3>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                            <div>
+                                <label className="text-[10px] font-bold text-muted uppercase block mb-1">Tipo de Movimentação</label>
+                                <select
+                                    value={filtroTipo}
+                                    onChange={e => setFiltroTipo(e.target.value)}
+                                    className="input w-full text-sm"
+                                >
+                                    <option value="todos">Todas</option>
+                                    <option value="entrada">Todas Entradas</option>
+                                    <option value="saida">Todas Saídas</option>
+                                    <option value="entrada_fechamento">Fechamento de Turno</option>
+                                    <option value="entrada_sangria">Sangria Recebida</option>
+                                    <option value="saida_deposito">Depósito Bancário</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="text-[10px] font-bold text-muted uppercase block mb-1">Data Início</label>
+                                <input
+                                    type="date"
+                                    value={filtroDataInicio}
+                                    onChange={e => setFiltroDataInicio(e.target.value)}
+                                    className="input w-full text-sm"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="text-[10px] font-bold text-muted uppercase block mb-1">Data Fim</label>
+                                <input
+                                    type="date"
+                                    value={filtroDataFim}
+                                    onChange={e => setFiltroDataFim(e.target.value)}
+                                    className="input w-full text-sm"
+                                />
+                            </div>
+
+                            <div className="flex items-end">
+                                <button
+                                    onClick={limparFiltros}
+                                    className="btn btn-ghost w-full text-sm"
+                                >
+                                    Limpar Filtros
+                                </button>
+                            </div>
+                        </div>
+
+                        <p className="text-[10px] text-muted mt-2">
+                            {historicoFiltrado.length} de {historico.length} movimentações
+                        </p>
+                    </div>
+
+                    {/* Lista de Movimentações */}
+                    <div className="space-y-2">
+                        {historicoFiltrado.length === 0 ? (
+                            <p className="text-center text-muted text-sm py-8">
+                                {historico.length === 0 ? 'Nenhuma movimentação.' : 'Nenhuma movimentação corresponde aos filtros aplicados.'}
+                            </p>
+                        ) : (
+                            historicoFiltrado.map((m: any) => {
+                                const isEntrada = m.tipo.includes('entrada');
+                                return (
+                                    <div key={m.id} className="p-3 rounded-xl border border-border bg-bg-card flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                                                isEntrada ? 'bg-success/10' : 'bg-danger/10'
+                                            }`}>
+                                                {isEntrada ? (
+                                                    <ArrowUpCircle size={14} className="text-success" />
+                                                ) : (
+                                                    <ArrowDownCircle size={14} className="text-danger" />
+                                                )}
+                                            </div>
+                                            <div>
+                                                <p className="text-sm font-medium">
+                                                    {m.tipo === 'entrada_fechamento' ? 'Fechamento de Turno' :
+                                                     m.tipo === 'entrada_sangria' ? 'Sangria Recebida' :
+                                                     m.tipo === 'saida_deposito' ? 'Depósito Bancário' :
+                                                     m.tipo}
+                                                </p>
+                                                <p className="text-[10px] text-muted">
+                                                    {new Date(m.data_movimentacao || m.created_at).toLocaleString('pt-BR')}
+                                                    {m.observacoes && ` — ${m.observacoes}`}
+                                                </p>
+                                            </div>
                                         </div>
-                                        <div>
-                                            <p className="text-sm font-medium">
-                                                {m.tipo === 'entrada_fechamento' ? 'Fechamento de Turno' :
-                                                 m.tipo === 'entrada_sangria' ? 'Sangria Recebida' :
-                                                 m.tipo === 'saida_deposito' ? 'Depósito Bancário' :
-                                                 m.tipo}
-                                            </p>
-                                            <p className="text-[10px] text-muted">
-                                                {new Date(m.data_movimentacao || m.created_at).toLocaleString('pt-BR')}
-                                                {m.observacoes && ` — ${m.observacoes}`}
-                                            </p>
-                                        </div>
+                                        <p className={`text-sm font-black ${isEntrada ? 'text-success' : 'text-danger'}`}>
+                                            {isEntrada ? '+' : '-'}R$ {Math.abs(m.valor).toFixed(2)}
+                                        </p>
                                     </div>
-                                    <p className={`text-sm font-black ${isEntrada ? 'text-success' : 'text-danger'}`}>
-                                        {isEntrada ? '+' : '-'}R$ {Math.abs(m.valor).toFixed(2)}
-                                    </p>
-                                </div>
-                            );
-                        })
-                    )}
+                                );
+                            })
+                        )}
+                    </div>
                 </div>
             )}
 
@@ -251,6 +363,16 @@ export default function CofrePage() {
                                     Valor superior ao saldo do cofre (R$ {saldo.toFixed(2)})
                                 </p>
                             )}
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-muted uppercase">Data do Depósito</label>
+                            <input
+                                type="date"
+                                className="input w-full"
+                                value={depositoData}
+                                onChange={e => setDepositoData(e.target.value)}
+                            />
                         </div>
 
                         <div className="space-y-2">

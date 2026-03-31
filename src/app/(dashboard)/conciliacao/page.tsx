@@ -1,13 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { 
-    Building, Loader2, CheckCircle2, AlertTriangle, 
-    Calendar, DollarSign, TrendingUp, TrendingDown, 
-    Smartphone, Coins, Banknote, Receipt, Plus, 
-    RefreshCw, Filter, ArrowDownCircle, ArrowUpCircle,
-    Save, Edit, X, Wallet, History, FileText, Briefcase
-} from 'lucide-react';
+import { Building, Loader as Loader2, CircleCheck as CheckCircle2, TriangleAlert as AlertTriangle, Calendar, DollarSign, TrendingUp, TrendingDown, Smartphone, Coins, Banknote, Receipt, Plus, RefreshCw, ListFilter as Filter, CircleArrowDown as ArrowDownCircle, CircleArrowUp as ArrowUpCircle, Save, CreditCard as Edit, X, Wallet, History, FileText, Briefcase } from 'lucide-react';
 import { useToast } from '@/contexts/ToastContext';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import { MoneyInput } from '@/components/ui/MoneyInput';
@@ -83,6 +77,11 @@ export default function ConciliacaoPage() {
         observacoes: ''
     });
     const [processando, setProcessando] = useState(false);
+
+    // Filtros para histórico de depósitos
+    const [filtroDepositoDataInicio, setFiltroDepositoDataInicio] = useState('');
+    const [filtroDepositoDataFim, setFiltroDepositoDataFim] = useState('');
+    const [depositosFiltrados, setDepositosFiltrados] = useState<DepositoCofre[]>([]);
 
     // Carregar lojas do usuário (múltiplas filiais)
     const carregarLojas = useCallback(async () => {
@@ -300,6 +299,25 @@ export default function ConciliacaoPage() {
             buscarResumo();
         }
     }, [lojaSelecionada, contaSelecionada, mesReferencia, initialLoad, buscarResumo]);
+
+    // Aplicar filtros nos depósitos
+    useEffect(() => {
+        let filtered = [...depositos];
+
+        if (filtroDepositoDataInicio) {
+            filtered = filtered.filter(d => {
+                return new Date(d.data_movimentacao) >= new Date(filtroDepositoDataInicio);
+            });
+        }
+
+        if (filtroDepositoDataFim) {
+            filtered = filtered.filter(d => {
+                return new Date(d.data_movimentacao) <= new Date(filtroDepositoDataFim + 'T23:59:59');
+            });
+        }
+
+        setDepositosFiltrados(filtered);
+    }, [depositos, filtroDepositoDataInicio, filtroDepositoDataFim]);
 
     const handleRegistrarSaldoInicial = async () => {
         if (!lojaSelecionada || !contaSelecionada) return;
@@ -581,27 +599,79 @@ export default function ConciliacaoPage() {
                                 <History size={18} className="text-primary-blue-light" />
                                 Histórico de Depósitos do Cofre
                             </h2>
+
+                            {/* Filtros do Histórico */}
+                            <div className="mb-4 p-4 rounded-xl bg-surface-subtle border border-border">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <Filter size={16} className="text-primary-blue-light" />
+                                    <h3 className="text-sm font-bold">Filtrar Depósitos</h3>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                    <div>
+                                        <label className="text-[10px] font-bold text-muted uppercase block mb-1">Data Início</label>
+                                        <input
+                                            type="date"
+                                            value={filtroDepositoDataInicio}
+                                            onChange={e => setFiltroDepositoDataInicio(e.target.value)}
+                                            className="input w-full text-sm"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] font-bold text-muted uppercase block mb-1">Data Fim</label>
+                                        <input
+                                            type="date"
+                                            value={filtroDepositoDataFim}
+                                            onChange={e => setFiltroDepositoDataFim(e.target.value)}
+                                            className="input w-full text-sm"
+                                        />
+                                    </div>
+                                    <div className="flex items-end">
+                                        <button
+                                            onClick={() => {
+                                                setFiltroDepositoDataInicio('');
+                                                setFiltroDepositoDataFim('');
+                                            }}
+                                            className="btn btn-ghost w-full text-sm"
+                                        >
+                                            Limpar Filtros
+                                        </button>
+                                    </div>
+                                </div>
+                                <p className="text-[10px] text-muted mt-2">
+                                    {depositosFiltrados.length} de {depositos.length} depósitos
+                                </p>
+                            </div>
+
+                            {/* Tabela de Depósitos */}
                             <div className="overflow-x-auto">
                                 <table className="w-full">
                                     <thead>
                                         <tr className="border-b border-border">
-                                            <th className="text-left py-2 px-2">Data</th>
-                                            <th className="text-left py-2 px-2">Conta de Destino</th>
-                                            <th className="text-right py-2 px-2">Valor</th>
-                                            <th className="text-left py-2 px-2">Observações</th>
-                                            <th className="text-left py-2 px-2">Registrado por</th>
+                                            <th className="text-left py-2 px-2 text-xs font-bold text-muted uppercase">Data</th>
+                                            <th className="text-left py-2 px-2 text-xs font-bold text-muted uppercase">Conta de Destino</th>
+                                            <th className="text-right py-2 px-2 text-xs font-bold text-muted uppercase">Valor</th>
+                                            <th className="text-left py-2 px-2 text-xs font-bold text-muted uppercase">Observações</th>
+                                            <th className="text-left py-2 px-2 text-xs font-bold text-muted uppercase">Registrado por</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {depositos.map((dep) => (
-                                            <tr key={dep.id} className="border-b border-border/50 hover:bg-surface-subtle">
-                                                <td className="py-2 px-2">{formatarData(dep.data_movimentacao)}</td>
-                                                <td className="py-2 px-2">{dep.banco_nome} - {dep.conta_nome}</td>
-                                                <td className="py-2 px-2 text-right font-bold text-success">{formatarMoeda(dep.valor)}</td>
-                                                <td className="py-2 px-2 text-muted text-sm">{dep.observacoes || '-'}</td>
-                                                <td className="py-2 px-2 text-muted text-sm">{dep.operador_nome || 'Sistema'}</td>
+                                        {depositosFiltrados.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={5} className="py-8 text-center text-muted text-sm">
+                                                    {depositos.length === 0 ? 'Nenhum depósito registrado' : 'Nenhum depósito corresponde aos filtros aplicados'}
+                                                </td>
                                             </tr>
-                                        ))}
+                                        ) : (
+                                            depositosFiltrados.map((dep) => (
+                                                <tr key={dep.id} className="border-b border-border/50 hover:bg-surface-subtle transition-colors">
+                                                    <td className="py-3 px-2 text-sm">{formatarData(dep.data_movimentacao)}</td>
+                                                    <td className="py-3 px-2 text-sm">{dep.banco_nome} - {dep.conta_nome}</td>
+                                                    <td className="py-3 px-2 text-right font-bold text-success text-sm">{formatarMoeda(dep.valor)}</td>
+                                                    <td className="py-3 px-2 text-muted text-sm">{dep.observacoes || '-'}</td>
+                                                    <td className="py-3 px-2 text-muted text-sm">{dep.operador_nome || 'Sistema'}</td>
+                                                </tr>
+                                            ))
+                                        )}
                                     </tbody>
                                 </table>
                             </div>
