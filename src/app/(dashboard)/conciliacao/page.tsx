@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Loader2, TrendingUp, Smartphone, Banknote, RefreshCw, Filter, ArrowDownCircle, X, Wallet, History, Calendar } from 'lucide-react';
+import { Loader2, TrendingUp, RefreshCw, Filter, ArrowDownCircle, X, Wallet, History } from 'lucide-react';
 import { useToast } from '@/contexts/ToastContext';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 
@@ -23,6 +23,7 @@ export default function ConciliacaoPage() {
     const { toast } = useToast();
 
     const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
     const [initialLoad, setInitialLoad] = useState(true);
     const [lojas, setLojas] = useState<Loja[]>([]);
 
@@ -116,10 +117,15 @@ export default function ConciliacaoPage() {
     }, [supabase, lojaSelecionada]);
 
     // Buscar dados de conciliação (entradas líquidas e depósitos)
-    const buscarDadosConciliacao = useCallback(async () => {
+    const buscarDadosConciliacao = useCallback(async (showLoading: boolean = true) => {
         if (!lojaSelecionada) return;
 
-        setLoading(true);
+        if (showLoading) {
+            setLoading(true);
+        } else {
+            setRefreshing(true);
+        }
+
         try {
             let dataInicioSQL: string;
             let dataFimSQL: string;
@@ -130,10 +136,10 @@ export default function ConciliacaoPage() {
                 const ultimoDia = new Date(parseInt(ano), parseInt(mes), 0).getDate();
                 dataFimSQL = `${mesReferencia}-${ultimoDia}`;
             } else {
-                // Validação para período personalizado: ambas as datas devem estar preenchidas
                 if (!dataInicio || !dataFim) {
                     toast({ message: 'Preencha as datas de início e fim para o período personalizado', type: 'warning' });
-                    setLoading(false);
+                    if (showLoading) setLoading(false);
+                    else setRefreshing(false);
                     return;
                 }
                 dataInicioSQL = dataInicio;
@@ -156,20 +162,12 @@ export default function ConciliacaoPage() {
             setTotalEntradas(totalEntradasValor);
 
             // 2. Depósitos (tabela depositos_conciliacao)
-            let queryDepositos = supabase
+            const { data: depositosData, error: depositosError } = await supabase
                 .from('depositos_conciliacao')
-                .select(`
-                    id,
-                    valor,
-                    data_deposito,
-                    observacoes,
-                    usuario_id
-                `)
+                .select('id, valor, data_deposito, observacoes, usuario_id')
                 .eq('loja_id', lojaSelecionada)
                 .gte('data_deposito', dataInicioSQL)
                 .lte('data_deposito', dataFimSQL);
-
-            const { data: depositosData, error: depositosError } = await queryDepositos;
 
             if (depositosError) throw depositosError;
 
@@ -204,9 +202,32 @@ export default function ConciliacaoPage() {
             console.error('Erro ao buscar dados de conciliação:', err);
             toast({ message: err.message || 'Erro ao carregar dados', type: 'error' });
         } finally {
-            setLoading(false);
+            if (showLoading) setLoading(false);
+            else setRefreshing(false);
         }
     }, [supabase, lojaSelecionada, mesReferencia, filtroTipo, dataInicio, dataFim, toast]);
+
+    // Função para limpar todos os filtros principais
+    const limparFiltrosPrincipais = () => {
+        // Resetar seleção de filial para a primeira
+        if (lojas.length > 0) {
+            setLojaSelecionada(lojas[0].id);
+        }
+        // Resetar mês atual
+        const hoje = new Date();
+        const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
+        setMesReferencia(mesAtual);
+        // Resetar período personalizado
+        setDataInicio('');
+        setDataFim('');
+        // Resetar tipo de filtro para "mês"
+        setFiltroTipo('mes');
+        // Limpar também os filtros de depósitos (opcional)
+        setFiltroDepositoDataInicio('');
+        setFiltroDepositoDataFim('');
+        setFiltroValorMin('');
+        // Buscar dados após limpar (o useEffect cuidará disso)
+    };
 
     // Aplicar filtros nos depósitos (client-side)
     useEffect(() => {
@@ -236,7 +257,7 @@ export default function ConciliacaoPage() {
     // Buscar dados quando loja ou filtros mudarem
     useEffect(() => {
         if (lojaSelecionada && !initialLoad) {
-            buscarDadosConciliacao();
+            buscarDadosConciliacao(true);
         }
     }, [lojaSelecionada, mesReferencia, filtroTipo, dataInicio, dataFim, initialLoad, buscarDadosConciliacao]);
 
@@ -247,7 +268,6 @@ export default function ConciliacaoPage() {
         }).format(valor);
     };
 
-    // Formata data diretamente da string YYYY-MM-DD
     const formatarData = (data: string) => {
         if (!data) return '-';
         const [ano, mes, dia] = data.split('-');
@@ -281,9 +301,19 @@ export default function ConciliacaoPage() {
                         <p className="text-xs text-muted">Visão consolidada de entradas líquidas e depósitos</p>
                     </div>
                 </div>
-                <button onClick={buscarDadosConciliacao} className="btn btn-ghost btn-sm">
-                    <RefreshCw size={14} /> Atualizar
-                </button>
+                <div className="flex gap-2">
+                    <button
+                        onClick={() => buscarDadosConciliacao(false)}
+                        disabled={refreshing}
+                        className="btn btn-ghost btn-sm"
+                    >
+                        {refreshing ? <Loader2 className="animate-spin" size={14} /> : <RefreshCw size={14} />}
+                        Atualizar
+                    </button>
+                    <button onClick={limparFiltrosPrincipais} className="btn btn-ghost btn-sm">
+                        <X size={14} /> Limpar filtros
+                    </button>
+                </div>
             </div>
 
             {/* Filtros principais */}
