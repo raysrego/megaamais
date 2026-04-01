@@ -90,45 +90,53 @@ export async function registrarDepositoCofre(
 // (mantenha as demais funções do arquivo: getEntradasCofrePorFechamento, getSaldoCofre, etc.)
 
 // ─── Buscar entradas do cofre por fechamento aprovado ───
-export async function getEntradasCofrePorFechamento() {
+export async function getEntradasCofrePorFechamento(lojaId?: string) {
     const supabase = await createClient();
 
-    const { data, error } = await supabase
+    let query = supabase
         .from('cofre_entradas_por_fechamento')
         .select('*')
         .order('data_turno', { ascending: false })
         .limit(50);
 
+    if (lojaId) {
+        query = query.eq('loja_id', lojaId);
+    }
+
+    const { data, error } = await query;
     if (error) throw new Error(`Erro: ${error.message}`);
     return data ?? [];
 }
 
 // ─── Buscar saldo atual do cofre ───
-export async function getSaldoCofre(): Promise<number> {
+export async function getSaldoCofre(lojaId?: string): Promise<number> {
     const supabase = await createClient();
 
-    const { data, error } = await supabase
-        .from('cofre_saldo_atual')
-        .select('saldo')
-        .single();
+    let query = supabase.from('cofre_saldo_atual').select('saldo');
+    if (lojaId) {
+        query = query.eq('loja_id', lojaId);
+    }
+    const { data, error } = await query.maybeSingle();
 
     if (error) return 0;
     return data?.saldo ?? 0;
 }
 
 // ─── Buscar histórico do cofre com rastreio ───
-export async function getHistoricoCofre(limite: number = 30) {
+export async function getHistoricoCofre(limite: number = 30, lojaId?: string) {
     const supabase = await createClient();
 
-    const { data, error } = await supabase
-        .from('cofre_movimentacoes')
-        .select(`
-            id, tipo, valor, observacoes, data_movimentacao, created_at,
-            operador_id, origem_sessao_id, conta_bancaria_id
-        `)
+    let query = supabase
+        .from('vw_cofre_movimentacoes_detalhadas')
+        .select('*')
         .order('data_movimentacao', { ascending: false })
         .limit(limite);
 
+    if (lojaId) {
+        query = query.eq('loja_id', lojaId);
+    }
+
+    const { data, error } = await query;
     if (error) throw new Error(`Erro: ${error.message}`);
     return data ?? [];
 }
