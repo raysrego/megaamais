@@ -1,14 +1,14 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Vault, CircleArrowUp as ArrowUpCircle, CircleArrowDown as ArrowDownCircle, Building, Loader as Loader2, DollarSign, CircleCheck as CheckCircle2, Clock, ExternalLink, Plus, ListFilter as Filter, Calendar } from 'lucide-react';
+import { Vault, CircleArrowUp as ArrowUpCircle, CircleArrowDown as ArrowDownCircle, Building, Loader2, DollarSign, CircleCheck as CheckCircle2, Clock, ExternalLink, Plus, Filter, Calendar } from 'lucide-react';
 import {
     getSaldoCofre,
     getEntradasCofrePorFechamento,
     getHistoricoCofre,
-    registrarDepositoCofre
+    registrarDepositoCofre,
+    getLojasUsuario
 } from '@/actions/cofre';
-import { getEmpresas } from '@/actions/admin';
 import { MoneyInput } from '@/components/ui/MoneyInput';
 import { useToast } from '@/contexts/ToastContext';
 
@@ -18,7 +18,7 @@ export default function CofrePage() {
     const [entradas, setEntradas] = useState<any[]>([]);
     const [historico, setHistorico] = useState<any[]>([]);
     const [historicoFiltrado, setHistoricoFiltrado] = useState<any[]>([]);
-    const [filiais, setFiliais] = useState<any[]>([]);
+    const [lojas, setLojas] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [showDeposito, setShowDeposito] = useState(false);
     const [depositoValor, setDepositoValor] = useState(0);
@@ -36,16 +36,16 @@ export default function CofrePage() {
     const carregarDados = useCallback(async () => {
         setLoading(true);
         try {
-            const [s, e, h, f] = await Promise.all([
+            const [s, e, h, lojasData] = await Promise.all([
                 getSaldoCofre(),
                 getEntradasCofrePorFechamento(),
                 getHistoricoCofre(),
-                getEmpresas(),
+                getLojasUsuario(),
             ]);
             setSaldo(s);
             setEntradas(e);
             setHistorico(h);
-            setFiliais(f);
+            setLojas(lojasData);
         } catch (err: any) {
             toast({ message: err.message, type: 'error' });
         } finally {
@@ -59,7 +59,6 @@ export default function CofrePage() {
     useEffect(() => {
         let filtered = [...historico];
 
-        // Filtro por tipo
         if (filtroTipo !== 'todos') {
             if (filtroTipo === 'entrada') {
                 filtered = filtered.filter(m => m.tipo.includes('entrada'));
@@ -70,7 +69,6 @@ export default function CofrePage() {
             }
         }
 
-        // Filtro por data início
         if (filtroDataInicio) {
             filtered = filtered.filter(m => {
                 const dataMovimentacao = new Date(m.data_movimentacao || m.created_at);
@@ -78,7 +76,6 @@ export default function CofrePage() {
             });
         }
 
-        // Filtro por data fim
         if (filtroDataFim) {
             filtered = filtered.filter(m => {
                 const dataMovimentacao = new Date(m.data_movimentacao || m.created_at);
@@ -124,11 +121,6 @@ export default function CofrePage() {
             </div>
         );
     }
-
-    const entradasPendentes = entradas.filter(e => e.auditoria_status === 'aprovado' && !e.cofre_confirmado);
-    const totalDisponivel = entradas
-        .filter(e => e.auditoria_status === 'aprovado')
-        .reduce((sum, e) => sum + (e.valor_enviado_cofre || 0), 0);
 
     return (
         <div className="space-y-6 p-4 max-w-4xl mx-auto">
@@ -347,9 +339,9 @@ export default function CofrePage() {
                                 className="input w-full"
                             >
                                 <option value="">Selecione...</option>
-                                {filiais.map((f: any) => (
-                                    <option key={f.id} value={f.id}>
-                                        {f.nome_fantasia || f.nome}
+                                {lojas.map((loja: any) => (
+                                    <option key={loja.id} value={loja.id}>
+                                        {loja.nome_fantasia || loja.nome}
                                     </option>
                                 ))}
                             </select>
