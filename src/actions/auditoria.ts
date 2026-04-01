@@ -6,101 +6,74 @@ import { revalidatePath } from 'next/cache';
 // ─── Tipos ───
 export interface FechamentoAuditoria {
     id: number;
-    tipo: string;
+    data_turno: string;
+    data_fechamento: string;
     terminal_id: string;
     operador_id: string;
     operador_nome: string;
-    data_turno: string;
-    data_abertura: string;
-    data_fechamento: string;
     valor_inicial: number;
-    valor_final_calculado: number;
-    resumo_entradas_pix: number;
-    resumo_entradas_dinheiro: number;
-    resumo_entradas_bolao_dinheiro: number;
-    resumo_entradas_bolao_pix: number;
-    resumo_saidas_sangria: number;
-    resumo_saidas_deposito: number;
-    resumo_saidas_boleto: number;
-    resumo_saidas_trocados: number;
     resumo_total_entradas: number;
-    resumo_total_saidas: number;
-    dinheiro_em_maos: number;
     valor_enviado_cofre: number;
     pix_externo_informado: number;
-    fundo_caixa_devolvido: boolean;
-    saldo_esperado_dinheiro: number;
-    diferenca_caixa: number;
-    auditoria_status: string;
-    auditoria_por: string | null;
-    auditoria_data: string | null;
-    auditoria_observacoes: string | null;
-    observacoes_operador: string | null;
-    cofre_confirmado: boolean;
-    cofre_movimentacao_id: number | null;
-    tem_fundo_caixa: boolean;
-    loja_id: string | null;
+    // ... outros campos conforme necessário
 }
 
-// ─── Listar fechamentos para auditoria ───
-export async function getFechamentosAuditoria(
-    filtros?: {
-        status?: string;
-        dataInicio?: string;
-        dataFim?: string;
-        terminalId?: string;
-        lojaId?: string;
-    }
-): Promise<FechamentoAuditoria[]> {
+// ─── Buscar fechamentos para auditoria com filtros ───
+export async function getFechamentosAuditoria(filters?: {
+    status?: string;
+    dataInicio?: string;
+    dataFim?: string;
+}) {
     const supabase = await createClient();
 
     let query = supabase
-        .from('vw_auditoria_fechamentos')
+        .from('caixa_sessoes')
         .select('*')
-        .order('data_turno', { ascending: false })
-        .order('data_fechamento', { ascending: false });
+        .order('data_turno', { ascending: false });
 
-    if (filtros?.status && filtros.status !== 'todos') {
-        query = query.eq('auditoria_status', filtros.status);
+    if (filters?.status) {
+        query = query.eq('auditoria_status', filters.status);
     }
-    if (filtros?.dataInicio) {
-        query = query.gte('data_turno', filtros.dataInicio);
+    if (filters?.dataInicio) {
+        query = query.gte('data_turno', filters.dataInicio);
     }
-    if (filtros?.dataFim) {
-        query = query.lte('data_turno', filtros.dataFim);
-    }
-    if (filtros?.terminalId) {
-        query = query.eq('terminal_id', filtros.terminalId);
-    }
-    if (filtros?.lojaId) {
-        query = query.eq('loja_id', filtros.lojaId);
+    if (filters?.dataFim) {
+        query = query.lte('data_turno', filters.dataFim);
     }
 
-    const { data, error } = await query.limit(50);
+    const { data, error } = await query;
 
-    if (error) throw new Error(`Erro ao buscar fechamentos: ${error.message}`);
-    return (data ?? []) as FechamentoAuditoria[];
+    if (error) {
+        console.error('Erro ao buscar fechamentos:', error);
+        throw new Error(`Erro ao buscar fechamentos: ${error.message}`);
+    }
+
+    return data ?? [];
 }
 
-// ─── Aprovar fechamento (cria entrada no cofre automaticamente) ───
+// ─── Aprovar fechamento e atualizar valor_para_conciliacao ───
 export async function aprovarFechamento(sessaoId: number, observacoes?: string) {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
+
     if (!user) throw new Error('Não autenticado');
 
-    // Buscar dados do fechamento
+    // Buscar dados necessários para calcular valor_para_conciliacao
     const { data: sessao, error: fetchError } = await supabase
         .from('caixa_sessoes')
         .select('resumo_total_entradas, valor_enviado_cofre')
         .eq('id', sessaoId)
         .single();
 
-    if (fetchError || !sessao) throw new Error('Fechamento não encontrado');
+    if (fetchError || !sessao) {
+        console.error('Erro ao buscar fechamento:', fetchError);
+        throw new Error('Fechamento não encontrado');
+    }
 
     const valorConciliacao = (sessao.resumo_total_entradas || 0) - (sessao.valor_enviado_cofre || 0);
 
-    // Atualizar status e armazenar valor_para_conciliacao
-    const { error } = await supabase
+    // Atualizar status e valor_para_conciliacao
+    const { error: updateError } = await supabase
         .from('caixa_sessoes')
         .update({
             auditoria_status: 'aprovado',
@@ -108,47 +81,57 @@ export async function aprovarFechamento(sessaoId: number, observacoes?: string) 
             auditoria_data: new Date().toISOString(),
             auditoria_observacoes: observacoes,
             valor_para_conciliacao: valorConciliacao,
+            updated_at: new Date().toISOString(),
         })
         .eq('id', sessaoId);
 
-    if (error) throw new Error(`Erro ao aprovar: ${error.message}`);
+    if (updateError) {
+        console.error('Erro ao aprovar fechamento:', updateError);
+        throw new Error(`Erro ao aprovar: ${updateError.message}`);
+    }
 
+    // Revalidar páginas afetadas
     revalidatePath('/auditoria');
     revalidatePath('/conciliacao');
+
     return { success: true };
 }
 
 // ─── Rejeitar fechamento ───
 export async function rejeitarFechamento(
     sessaoId: number,
-    observacoes: string,
-    solicitarCorrecao: boolean = false
+    justificativa: string,
+    corrigir?: boolean
 ) {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) throw new Error('Não autenticado');
-    if (!observacoes.trim()) throw new Error('Observação obrigatória ao rejeitar');
 
-    const { data, error } = await supabase.rpc('rejeitar_fechamento_caixa', {
-        p_sessao_id: sessaoId,
-        p_gerente_id: user.id,
-        p_observacoes: observacoes,
-        p_solicitar_correcao: solicitarCorrecao,
-    });
+    const novoStatus = corrigir ? 'correcao_solicitada' : 'rejeitado';
 
-    if (error) throw new Error(`Erro ao rejeitar: ${error.message}`);
+    const { error } = await supabase
+        .from('caixa_sessoes')
+        .update({
+            auditoria_status: novoStatus,
+            auditoria_por: user.id,
+            auditoria_data: new Date().toISOString(),
+            auditoria_observacoes: justificativa,
+            updated_at: new Date().toISOString(),
+        })
+        .eq('id', sessaoId);
 
-    const resultado = data as { success: boolean; error?: string };
-    if (!resultado.success) {
-        throw new Error(resultado.error || 'Erro desconhecido');
+    if (error) {
+        console.error('Erro ao rejeitar fechamento:', error);
+        throw new Error(`Erro ao rejeitar: ${error.message}`);
     }
 
     revalidatePath('/auditoria');
-    return resultado;
+
+    return { success: true };
 }
 
-// ─── Buscar movimentações detalhadas de uma sessão ───
+// ─── Buscar movimentações de uma sessão (para detalhes) ───
 export async function getMovimentacoesSessao(sessaoId: number) {
     const supabase = await createClient();
 
@@ -156,141 +139,12 @@ export async function getMovimentacoesSessao(sessaoId: number) {
         .from('caixa_movimentacoes')
         .select('*')
         .eq('sessao_id', sessaoId)
-        .is('deleted_at', null)
         .order('created_at', { ascending: true });
 
-    if (error) throw new Error(`Erro ao buscar movimentações: ${error.message}`);
-    return data ?? [];
-}
-
-// ─── Resumo de auditoria para KPIs ───
-export async function getResumoAuditoria(lojaId?: string) {
-    const supabase = await createClient();
-
-    let query = supabase
-        .from('vw_auditoria_fechamentos')
-        .select('auditoria_status, diferenca_caixa');
-
-    if (lojaId) {
-        query = query.eq('loja_id', lojaId);
+    if (error) {
+        console.error('Erro ao buscar movimentações:', error);
+        throw new Error(`Erro ao buscar movimentações: ${error.message}`);
     }
 
-    const seteDiasAtras = new Date();
-    seteDiasAtras.setDate(seteDiasAtras.getDate() - 7);
-    query = query.gte('data_turno', seteDiasAtras.toISOString().split('T')[0]);
-
-    const { data, error } = await query;
-
-    if (error) throw new Error(`Erro: ${error.message}`);
-
-    const resumo = {
-        pendentes: 0,
-        aprovados: 0,
-        rejeitados: 0,
-        correcao_solicitada: 0,
-        total_diferenca: 0,
-        total: 0,
-    };
-
-    for (const item of data ?? []) {
-        resumo.total++;
-        switch (item.auditoria_status) {
-            case 'pendente': resumo.pendentes++; break;
-            case 'aprovado': resumo.aprovados++; break;
-            case 'rejeitado': resumo.rejeitados++; break;
-            case 'correcao_solicitada': resumo.correcao_solicitada++; break;
-        }
-        resumo.total_diferenca += Math.abs(item.diferenca_caixa || 0);
-    }
-
-    return resumo;
-}
-
-// ─── Registrar depósito bancário a partir do cofre ───
-export async function registrarDepositoCofre(
-    valor: number,
-    contaBancariaId: string,
-    observacoes?: string
-) {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) throw new Error('Não autenticado');
-    if (valor <= 0) throw new Error('Valor deve ser positivo');
-
-    const { data, error } = await supabase.rpc('registrar_deposito_cofre', {
-        p_valor: valor,
-        p_conta_id: contaBancariaId,
-        p_usuario_id: user.id,
-        p_observacoes: observacoes ?? null,
-    });
-
-    if (error) throw new Error(`Erro ao registrar depósito: ${error.message}`);
-
-    const resultado = data as { success: boolean; error?: string };
-    if (!resultado.success) {
-        throw new Error(resultado.error || 'Erro ao registrar depósito');
-    }
-
-    revalidatePath('/cofre');
-    revalidatePath('/conciliacao');
-    return resultado;
-}
-
-// ─── Buscar entradas do cofre por fechamento aprovado ───
-export async function getEntradasCofrePorFechamento() {
-    const supabase = await createClient();
-
-    const { data, error } = await supabase
-        .from('cofre_entradas_por_fechamento')
-        .select('*')
-        .order('data_turno', { ascending: false })
-        .limit(50);
-
-    if (error) throw new Error(`Erro: ${error.message}`);
-    return data ?? [];
-}
-
-// ─── Buscar saldo atual do cofre ───
-export async function getSaldoCofre(): Promise<number> {
-    const supabase = await createClient();
-
-    const { data, error } = await supabase
-        .from('cofre_saldo_atual')
-        .select('saldo')
-        .single();
-
-    if (error) return 0;
-    return data?.saldo ?? 0;
-}
-
-// ─── Buscar histórico do cofre com rastreio ───
-export async function getHistoricoCofre(limite: number = 30) {
-    const supabase = await createClient();
-
-    const { data, error } = await supabase
-        .from('cofre_movimentacoes')
-        .select(`
-            id, tipo, valor, observacoes, data_movimentacao, created_at,
-            operador_id, origem_sessao_id, conta_bancaria_id
-        `)
-        .order('data_movimentacao', { ascending: false })
-        .limit(limite);
-
-    if (error) throw new Error(`Erro: ${error.message}`);
-    return data ?? [];
-}
-
-// ─── Buscar depósitos pendentes de conciliação ───
-export async function getDepositosPendentes() {
-    const supabase = await createClient();
-
-    const { data, error } = await supabase
-        .from('vw_cofre_depositos_rastreio')
-        .select('*')
-        .eq('status_conciliacao', 'pendente')
-        .order('data_movimentacao', { ascending: false });
-
-    if (error) throw new Error(`Erro: ${error.message}`);
     return data ?? [];
 }
