@@ -186,38 +186,31 @@ export async function getHistoricoCofre(
             return [];
         }
         
-        // Buscar nomes dos operadores
+        // Buscar nomes dos operadores e contas em paralelo
         const operadoresIds = [...new Set(data.map(m => m.operador_id).filter(id => id))];
-        let operadoresMap = new Map();
-        
-        if (operadoresIds.length > 0) {
-            const { data: usuarios, error: usuariosError } = await supabase
-                .from('usuarios')
-                .select('id, nome')
-                .in('id', operadoresIds);
-            
-            if (!usuariosError && usuarios) {
-                usuarios.forEach((user: any) => {
-                    operadoresMap.set(user.id, user.nome);
-                });
-            }
-        }
-        
-        // Buscar nomes das contas
         const contasIds = [...new Set(data.map(m => m.conta_bancaria_id).filter(id => id))];
-        let contasMap = new Map();
-        
-        if (contasIds.length > 0) {
-            const { data: contas, error: contasError } = await supabase
-                .from('financeiro_contas_bancarias')
-                .select('id, nome')
-                .in('id', contasIds);
-            
-            if (!contasError && contas) {
-                contas.forEach((conta: any) => {
-                    contasMap.set(conta.id, conta.nome);
-                });
-            }
+
+        const [usuariosResult, contasResult] = await Promise.all([
+            operadoresIds.length > 0
+                ? supabase.from('usuarios').select('id, nome').in('id', operadoresIds)
+                : Promise.resolve({ data: null, error: null }),
+            contasIds.length > 0
+                ? supabase.from('financeiro_contas_bancarias').select('id, nome').in('id', contasIds)
+                : Promise.resolve({ data: null, error: null })
+        ]);
+
+        const operadoresMap = new Map();
+        if (!usuariosResult.error && usuariosResult.data) {
+            usuariosResult.data.forEach((user: any) => {
+                operadoresMap.set(user.id, user.nome);
+            });
+        }
+
+        const contasMap = new Map();
+        if (!contasResult.error && contasResult.data) {
+            contasResult.data.forEach((conta: any) => {
+                contasMap.set(conta.id, conta.nome);
+            });
         }
         
         const resultado: MovimentacaoCofre[] = data.map((mov: any) => ({

@@ -94,7 +94,6 @@ export async function createNewUser(prevState: any, formData: FormData) {
         console.log('[CREATE_USER] Perfil criado com sucesso');
 
         revalidatePath('/configuracoes');
-        revalidatePath('/(dashboard)');
 
         return { success: true, message: `Usuario ${nome} criado com sucesso!` };
 

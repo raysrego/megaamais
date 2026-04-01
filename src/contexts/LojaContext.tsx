@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import { usePerfil } from '@/hooks/usePerfil';
 import { getLojasAction } from '@/hooks/actions';
@@ -133,8 +133,15 @@ export const LojaProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
     };
 
+    const value = useMemo(() => ({
+        lojaAtual,
+        lojasDisponiveis,
+        setLojaAtual: mudarLoja,
+        loading
+    }), [lojaAtual, lojasDisponiveis, loading]);
+
     return (
-        <LojaContext.Provider value={{ lojaAtual, lojasDisponiveis, setLojaAtual: mudarLoja, loading }}>
+        <LojaContext.Provider value={value}>
             {children}
         </LojaContext.Provider>
     );

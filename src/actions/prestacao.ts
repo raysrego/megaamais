@@ -66,20 +66,21 @@ export async function listarPendenciasFilial(lojaId: string): Promise<ResumoPend
 
     if (!operadores) return [];
 
-    const resultados: ResumoPendencia[] = [];
-
-    for (const op of operadores) {
+    const pendenciasPromises = operadores.map(async (op) => {
         const { total, count } = await getPendenciaOperador(op.id);
         if (total > 0) {
-            resultados.push({
+            return {
                 operador_id: op.id,
                 operador_nome: op.nome || 'Sem nome',
                 total_pendente: total,
                 qtd_vendas: count,
-                ultimo_venda: new Date().toISOString() // Simplificação, ideal seria query real
-            });
+                ultimo_venda: new Date().toISOString()
+            };
         }
-    }
+        return null;
+    });
+
+    const resultados = (await Promise.all(pendenciasPromises)).filter((r): r is ResumoPendencia => r !== null);
 
     return resultados;
 }

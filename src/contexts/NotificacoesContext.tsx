@@ -133,21 +133,24 @@ export function NotificacoesProvider({ children }: { children: React.ReactNode }
         return () => {
             if (abortControllerRef.current) abortControllerRef.current.abort();
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [lojaAtual?.id]);
+    }, [lojaAtual?.id, fetchNotificacoes]);
 
     const marcarTodasComoLidas = useCallback(() => {
-        const newLidas = [...new Set([...lidasIds, ...notificacoes.map(n => n.id)])];
-        setLidasIds(newLidas);
-        setNotificacoes(prev => prev.map(n => ({ ...n, lida: true })));
-    }, [notificacoes, lidasIds]);
+        setNotificacoes(prev => {
+            const newLidas = [...new Set([...lidasIds, ...prev.map(n => n.id)])];
+            setLidasIds(newLidas);
+            return prev.map(n => ({ ...n, lida: true }));
+        });
+    }, [lidasIds]);
 
     const limparLidas = useCallback(() => {
-        const lidasAtuais = notificacoes.filter(n => n.lida).map(n => n.id);
-        const newOcultas = [...new Set([...ocultasIds, ...lidasAtuais])];
-        setOcultasIds(newOcultas);
-        setNotificacoes(prev => prev.filter(n => !n.lida));
-    }, [notificacoes, ocultasIds]);
+        setNotificacoes(prev => {
+            const lidasAtuais = prev.filter(n => n.lida).map(n => n.id);
+            const newOcultas = [...new Set([...ocultasIds, ...lidasAtuais])];
+            setOcultasIds(newOcultas);
+            return prev.filter(n => !n.lida);
+        });
+    }, [ocultasIds]);
 
     const marcarComoLida = useCallback((id: string) => {
         if (!lidasIds.includes(id)) setLidasIds(prev => [...prev, id]);

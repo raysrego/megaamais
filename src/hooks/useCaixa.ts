@@ -58,6 +58,8 @@ export function useCaixa() {
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const [sessaoAtiva, setSessaoAtiva] = useState<CaixaSessao | null>(null);
   const [loading, setLoading] = useState(true);
+  const reconnectAttempts = useRef(0);
+  const maxReconnectAttempts = 5;
   const [error, setError] = useState<string | null>(null);
   const [movimentacoes, setMovimentacoes] = useState<CaixaMovimentacao[]>([]);
   const realtimeChannel = useRef<RealtimeChannel | null>(null);
@@ -227,21 +229,32 @@ export function useCaixa() {
         .subscribe((status, err) => {
           if (status === 'SUBSCRIBED') {
             console.log('[useCaixa] Realtime conectado');
+            reconnectAttempts.current = 0;
             if (reconnectTimeoutRef.current) {
               clearTimeout(reconnectTimeoutRef.current);
             }
           } else if (status === 'CHANNEL_ERROR') {
             console.error('[useCaixa] Erro no canal Realtime:', err);
-            // Não mostrar erro para o usuário, apenas tentar reconectar
+
+            if (reconnectAttempts.current >= maxReconnectAttempts) {
+              console.error('[useCaixa] Máximo de tentativas de reconexão atingido');
+              return;
+            }
+
             if (reconnectTimeoutRef.current) {
               clearTimeout(reconnectTimeoutRef.current);
             }
+
+            const backoffDelay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000);
+            reconnectAttempts.current++;
+
+            console.log(`[useCaixa] Tentando reconectar em ${backoffDelay}ms (tentativa ${reconnectAttempts.current}/${maxReconnectAttempts})`);
+
             reconnectTimeoutRef.current = setTimeout(() => {
               if (isMounted.current && sessaoAtiva) {
-                console.log('[useCaixa] Tentando reconectar canal Realtime');
                 setupChannel();
               }
-            }, 5000);
+            }, backoffDelay);
           }
         });
 
