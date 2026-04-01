@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Loader2, TrendingUp, Smartphone, Banknote, RefreshCw, Filter, ArrowDownCircle, X, Wallet, History } from 'lucide-react';
+import { Loader2, TrendingUp, Smartphone, Banknote, RefreshCw, Filter, ArrowDownCircle, X, Wallet, History, Calendar } from 'lucide-react';
 import { useToast } from '@/contexts/ToastContext';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 
@@ -126,11 +126,16 @@ export default function ConciliacaoPage() {
 
             if (filtroTipo === 'mes') {
                 dataInicioSQL = `${mesReferencia}-01`;
-                // último dia do mês
                 const [ano, mes] = mesReferencia.split('-');
                 const ultimoDia = new Date(parseInt(ano), parseInt(mes), 0).getDate();
                 dataFimSQL = `${mesReferencia}-${ultimoDia}`;
             } else {
+                // Validação para período personalizado: ambas as datas devem estar preenchidas
+                if (!dataInicio || !dataFim) {
+                    toast({ message: 'Preencha as datas de início e fim para o período personalizado', type: 'warning' });
+                    setLoading(false);
+                    return;
+                }
                 dataInicioSQL = dataInicio;
                 dataFimSQL = dataFim;
             }
@@ -208,10 +213,10 @@ export default function ConciliacaoPage() {
         let filtered = [...depositosDetalhes];
 
         if (filtroDepositoDataInicio) {
-            filtered = filtered.filter(d => new Date(d.data_deposito) >= new Date(filtroDepositoDataInicio));
+            filtered = filtered.filter(d => d.data_deposito >= filtroDepositoDataInicio);
         }
         if (filtroDepositoDataFim) {
-            filtered = filtered.filter(d => new Date(d.data_deposito) <= new Date(filtroDepositoDataFim + 'T23:59:59'));
+            filtered = filtered.filter(d => d.data_deposito <= filtroDepositoDataFim);
         }
         if (filtroValorMin) {
             const min = parseFloat(filtroValorMin);
@@ -242,18 +247,11 @@ export default function ConciliacaoPage() {
         }).format(valor);
     };
 
+    // Formata data diretamente da string YYYY-MM-DD
     const formatarData = (data: string) => {
-    if (!data) return '-';
-    // espera o formato YYYY-MM-DD
-    const [ano, mes, dia] = data.split('-');
-    return `${dia}/${mes}/${ano}`;
-};
-
-    const formatarMes = (mes: string) => {
-        const [ano, mesNum] = mes.split('-');
-        const meses = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 
-                       'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
-        return `${meses[parseInt(mesNum) - 1]} de ${ano}`;
+        if (!data) return '-';
+        const [ano, mes, dia] = data.split('-');
+        return `${dia}/${mes}/${ano}`;
     };
 
     const limparFiltrosDepositos = () => {
