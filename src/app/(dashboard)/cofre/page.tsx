@@ -8,7 +8,7 @@ import {
     getHistoricoCofre,
     registrarDepositoCofre
 } from '@/actions/cofre';
-import { getContasBancarias } from '@/actions/financeiro';
+import { getEmpresas } from '@/actions/admin';
 import { MoneyInput } from '@/components/ui/MoneyInput';
 import { useToast } from '@/contexts/ToastContext';
 
@@ -18,11 +18,11 @@ export default function CofrePage() {
     const [entradas, setEntradas] = useState<any[]>([]);
     const [historico, setHistorico] = useState<any[]>([]);
     const [historicoFiltrado, setHistoricoFiltrado] = useState<any[]>([]);
-    const [contas, setContas] = useState<any[]>([]);
+    const [filiais, setFiliais] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [showDeposito, setShowDeposito] = useState(false);
     const [depositoValor, setDepositoValor] = useState(0);
-    const [depositoConta, setDepositoConta] = useState('');
+    const [depositoFilial, setDepositoFilial] = useState('');
     const [depositoData, setDepositoData] = useState(new Date().toISOString().split('T')[0]);
     const [depositoObs, setDepositoObs] = useState('');
     const [depositing, setDepositing] = useState(false);
@@ -36,16 +36,16 @@ export default function CofrePage() {
     const carregarDados = useCallback(async () => {
         setLoading(true);
         try {
-            const [s, e, h, c] = await Promise.all([
+            const [s, e, h, f] = await Promise.all([
                 getSaldoCofre(),
                 getEntradasCofrePorFechamento(),
                 getHistoricoCofre(),
-                getContasBancarias(),
+                getEmpresas(),
             ]);
             setSaldo(s);
             setEntradas(e);
             setHistorico(h);
-            setContas(c);
+            setFiliais(f);
         } catch (err: any) {
             toast({ message: err.message, type: 'error' });
         } finally {
@@ -90,17 +90,17 @@ export default function CofrePage() {
     }, [historico, filtroTipo, filtroDataInicio, filtroDataFim]);
 
     const handleDeposito = async () => {
-        if (depositoValor <= 0 || !depositoConta || !depositoData) {
-            toast({ message: 'Informe valor, data e conta destino', type: 'warning' });
+        if (depositoValor <= 0 || !depositoFilial || !depositoData) {
+            toast({ message: 'Informe valor, data e filial destino', type: 'warning' });
             return;
         }
         setDepositing(true);
         try {
-            await registrarDepositoCofre(depositoValor, depositoConta, depositoObs || undefined, depositoData);
+            await registrarDepositoCofre(depositoValor, depositoFilial, depositoObs || undefined, depositoData);
             toast({ message: 'Depósito registrado com sucesso!', type: 'success' });
             setShowDeposito(false);
             setDepositoValor(0);
-            setDepositoConta('');
+            setDepositoFilial('');
             setDepositoData(new Date().toISOString().split('T')[0]);
             setDepositoObs('');
             carregarDados();
@@ -340,16 +340,16 @@ export default function CofrePage() {
                         </h3>
 
                         <div className="space-y-2">
-                            <label className="text-xs font-bold text-muted uppercase">Conta Destino</label>
+                            <label className="text-xs font-bold text-muted uppercase">Filial Destino</label>
                             <select
-                                value={depositoConta}
-                                onChange={e => setDepositoConta(e.target.value)}
+                                value={depositoFilial}
+                                onChange={e => setDepositoFilial(e.target.value)}
                                 className="input w-full"
                             >
                                 <option value="">Selecione...</option>
-                                {contas.map((c: any) => (
-                                    <option key={c.id} value={c.id}>
-                                        {c.banco} — {c.nome}
+                                {filiais.map((f: any) => (
+                                    <option key={f.id} value={f.id}>
+                                        {f.nome_fantasia || f.nome}
                                     </option>
                                 ))}
                             </select>
@@ -396,7 +396,7 @@ export default function CofrePage() {
                             <button
                                 className="btn btn-primary flex-1 font-black"
                                 onClick={handleDeposito}
-                                disabled={depositing || depositoValor <= 0 || !depositoConta || depositoValor > saldo}
+                                disabled={depositing || depositoValor <= 0 || !depositoFilial || depositoValor > saldo}
                             >
                                 {depositing ? <Loader2 className="animate-spin" size={14} /> : 'Confirmar'}
                             </button>

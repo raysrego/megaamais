@@ -164,3 +164,15 @@ export async function toggleUserStatus(userId: string, active: boolean) {
 
 // A função deleteUser foi removida para garantir a auditoria.
 // Use toggleUserStatus(id, false) para inativar um usuário.
+
+export async function getEmpresas() {
+    const supabaseAdmin = getAdminClient();
+    const { data, error } = await supabaseAdmin
+        .from('empresas')
+        .select('id, nome, nome_fantasia, cnpj, ativo')
+        .eq('ativo', true)
+        .order('nome');
+
+    if (error) throw error;
+    return data || [];
+}
