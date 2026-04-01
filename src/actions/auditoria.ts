@@ -3,20 +3,72 @@
 import { createClient } from '@/utils/supabase/server';
 import { revalidatePath } from 'next/cache';
 
+// ─── Tipos ───
+export interface FechamentoAuditoria {
+    id: number;
+    data_turno: string;
+    data_fechamento: string;
+    terminal_id: string;
+    operador_id: string;
+    operador_nome: string;
+    valor_inicial: number;
+    resumo_total_entradas: number;
+    valor_enviado_cofre: number;
+    pix_externo_informado: number;
+    // outros campos conforme necessário
+}
+
+// ─── Buscar fechamentos para auditoria com filtros ───
+export async function getFechamentosAuditoria(filters?: {
+    status?: string;
+    dataInicio?: string;
+    dataFim?: string;
+}) {
+    const supabase = await createClient();
+
+    let query = supabase
+        .from('caixa_sessoes')
+        .select('*')
+        .order('data_turno', { ascending: false });
+
+    if (filters?.status) {
+        query = query.eq('auditoria_status', filters.status);
+    }
+    if (filters?.dataInicio) {
+        query = query.gte('data_turno', filters.dataInicio);
+    }
+    if (filters?.dataFim) {
+        query = query.lte('data_turno', filters.dataFim);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+        console.error('Erro ao buscar fechamentos:', error);
+        throw new Error(`Erro ao buscar fechamentos: ${error.message}`);
+    }
+
+    return data ?? [];
+}
+
+// ─── Aprovar fechamento e atualizar cofre e conciliação ───
 export async function aprovarFechamento(sessaoId: number, observacoes?: string) {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) throw new Error('Não autenticado');
 
-    // Buscar dados da sessão (incluindo loja_id e valor_enviado_cofre)
+    // Buscar dados da sessão (incluindo loja_id, valor_enviado_cofre e resumo_total_entradas)
     const { data: sessao, error: fetchError } = await supabase
         .from('caixa_sessoes')
         .select('resumo_total_entradas, valor_enviado_cofre, loja_id, data_turno')
         .eq('id', sessaoId)
         .single();
 
-    if (fetchError || !sessao) throw new Error('Fechamento não encontrado');
+    if (fetchError || !sessao) {
+        console.error('Erro ao buscar fechamento:', fetchError);
+        throw new Error('Fechamento não encontrado');
+    }
 
     // 1. Calcular valor líquido para conciliação
     const valorConciliacao = (sessao.resumo_total_entradas || 0) - (sessao.valor_enviado_cofre || 0);
@@ -34,7 +86,7 @@ export async function aprovarFechamento(sessaoId: number, observacoes?: string) 
                 loja_id: sessao.loja_id,
                 origem_sessao_id: sessaoId,
                 observacoes: `Entrada referente ao fechamento do turno ${sessao.data_turno}`,
-                status: 'concluido'
+                status: 'concluido',
             });
 
         if (cofreError) {
@@ -56,7 +108,10 @@ export async function aprovarFechamento(sessaoId: number, observacoes?: string) 
         })
         .eq('id', sessaoId);
 
-    if (updateError) throw new Error(`Erro ao aprovar: ${updateError.message}`);
+    if (updateError) {
+        console.error('Erro ao aprovar fechamento:', updateError);
+        throw new Error(`Erro ao aprovar: ${updateError.message}`);
+    }
 
     // Revalidar páginas afetadas
     revalidatePath('/auditoria');
@@ -96,7 +151,6 @@ export async function rejeitarFechamento(
     }
 
     revalidatePath('/auditoria');
-
     return { success: true };
 }
 
