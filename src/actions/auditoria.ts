@@ -83,48 +83,39 @@ export async function getFechamentosAuditoria(
 }
 
 // ─── Aprovar fechamento (cria entrada no cofre automaticamente) ───
-export async function aprovarFechamento(
-    sessaoId: number,
-    observacoes?: string,
-    contaBancariaId?: string
-) {
-    console.log('[Server Action] aprovarFechamento chamado:', { sessaoId, observacoes, contaBancariaId });
-    
+export async function aprovarFechamento(sessaoId: number, observacoes?: string) {
     const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Não autenticado');
 
-    if (authError) {
-        console.error('[Server Action] Erro de autenticação:', authError);
-        throw new Error(`Erro de autenticação: ${authError.message}`);
-    }
+    // Buscar dados do fechamento
+    const { data: sessao, error: fetchError } = await supabase
+        .from('caixa_sessoes')
+        .select('resumo_total_entradas, valor_enviado_cofre')
+        .eq('id', sessaoId)
+        .single();
 
-    if (!user) {
-        console.error('[Server Action] Usuário não autenticado');
-        throw new Error('Não autenticado');
-    }
+    if (fetchError || !sessao) throw new Error('Fechamento não encontrado');
 
-    console.log('[Server Action] Usuário autenticado:', user.id);
+    const valorConciliacao = (sessao.resumo_total_entradas || 0) - (sessao.valor_enviado_cofre || 0);
 
-    const { data, error } = await supabase.rpc('aprovar_fechamento_caixa', {
-        p_sessao_id: sessaoId,
-        p_gerente_id: user.id,
-        p_observacoes: observacoes ?? null,
-        p_conta_bancaria_id: contaBancariaId ?? null,
-    });
+    // Atualizar status e armazenar valor_para_conciliacao
+    const { error } = await supabase
+        .from('caixa_sessoes')
+        .update({
+            auditoria_status: 'aprovado',
+            auditoria_por: user.id,
+            auditoria_data: new Date().toISOString(),
+            auditoria_observacoes: observacoes,
+            valor_para_conciliacao: valorConciliacao,
+        })
+        .eq('id', sessaoId);
 
-    if (error) {
-        console.error('[Server Action] Erro na RPC:', error);
-        throw new Error(`Erro ao aprovar: ${error.message}`);
-    }
+    if (error) throw new Error(`Erro ao aprovar: ${error.message}`);
 
-    console.log('[Server Action] Resultado da RPC:', data);
-    
-    // Revalidar os paths
     revalidatePath('/auditoria');
-    revalidatePath('/cofre');
     revalidatePath('/conciliacao');
-    
-    return data as { success: boolean; error?: string; movimentacao_id?: number; valor?: number };
+    return { success: true };
 }
 
 // ─── Rejeitar fechamento ───
