@@ -1,12 +1,12 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Vault, CircleArrowUp as ArrowUpCircle, CircleArrowDown as ArrowDownCircle, Building, Loader as Loader2, DollarSign, CircleCheck as CheckCircle2, Clock, ExternalLink, Plus, ListFilter as Filter, Calendar } from 'lucide-react';
+import { Vault, CircleArrowUp as ArrowUpCircle, CircleArrowDown as ArrowDownCircle, Building, Loader as Loader2, CircleCheck as CheckCircle2, Clock, ListFilter as Filter } from 'lucide-react';
 import {
     getSaldoCofre,
     getEntradasCofrePorFechamento,
     getHistoricoCofre,
-    registrarDepositoCofre
+    registrarDepositoCofre,
 } from '@/actions/cofre';
 import { getEmpresas } from '@/actions/admin';
 import { MoneyInput } from '@/components/ui/MoneyInput';
@@ -27,38 +27,56 @@ export default function CofrePage() {
     const [depositoObs, setDepositoObs] = useState('');
     const [depositing, setDepositing] = useState(false);
     const [tab, setTab] = useState<'entradas' | 'historico'>('entradas');
+
+    // Filtro por filial
     const [filialSelecionada, setFilialSelecionada] = useState('');
 
-    // Filtros do histórico
+    // Filtros do histórico (client-side)
     const [filtroTipo, setFiltroTipo] = useState('todos');
     const [filtroDataInicio, setFiltroDataInicio] = useState('');
     const [filtroDataFim, setFiltroDataFim] = useState('');
 
+    // Carregar todas as filiais (para o seletor)
+    const carregarFiliais = useCallback(async () => {
+        try {
+            const empresas = await getEmpresas();
+            setFiliais(empresas);
+        } catch (err: any) {
+            toast({ message: err.message, type: 'error' });
+        }
+    }, [toast]);
+
+    // Carregar dados do cofre com base na filial selecionada
     const carregarDados = useCallback(async () => {
-    setLoading(true);
-    try {
-        const [s, e, h] = await Promise.all([
-            getSaldoCofre(filialSelecionada || undefined),
-            getEntradasCofrePorFechamento(filialSelecionada || undefined),
-            getHistoricoCofre(30, filialSelecionada || undefined),
-        ]);
-        setSaldo(s);
-        setEntradas(e);
-        setHistorico(h);
-    } catch (err: any) {
-        toast({ message: err.message, type: 'error' });
-    } finally {
-        setLoading(false);
-    }
-}, [toast, filialSelecionada]);
+        setLoading(true);
+        try {
+            const [s, e, h] = await Promise.all([
+                getSaldoCofre(filialSelecionada || undefined),
+                getEntradasCofrePorFechamento(filialSelecionada || undefined),
+                getHistoricoCofre(30, filialSelecionada || undefined),
+            ]);
+            setSaldo(s);
+            setEntradas(e);
+            setHistorico(h);
+        } catch (err: any) {
+            toast({ message: err.message, type: 'error' });
+        } finally {
+            setLoading(false);
+        }
+    }, [toast, filialSelecionada]);
 
-    useEffect(() => { carregarDados(); }, [carregarDados]);
+    useEffect(() => {
+        carregarFiliais();
+    }, [carregarFiliais]);
 
-    // Aplicar filtros no histórico
+    useEffect(() => {
+        carregarDados();
+    }, [carregarDados]);
+
+    // Aplicar filtros no histórico (client-side)
     useEffect(() => {
         let filtered = [...historico];
 
-        // Filtro por tipo
         if (filtroTipo !== 'todos') {
             if (filtroTipo === 'entrada') {
                 filtered = filtered.filter(m => m.tipo.includes('entrada'));
@@ -69,7 +87,6 @@ export default function CofrePage() {
             }
         }
 
-        // Filtro por data início
         if (filtroDataInicio) {
             filtered = filtered.filter(m => {
                 const dataMovimentacao = new Date(m.data_movimentacao || m.created_at);
@@ -77,7 +94,6 @@ export default function CofrePage() {
             });
         }
 
-        // Filtro por data fim
         if (filtroDataFim) {
             filtered = filtered.filter(m => {
                 const dataMovimentacao = new Date(m.data_movimentacao || m.created_at);
@@ -124,15 +140,10 @@ export default function CofrePage() {
         );
     }
 
-    const entradasPendentes = entradas.filter(e => e.auditoria_status === 'aprovado' && !e.cofre_confirmado);
-    const totalDisponivel = entradas
-        .filter(e => e.auditoria_status === 'aprovado')
-        .reduce((sum, e) => sum + (e.valor_enviado_cofre || 0), 0);
-
     return (
         <div className="space-y-6 p-4 max-w-4xl mx-auto">
-            {/* Header */}
-            <div className="flex items-center justify-between">
+            {/* Header com seletor de filial */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-xl bg-primary-blue-light/10 flex items-center justify-center">
                         <Vault size={20} className="text-primary-blue-light" />
@@ -142,12 +153,24 @@ export default function CofrePage() {
                         <p className="text-xs text-muted">Controle de valores em espécie</p>
                     </div>
                 </div>
-                <button
-                    onClick={() => setShowDeposito(true)}
-                    className="btn btn-primary"
-                >
-                    <Building size={14} /> Registrar Depósito
-                </button>
+                <div className="flex gap-3">
+                    <select
+                        value={filialSelecionada}
+                        onChange={e => setFilialSelecionada(e.target.value)}
+                        className="input text-sm"
+                    >
+                        <option value="">Todas as filiais</option>
+                        {filiais.map(f => (
+                            <option key={f.id} value={f.id}>{f.nome_fantasia || f.nome}</option>
+                        ))}
+                    </select>
+                    <button
+                        onClick={() => setShowDeposito(true)}
+                        className="btn btn-primary"
+                    >
+                        <Building size={14} /> Registrar Depósito
+                    </button>
+                </div>
             </div>
 
             {/* Saldo */}
@@ -177,23 +200,6 @@ export default function CofrePage() {
                     Histórico Completo
                 </button>
             </div>
-            const carregarDados = useCallback(async () => {
-    setLoading(true);
-    try {
-        const [s, e, h] = await Promise.all([
-            getSaldoCofre(filialSelecionada || undefined),
-            getEntradasCofrePorFechamento(filialSelecionada || undefined),
-            getHistoricoCofre(30, filialSelecionada || undefined),
-        ]);
-        setSaldo(s);
-        setEntradas(e);
-        setHistorico(h);
-    } catch (err: any) {
-        toast({ message: err.message, type: 'error' });
-    } finally {
-        setLoading(false);
-    }
-}, [toast, filialSelecionada]);
 
             {/* Tab: Entradas por Fechamento */}
             {tab === 'entradas' && (
@@ -216,9 +222,9 @@ export default function CofrePage() {
                                         )}
                                     </div>
                                     <div>
-                                       <p className="text-sm font-bold">
-    {e.filial_nome || e.terminal_id} — {e.operador_nome || 'Operador'}
-</p>
+                                        <p className="text-sm font-bold">
+                                            {e.filial_nome || e.terminal_id} — {e.operador_nome || 'Operador'}
+                                        </p>
                                         <p className="text-[10px] text-muted">
                                             Turno {e.data_turno} • {e.auditoria_status === 'aprovado' ? 'Aprovado' : 'Pendente'}
                                         </p>
@@ -309,6 +315,12 @@ export default function CofrePage() {
                         ) : (
                             historicoFiltrado.map((m: any) => {
                                 const isEntrada = m.tipo.includes('entrada');
+                                let tipoDescricao = '';
+                                if (m.tipo === 'entrada_fechamento') tipoDescricao = 'Fechamento de Turno';
+                                else if (m.tipo === 'entrada_sangria') tipoDescricao = 'Sangria Recebida';
+                                else if (m.tipo === 'saida_deposito') tipoDescricao = `Depósito Bancário (${m.filial_nome || 'Filial não informada'})`;
+                                else tipoDescricao = m.tipo;
+                                
                                 return (
                                     <div key={m.id} className="p-3 rounded-xl border border-border bg-bg-card flex items-center justify-between">
                                         <div className="flex items-center gap-3">
@@ -322,17 +334,14 @@ export default function CofrePage() {
                                                 )}
                                             </div>
                                             <div>
-    <p className="text-sm font-medium">
-        {m.tipo === 'entrada_fechamento' ? 'Fechamento de Turno' :
-         m.tipo === 'entrada_sangria' ? 'Sangria Recebida' :
-         m.tipo === 'saida_deposito' ? `Depósito Bancário (${m.filial_destino_nome || 'Filial não informada'})` :
-         m.tipo}
-    </p>
-    <p className="text-[10px] text-muted">
-        {new Date(m.data_movimentacao || m.created_at).toLocaleString('pt-BR')}
-        {m.observacoes && ` — ${m.observacoes}`}
-    </p>
-</div>
+                                                <p className="text-sm font-medium">
+                                                    {tipoDescricao}
+                                                </p>
+                                                <p className="text-[10px] text-muted">
+                                                    {new Date(m.data_movimentacao || m.created_at).toLocaleString('pt-BR')}
+                                                    {m.observacoes && ` — ${m.observacoes}`}
+                                                </p>
+                                            </div>
                                         </div>
                                         <p className={`text-sm font-black ${isEntrada ? 'text-success' : 'text-danger'}`}>
                                             {isEntrada ? '+' : '-'}R$ {Math.abs(m.valor).toFixed(2)}
@@ -345,7 +354,7 @@ export default function CofrePage() {
                 </div>
             )}
 
-            {/* Modal Depósito */}
+            {/* Modal Depósito (sem alterações) */}
             {showDeposito && (
                 <>
                     <div className="fixed inset-0 bg-black/70 z-50" onClick={() => setShowDeposito(false)} />
