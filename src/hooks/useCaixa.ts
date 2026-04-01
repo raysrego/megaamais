@@ -276,45 +276,56 @@ export function useCaixa() {
 
   // Abrir caixa
   const abrirCaixa = async (
-    valorInicial: number,
-    terminalCodigo?: string,
-    terminalId?: number,
-    temFundoCaixa: boolean = true,
-    dataTurno?: string
-  ) => {
-    setError(null);
-    try {
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError) throw userError;
-      if (!user) throw new Error('Usuário não autenticado');
+  valorInicial: number,
+  terminalCodigo?: string,
+  terminalId?: number,
+  temFundoCaixa: boolean = true,
+  dataTurno?: string
+) => {
+  setError(null);
+  try {
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError) throw userError;
+    if (!user) throw new Error('Usuário não autenticado');
 
-      const turnoData = dataTurno || new Date().toISOString().split('T')[0];
-
-      const { data, error } = await supabase
-        .from('caixa_sessoes')
-        .insert({
-          operador_id: user.id,
-          terminal_id: terminalCodigo || 'TFL-WEB',
-          terminal_id_ref: terminalId || null,
-          valor_inicial: valorInicial,
-          valor_final_calculado: valorInicial,
-          status: 'aberto',
-          tem_fundo_caixa: temFundoCaixa,
-          data_turno: turnoData,
-        })
-        .select()
-        .single();
-        
-      if (error) throw error;
-      
-      setSessaoAtiva(data as CaixaSessao);
-      return data;
-    } catch (err) {
-      console.error('[useCaixa] Erro ao abrir caixa:', err);
-      setError('Falha ao abrir o caixa. Tente novamente.');
-      throw err;
+    // Buscar empresa_id do usuário
+    const { data: userData, error: userDataError } = await supabase
+      .from('usuarios')
+      .select('empresa_id')
+      .eq('id', user.id)
+      .single();
+    if (userDataError || !userData?.empresa_id) {
+      throw new Error('Usuário não possui filial vinculada');
     }
-  };
+
+    const turnoData = dataTurno || new Date().toISOString().split('T')[0];
+
+    const { data, error } = await supabase
+      .from('caixa_sessoes')
+      .insert({
+        operador_id: user.id,
+        terminal_id: terminalCodigo || 'TFL-WEB',
+        terminal_id_ref: terminalId || null,
+        valor_inicial: valorInicial,
+        valor_final_calculado: valorInicial,
+        status: 'aberto',
+        tem_fundo_caixa: temFundoCaixa,
+        data_turno: turnoData,
+        loja_id: userData.empresa_id,   // <-- AGORA PREENCHIDO
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    setSessaoAtiva(data as CaixaSessao);
+    return data;
+  } catch (err) {
+    console.error('[useCaixa] Erro ao abrir caixa:', err);
+    setError('Falha ao abrir o caixa. Tente novamente.');
+    throw err;
+  }
+};
 
   // Registrar movimentação
   const registrarMovimentacao = async (
