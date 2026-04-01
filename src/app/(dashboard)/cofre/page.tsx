@@ -27,6 +27,7 @@ export default function CofrePage() {
     const [depositoObs, setDepositoObs] = useState('');
     const [depositing, setDepositing] = useState(false);
     const [tab, setTab] = useState<'entradas' | 'historico'>('entradas');
+    const [filialSelecionada, setFilialSelecionada] = useState('');
 
     // Filtros do histórico
     const [filtroTipo, setFiltroTipo] = useState('todos');
@@ -34,24 +35,22 @@ export default function CofrePage() {
     const [filtroDataFim, setFiltroDataFim] = useState('');
 
     const carregarDados = useCallback(async () => {
-        setLoading(true);
-        try {
-            const [s, e, h, f] = await Promise.all([
-                getSaldoCofre(),
-                getEntradasCofrePorFechamento(),
-                getHistoricoCofre(),
-                getEmpresas(),
-            ]);
-            setSaldo(s);
-            setEntradas(e);
-            setHistorico(h);
-            setFiliais(f);
-        } catch (err: any) {
-            toast({ message: err.message, type: 'error' });
-        } finally {
-            setLoading(false);
-        }
-    }, [toast]);
+    setLoading(true);
+    try {
+        const [s, e, h] = await Promise.all([
+            getSaldoCofre(filialSelecionada || undefined),
+            getEntradasCofrePorFechamento(filialSelecionada || undefined),
+            getHistoricoCofre(30, filialSelecionada || undefined),
+        ]);
+        setSaldo(s);
+        setEntradas(e);
+        setHistorico(h);
+    } catch (err: any) {
+        toast({ message: err.message, type: 'error' });
+    } finally {
+        setLoading(false);
+    }
+}, [toast, filialSelecionada]);
 
     useEffect(() => { carregarDados(); }, [carregarDados]);
 
@@ -178,6 +177,23 @@ export default function CofrePage() {
                     Histórico Completo
                 </button>
             </div>
+            const carregarDados = useCallback(async () => {
+    setLoading(true);
+    try {
+        const [s, e, h] = await Promise.all([
+            getSaldoCofre(filialSelecionada || undefined),
+            getEntradasCofrePorFechamento(filialSelecionada || undefined),
+            getHistoricoCofre(30, filialSelecionada || undefined),
+        ]);
+        setSaldo(s);
+        setEntradas(e);
+        setHistorico(h);
+    } catch (err: any) {
+        toast({ message: err.message, type: 'error' });
+    } finally {
+        setLoading(false);
+    }
+}, [toast, filialSelecionada]);
 
             {/* Tab: Entradas por Fechamento */}
             {tab === 'entradas' && (
@@ -200,9 +216,9 @@ export default function CofrePage() {
                                         )}
                                     </div>
                                     <div>
-                                        <p className="text-sm font-bold">
-                                            {e.terminal_id} — {e.operador_nome || 'Operador'}
-                                        </p>
+                                       <p className="text-sm font-bold">
+    {e.filial_nome || e.terminal_id} — {e.operador_nome || 'Operador'}
+</p>
                                         <p className="text-[10px] text-muted">
                                             Turno {e.data_turno} • {e.auditoria_status === 'aprovado' ? 'Aprovado' : 'Pendente'}
                                         </p>
@@ -306,17 +322,17 @@ export default function CofrePage() {
                                                 )}
                                             </div>
                                             <div>
-                                                <p className="text-sm font-medium">
-                                                    {m.tipo === 'entrada_fechamento' ? 'Fechamento de Turno' :
-                                                     m.tipo === 'entrada_sangria' ? 'Sangria Recebida' :
-                                                     m.tipo === 'saida_deposito' ? 'Depósito Bancário' :
-                                                     m.tipo}
-                                                </p>
-                                                <p className="text-[10px] text-muted">
-                                                    {new Date(m.data_movimentacao || m.created_at).toLocaleString('pt-BR')}
-                                                    {m.observacoes && ` — ${m.observacoes}`}
-                                                </p>
-                                            </div>
+    <p className="text-sm font-medium">
+        {m.tipo === 'entrada_fechamento' ? 'Fechamento de Turno' :
+         m.tipo === 'entrada_sangria' ? 'Sangria Recebida' :
+         m.tipo === 'saida_deposito' ? `Depósito Bancário (${m.filial_destino_nome || 'Filial não informada'})` :
+         m.tipo}
+    </p>
+    <p className="text-[10px] text-muted">
+        {new Date(m.data_movimentacao || m.created_at).toLocaleString('pt-BR')}
+        {m.observacoes && ` — ${m.observacoes}`}
+    </p>
+</div>
                                         </div>
                                         <p className={`text-sm font-black ${isEntrada ? 'text-success' : 'text-danger'}`}>
                                             {isEntrada ? '+' : '-'}R$ {Math.abs(m.valor).toFixed(2)}
