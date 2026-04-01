@@ -243,8 +243,11 @@ export default function ConciliacaoPage() {
     };
 
     const formatarData = (data: string) => {
-        return new Date(data).toLocaleDateString('pt-BR');
-    };
+    if (!data) return '-';
+    // espera o formato YYYY-MM-DD
+    const [ano, mes, dia] = data.split('-');
+    return `${dia}/${mes}/${ano}`;
+};
 
     const formatarMes = (mes: string) => {
         const [ano, mesNum] = mes.split('-');
