@@ -41,14 +41,16 @@ export async function registrarDepositoCofre(
         throw new Error(`Saldo insuficiente. Disponível: R$ ${saldoAtual.toFixed(2)}`);
     }
 
-    // 1. Registrar a movimentação no cofre (tipo 'saida_deposito')
+    // Registrar a movimentação no cofre (tipo 'saida_deposito')
     const { data: mov, error: movError } = await supabase
         .from('cofre_movimentacoes')
         .insert({
             tipo: 'saida_deposito',
             valor: valor,
-            data_movimentacao: dataDeposito ? new Date(dataDeposito) : new Date(),
+            data_movimentacao: new Date().toISOString(),
+            data_deposito: dataDeposito || new Date().toISOString().split('T')[0],
             operador_id: user.id,
+            usuario_id: user.id,
             observacoes: observacoes,
             loja_id: filialId,
             status: 'concluido',
@@ -61,26 +63,7 @@ export async function registrarDepositoCofre(
         throw new Error(`Erro ao registrar movimentação: ${movError.message}`);
     }
 
-    // 2. Registrar o depósito na tabela de conciliação (filial e valor)
-    const { error: insertError } = await supabase
-        .from('depositos_conciliacao')
-        .insert({
-            loja_id: filialId,
-            valor: valor,
-            data_deposito: dataDeposito ? new Date(dataDeposito) : new Date(),
-            observacoes: observacoes,
-            usuario_id: user.id,
-        });
-
-    if (insertError) {
-        console.error('Erro ao registrar depósito na conciliação:', insertError);
-        throw new Error(
-            'Depósito registrado no cofre, mas falha ao registrar na conciliação. Contate o suporte.'
-        );
-    }
-
     revalidatePath('/cofre');
-    revalidatePath('/conciliacao');
     return { success: true };
 }
 
