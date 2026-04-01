@@ -1,24 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import {
-    TrendingUp,
-    TrendingDown,
-    Ticket,
-    Monitor,
-    Calendar,
-    AlertTriangle,
-    CheckCircle2,
-    DollarSign,
-    Users,
-    BarChart3,
-    ArrowUpRight,
-    ArrowDownRight,
-    Zap,
-    Wallet,
-    ShieldCheck,
-    Shield
-} from 'lucide-react';
+import { useEffect, useState, useRef } from 'react';
+import { TrendingUp, TrendingDown, Ticket, Monitor, Calendar, TriangleAlert as AlertTriangle, CircleCheck as CheckCircle2, DollarSign, Users, ChartBar as BarChart3, ArrowUpRight, ArrowDownRight, Zap, Wallet, ShieldCheck, Shield } from 'lucide-react';
 import {
     AreaChart,
     Area,
@@ -97,9 +80,12 @@ export default function DashboardPage() {
         return value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     };
 
-    // Proteção de Rota
+    // Proteção de Rota - com proteção contra loops
+    const hasRedirected = useRef(false);
+
     useEffect(() => {
-        if (!loadingPerfil && !isAdmin) {
+        if (!loadingPerfil && !isAdmin && !hasRedirected.current) {
+            hasRedirected.current = true;
             router.replace('/caixa');
         }
     }, [isAdmin, loadingPerfil, router]);

@@ -90,9 +90,8 @@ export async function aprovarFechamento(sessaoId: number, observacoes?: string) 
         throw new Error(`Erro ao aprovar: ${updateError.message}`);
     }
 
-    // Revalidar páginas afetadas
+    // Revalidar página de auditoria
     revalidatePath('/auditoria');
-    revalidatePath('/conciliacao');
 
     return { success: true };
 }

@@ -313,8 +313,7 @@ export async function registrarDepositoCofre(
         }
         
         revalidatePath('/cofre');
-        revalidatePath('/conciliacao');
-        
+
         return { success: true, data };
     } catch (err: any) {
         console.error('[registrarDepositoCofre] Erro:', err);
@@ -370,8 +369,7 @@ export async function registrarEntradaCofre(
             .eq('id', sessaoId);
         
         revalidatePath('/cofre');
-        revalidatePath('/auditoria');
-        
+
         return { success: true, data };
     } catch (err: any) {
         console.error('[registrarEntradaCofre] Erro:', err);

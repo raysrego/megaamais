@@ -184,27 +184,28 @@ export async function getResumoConciliacao(
         percentual_conciliado: 0,
     };
 
-    for (const e of extratos) {
+    const stats = extratos.reduce((acc, e) => {
         switch (e.status) {
-            case 'conciliado': resumo.total_conciliados++; break;
-            case 'divergente': resumo.total_divergentes++; break;
-            case 'pendente': resumo.total_pendentes++; break;
-            case 'justificado': resumo.total_justificados++; break;
+            case 'conciliado': acc.total_conciliados++; break;
+            case 'divergente': acc.total_divergentes++; break;
+            case 'pendente': acc.total_pendentes++; break;
+            case 'justificado': acc.total_justificados++; break;
         }
-        resumo.soma_depositos_extrato += e.depositos_confirmados;
-        resumo.soma_depositos_sistema += e.depositos_sistema;
-        resumo.soma_pix_extrato += e.pix_ted_recebidos;
-        resumo.soma_pix_sistema += e.pix_sistema;
-        resumo.soma_pagamentos_extrato += e.debitos_pagamentos;
-        resumo.soma_pagamentos_sistema += e.pagamentos_sistema;
-    }
+        acc.soma_depositos_extrato += e.depositos_confirmados;
+        acc.soma_depositos_sistema += e.depositos_sistema;
+        acc.soma_pix_extrato += e.pix_ted_recebidos;
+        acc.soma_pix_sistema += e.pix_sistema;
+        acc.soma_pagamentos_extrato += e.debitos_pagamentos;
+        acc.soma_pagamentos_sistema += e.pagamentos_sistema;
+        return acc;
+    }, resumo);
 
     const total = extratos.length;
     if (total > 0) {
-        resumo.percentual_conciliado = Math.round(
-            ((resumo.total_conciliados + resumo.total_justificados) / total) * 100
+        stats.percentual_conciliado = Math.round(
+            ((stats.total_conciliados + stats.total_justificados) / total) * 100
         );
     }
 
-    return resumo;
+    return stats;
 }

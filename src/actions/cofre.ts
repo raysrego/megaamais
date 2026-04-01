@@ -70,7 +70,6 @@ export async function registrarDepositoCofre(
     }
 
     revalidatePath('/cofre');
-    revalidatePath('/conciliacao');
     return { success: true };
 }
 
