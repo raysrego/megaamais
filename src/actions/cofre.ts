@@ -3,7 +3,6 @@
 import { createClient } from '@/utils/supabase/server';
 import { revalidatePath } from 'next/cache';
 
-// ─── Registrar depósito bancário a partir do cofre (vinculado à filial) ───
 export async function registrarDepositoCofre(
     valor: number,
     filialId: string,
@@ -16,56 +15,95 @@ export async function registrarDepositoCofre(
     if (!user) throw new Error('Não autenticado');
     if (valor <= 0) throw new Error('Valor deve ser positivo');
 
-    // Verificar permissão do usuário na filial
+    // 1. Verificar se a filial existe
+    const { data: loja, error: lojaError } = await supabase
+        .from('empresas')
+        .select('id')
+        .eq('id', filialId)
+        .single();
+
+    if (lojaError || !loja) {
+        console.error('Filial não encontrada:', filialId, lojaError);
+        throw new Error('Filial não encontrada');
+    }
+
+    // 2. Verificar permissão do usuário na filial
     const { data: userData, error: userError } = await supabase
         .from('usuarios')
         .select('empresa_id, acesso_empresas')
         .eq('id', user.id)
         .single();
 
-    if (userError || !userData) throw new Error('Usuário não encontrado');
+    if (userError || !userData) {
+        console.error('Usuário não encontrado:', userError);
+        throw new Error('Usuário não encontrado');
+    }
 
     const temAcesso = userData.empresa_id === filialId ||
                       (userData.acesso_empresas?.includes(filialId) === true);
-    if (!temAcesso) throw new Error('Usuário não tem acesso a esta filial');
+    if (!temAcesso) {
+        console.error('Usuário sem acesso à filial:', { userId: user.id, filialId });
+        throw new Error('Usuário não tem acesso a esta filial');
+    }
 
-    // Verificar saldo disponível
-    const { data: saldoData } = await supabase
+    // 3. Verificar saldo disponível
+    const { data: saldoData, error: saldoError } = await supabase
         .from('cofre_saldo_atual')
         .select('saldo')
         .eq('loja_id', filialId)
-        .single();
+        .maybeSingle(); // Evita erro se não houver registro
+
+    if (saldoError) {
+        console.error('Erro ao buscar saldo:', saldoError);
+        throw new Error('Erro ao verificar saldo');
+    }
 
     const saldoAtual = saldoData?.saldo ?? 0;
     if (valor > saldoAtual) {
         throw new Error(`Saldo insuficiente. Disponível: R$ ${saldoAtual.toFixed(2)}`);
     }
 
-    // Registrar a movimentação no cofre (tipo 'saida_deposito')
-    const { data: mov, error: movError } = await supabase
-        .from('cofre_movimentacoes')
-        .insert({
-            tipo: 'saida_deposito',
-            valor: valor,
-            data_movimentacao: new Date().toISOString(),
-            data_deposito: dataDeposito || new Date().toISOString().split('T')[0],
-            operador_id: user.id,
-            usuario_id: user.id,
-            observacoes: observacoes,
-            loja_id: filialId,
-            status: 'concluido',
-        })
-        .select('id')
-        .single();
+    // 4. Preparar data de depósito
+    let dataDepositoDate: Date;
+    if (dataDeposito) {
+        dataDepositoDate = new Date(dataDeposito);
+        if (isNaN(dataDepositoDate.getTime())) {
+            throw new Error('Data de depósito inválida');
+        }
+    } else {
+        dataDepositoDate = new Date();
+    }
 
-    if (movError) {
-        console.error('Erro ao inserir cofre_movimentacoes:', movError);
-        throw new Error(`Erro ao registrar movimentação: ${movError.message}`);
+    // 5. Inserir movimentação
+    const insertData = {
+        tipo: 'saida_deposito',
+        valor: valor,
+        data_movimentacao: new Date().toISOString(),
+        data_deposito: dataDepositoDate.toISOString(),
+        operador_id: user.id,
+        usuario_id: user.id,
+        observacoes: observacoes || null,
+        loja_id: filialId,
+        status: 'concluido',
+    };
+
+    console.log('Inserindo cofre_movimentacoes:', insertData);
+
+    const { data, error } = await supabase
+        .from('cofre_movimentacoes')
+        .insert(insertData)
+        .select();
+
+    if (error) {
+        console.error('Erro detalhado ao inserir cofre_movimentacoes:', error);
+        throw new Error(`Erro ao registrar movimentação: ${error.message}`);
     }
 
     revalidatePath('/cofre');
     return { success: true };
 }
+
+// (mantenha as demais funções do arquivo: getEntradasCofrePorFechamento, getSaldoCofre, etc.)
 
 // ─── Buscar entradas do cofre por fechamento aprovado ───
 export async function getEntradasCofrePorFechamento() {
