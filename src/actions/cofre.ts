@@ -84,6 +84,8 @@ export async function registrarDepositoCofre(
     return { success: true };
 }
 
+
+
 // ─── Buscar entradas do cofre por fechamento aprovado ───
 export async function getEntradasCofrePorFechamento() {
     const supabase = await createClient();
