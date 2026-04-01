@@ -10,7 +10,8 @@ import {
     Loader2,
     X,
     TrendingUp,
-    TrendingDown
+    TrendingDown,
+    Filter
 } from 'lucide-react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import { useToast } from '@/contexts/ToastContext';
@@ -18,7 +19,6 @@ import {
     getFechamentosAuditoria,
     aprovarFechamento,
     rejeitarFechamento,
-    getMovimentacoesSessao,
     type FechamentoAuditoria
 } from '@/actions/auditoria';
 
@@ -247,13 +247,19 @@ export function AuditoriaFechamentos() {
     const [fechamentos, setFechamentos] = useState<Fechamento[]>([]);
     const [selectedFechamento, setSelectedFechamento] = useState<Fechamento | null>(null);
     const [showValidationModal, setShowValidationModal] = useState(false);
-    const [filtroStatus, setFiltroStatus] = useState<'todos' | 'fechado' | 'divergente' | 'batido'>('todos');
+    const [filtroStatus, setFiltroStatus] = useState<'todos' | 'pendente' | 'aprovado' | 'rejeitado'>('todos');
+
+    // Filtros por data
+    const [filtroDataInicio, setFiltroDataInicio] = useState('');
+    const [filtroDataFim, setFiltroDataFim] = useState('');
 
     const fetchHistorico = useCallback(async () => {
         setLoading(true);
         try {
             const data = await getFechamentosAuditoria({
                 status: filtroStatus !== 'todos' ? filtroStatus : undefined,
+                dataInicio: filtroDataInicio || undefined,
+                dataFim: filtroDataFim || undefined,
             });
 
             const fechamentosProcessados: Fechamento[] = data.map((f: any) => {
@@ -303,7 +309,7 @@ export function AuditoriaFechamentos() {
         } finally {
             setLoading(false);
         }
-    }, [filtroStatus, toast]);
+    }, [filtroStatus, filtroDataInicio, filtroDataFim, toast]);
 
     useEffect(() => {
         fetchHistorico();
@@ -369,6 +375,12 @@ export function AuditoriaFechamentos() {
         );
     };
 
+    const limparFiltros = () => {
+        setFiltroDataInicio('');
+        setFiltroDataFim('');
+        setFiltroStatus('todos');
+    };
+
     if (loading) {
         return (
             <div className="flex items-center justify-center p-12">
@@ -406,6 +418,39 @@ export function AuditoriaFechamentos() {
                 </div>
             </div>
 
+            {/* Filtros por data */}
+            <div className="mb-6 p-4 rounded-xl bg-surface-subtle border border-border">
+                <div className="flex items-center gap-2 mb-3">
+                    <Filter size={16} className="text-primary-blue-light" />
+                    <h4 className="text-sm font-bold">Filtrar por Período</h4>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label className="text-[10px] font-bold text-muted uppercase block mb-1">Data Início</label>
+                        <input
+                            type="date"
+                            value={filtroDataInicio}
+                            onChange={e => setFiltroDataInicio(e.target.value)}
+                            className="input w-full text-sm"
+                        />
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-bold text-muted uppercase block mb-1">Data Fim</label>
+                        <input
+                            type="date"
+                            value={filtroDataFim}
+                            onChange={e => setFiltroDataFim(e.target.value)}
+                            className="input w-full text-sm"
+                        />
+                    </div>
+                </div>
+                <div className="flex justify-end mt-3">
+                    <button onClick={limparFiltros} className="btn btn-ghost btn-sm text-xs">
+                        <X size={12} /> Limpar Filtros
+                    </button>
+                </div>
+            </div>
+
             <div style={{ display: 'grid', gridTemplateColumns: selectedFechamento ? '1fr 480px' : '1fr', gap: '1.5rem' }}>
                 {/* Tabela */}
                 <div className="card p-0 overflow-hidden">
@@ -418,13 +463,13 @@ export function AuditoriaFechamentos() {
                         <div className="table-container pt-0">
                             <table className="w-full">
                                 <thead>
-                                    <tr>
-                                        <th>Data Turno</th>
-                                        <th>Data Fechamento</th>
-                                        <th>Terminal</th>
-                                        <th>Operador</th>
-                                        <th>Status</th>
-                                        <th className="text-right">Valor na Conta</th>
+                                    <tr className="border-b border-border">
+                                        <th className="text-left py-2 px-2 text-xs font-bold text-muted uppercase">Data Turno</th>
+                                        <th className="text-left py-2 px-2 text-xs font-bold text-muted uppercase">Data Fechamento</th>
+                                        <th className="text-left py-2 px-2 text-xs font-bold text-muted uppercase">Terminal</th>
+                                        <th className="text-left py-2 px-2 text-xs font-bold text-muted uppercase">Operador</th>
+                                        <th className="text-left py-2 px-2 text-xs font-bold text-muted uppercase">Status</th>
+                                        <th className="text-right py-2 px-2 text-xs font-bold text-muted uppercase">Valor na Conta</th>
                                         <th style={{ width: '50px' }}></th>
                                     </tr>
                                 </thead>
