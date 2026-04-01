@@ -3,6 +3,7 @@
 import { createClient } from '@/utils/supabase/server';
 import { revalidatePath } from 'next/cache';
 
+// ─── Registrar depósito bancário a partir do cofre (vinculado à filial) ───
 export async function registrarDepositoCofre(
     valor: number,
     filialId: string,
@@ -15,7 +16,7 @@ export async function registrarDepositoCofre(
     if (!user) throw new Error('Não autenticado');
     if (valor <= 0) throw new Error('Valor deve ser positivo');
 
-    // Verificar permissão e saldo (como antes)
+    // Verificar permissão do usuário na filial
     const { data: userData, error: userError } = await supabase
         .from('usuarios')
         .select('empresa_id, acesso_empresas')
@@ -28,7 +29,7 @@ export async function registrarDepositoCofre(
                       (userData.acesso_empresas?.includes(filialId) === true);
     if (!temAcesso) throw new Error('Usuário não tem acesso a esta filial');
 
-    // Verificar saldo (usando view ou consulta direta)
+    // Verificar saldo disponível
     const { data: saldoData, error: saldoError } = await supabase
         .from('cofre_saldo_atual')
         .select('saldo')
@@ -41,11 +42,10 @@ export async function registrarDepositoCofre(
         throw new Error(`Saldo insuficiente. Disponível: R$ ${saldoAtual.toFixed(2)}`);
     }
 
-    // Data do depósito (formato date)
     const depositDate = dataDeposito ? new Date(dataDeposito) : new Date();
     const depositDateString = depositDate.toISOString().split('T')[0]; // YYYY-MM-DD
 
-    // 1. Inserir na tabela cofre_movimentacoes
+    // 1. Registrar a movimentação no cofre (tipo 'saida_deposito')
     const { error: movError } = await supabase
         .from('cofre_movimentacoes')
         .insert({
@@ -65,7 +65,7 @@ export async function registrarDepositoCofre(
         throw new Error(`Erro ao registrar movimentação: ${movError.message}`);
     }
 
-    // 2. Inserir na tabela depositos_conciliacao
+    // 2. Registrar na tabela de conciliação (depositos_conciliacao)
     const { error: concError } = await supabase
         .from('depositos_conciliacao')
         .insert({
@@ -78,16 +78,13 @@ export async function registrarDepositoCofre(
 
     if (concError) {
         console.error('Erro ao inserir depositos_conciliacao:', concError);
-        // Se falhar, devemos reverter o primeiro insert? Por simplicidade, só logamos e lançamos erro.
-        throw new Error('Depósito registrado no cofre, mas falha na conciliação.');
+        throw new Error('Depósito registrado no cofre, mas falha na conciliação. Contate o suporte.');
     }
 
     revalidatePath('/cofre');
     revalidatePath('/conciliacao');
     return { success: true };
 }
-
-// (mantenha as demais funções do arquivo: getEntradasCofrePorFechamento, getSaldoCofre, etc.)
 
 // ─── Buscar entradas do cofre por fechamento aprovado ───
 export async function getEntradasCofrePorFechamento(lojaId?: string) {
