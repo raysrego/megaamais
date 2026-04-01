@@ -84,8 +84,6 @@ export async function registrarDepositoCofre(
     return { success: true };
 }
 
-
-
 // ─── Buscar entradas do cofre por fechamento aprovado ───
 export async function getEntradasCofrePorFechamento() {
     const supabase = await createClient();
@@ -141,36 +139,5 @@ export async function getDepositosPendentes() {
         .order('data_movimentacao', { ascending: false });
 
     if (error) throw new Error(`Erro: ${error.message}`);
-    return data ?? [];
-}
-
-// ─── Buscar filiais que o usuário pode acessar (substitui getEmpresas) ───
-export async function getLojasUsuario() {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return [];
-
-    const { data: userData } = await supabase
-        .from('usuarios')
-        .select('empresa_id, acesso_empresas')
-        .eq('id', user.id)
-        .single();
-
-    let lojaIds: string[] = [];
-    if (userData?.empresa_id) lojaIds.push(userData.empresa_id);
-    if (userData?.acesso_empresas && Array.isArray(userData.acesso_empresas)) {
-        lojaIds.push(...userData.acesso_empresas);
-    }
-    lojaIds = [...new Set(lojaIds)];
-
-    if (lojaIds.length === 0) return [];
-
-    const { data, error } = await supabase
-        .from('empresas')
-        .select('id, nome_fantasia, nome')
-        .in('id', lojaIds)
-        .eq('ativo', true);
-
-    if (error) throw new Error(`Erro ao buscar lojas: ${error.message}`);
     return data ?? [];
 }
