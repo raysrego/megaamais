@@ -3,11 +3,10 @@
 import { createClient } from '@/utils/supabase/server';
 import { revalidatePath } from 'next/cache';
 
-// ─── Registrar depósito bancário a partir do cofre ───
-// Agora também registra na tabela depositos_conciliacao para conciliação por filial
+// ─── Registrar depósito bancário a partir do cofre (vinculado à filial) ───
 export async function registrarDepositoCofre(
     valor: number,
-    contaBancariaId: string,
+    filialId: string,
     observacoes?: string,
     dataDeposito?: string
 ) {
@@ -17,43 +16,56 @@ export async function registrarDepositoCofre(
     if (!user) throw new Error('Não autenticado');
     if (valor <= 0) throw new Error('Valor deve ser positivo');
 
-    // Obter empresa principal do usuário (filial)
+    // Verificar permissão do usuário na filial
     const { data: userData, error: userError } = await supabase
         .from('usuarios')
-        .select('empresa_id')
+        .select('empresa_id, acesso_empresas')
         .eq('id', user.id)
         .single();
 
-    if (userError || !userData?.empresa_id) {
-        throw new Error('Usuário não possui uma empresa vinculada');
+    if (userError || !userData) throw new Error('Usuário não encontrado');
+
+    const temAcesso = userData.empresa_id === filialId ||
+                      (userData.acesso_empresas?.includes(filialId) === true);
+    if (!temAcesso) throw new Error('Usuário não tem acesso a esta filial');
+
+    // Verificar saldo disponível
+    const { data: saldoData } = await supabase
+        .from('cofre_saldo_atual')
+        .select('saldo')
+        .eq('loja_id', filialId)
+        .single();
+
+    const saldoAtual = saldoData?.saldo ?? 0;
+    if (valor > saldoAtual) {
+        throw new Error(`Saldo insuficiente. Disponível: R$ ${saldoAtual.toFixed(2)}`);
     }
 
-    const lojaId = userData.empresa_id;
+    // 1. Registrar a movimentação no cofre (tipo 'saida_deposito')
+    const { data: mov, error: movError } = await supabase
+        .from('cofre_movimentacoes')
+        .insert({
+            tipo: 'saida_deposito',
+            valor: valor,
+            data_movimentacao: dataDeposito ? new Date(dataDeposito) : new Date(),
+            operador_id: user.id,
+            observacoes: observacoes,
+            loja_id: filialId,
+            status: 'concluido',
+        })
+        .select('id')
+        .single();
 
-    // 1. Registrar a movimentação no cofre (RPC existente)
-    const { data, error } = await supabase.rpc('registrar_deposito_cofre', {
-        p_valor: valor,
-        p_conta_id: contaBancariaId,
-        p_usuario_id: user.id,
-        p_observacoes: observacoes ?? null,
-        p_data_deposito: dataDeposito ?? null,
-    });
-
-    if (error) {
-        console.error('Erro ao registrar depósito no cofre:', error);
-        throw new Error(`Erro ao registrar depósito: ${error.message}`);
-    }
-
-    const resultado = data as { success: boolean; error?: string };
-    if (!resultado.success) {
-        throw new Error(resultado.error || 'Erro ao registrar depósito');
+    if (movError) {
+        console.error('Erro ao inserir cofre_movimentacoes:', movError);
+        throw new Error(`Erro ao registrar movimentação: ${movError.message}`);
     }
 
     // 2. Registrar o depósito na tabela de conciliação (filial e valor)
     const { error: insertError } = await supabase
         .from('depositos_conciliacao')
         .insert({
-            loja_id: lojaId,
+            loja_id: filialId,
             valor: valor,
             data_deposito: dataDeposito ? new Date(dataDeposito) : new Date(),
             observacoes: observacoes,
@@ -62,14 +74,13 @@ export async function registrarDepositoCofre(
 
     if (insertError) {
         console.error('Erro ao registrar depósito na conciliação:', insertError);
-        // Não lançamos erro aqui para não impedir o fluxo principal,
-        // mas registramos o erro e avisamos o usuário (toast será exibido no frontend)
         throw new Error(
             'Depósito registrado no cofre, mas falha ao registrar na conciliação. Contate o suporte.'
         );
     }
 
     revalidatePath('/cofre');
+    revalidatePath('/conciliacao');
     return { success: true };
 }
 
@@ -128,5 +139,36 @@ export async function getDepositosPendentes() {
         .order('data_movimentacao', { ascending: false });
 
     if (error) throw new Error(`Erro: ${error.message}`);
+    return data ?? [];
+}
+
+// ─── Buscar filiais que o usuário pode acessar (substitui getEmpresas) ───
+export async function getLojasUsuario() {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return [];
+
+    const { data: userData } = await supabase
+        .from('usuarios')
+        .select('empresa_id, acesso_empresas')
+        .eq('id', user.id)
+        .single();
+
+    let lojaIds: string[] = [];
+    if (userData?.empresa_id) lojaIds.push(userData.empresa_id);
+    if (userData?.acesso_empresas && Array.isArray(userData.acesso_empresas)) {
+        lojaIds.push(...userData.acesso_empresas);
+    }
+    lojaIds = [...new Set(lojaIds)];
+
+    if (lojaIds.length === 0) return [];
+
+    const { data, error } = await supabase
+        .from('empresas')
+        .select('id, nome_fantasia, nome')
+        .in('id', lojaIds)
+        .eq('ativo', true);
+
+    if (error) throw new Error(`Erro ao buscar lojas: ${error.message}`);
     return data ?? [];
 }
