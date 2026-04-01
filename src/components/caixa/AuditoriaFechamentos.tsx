@@ -1,18 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import {
-    ChevronRight,
-    CheckCircle2,
-    AlertTriangle,
-    RefreshCw,
-    ShieldCheck,
-    Loader2,
-    X,
-    TrendingUp,
-    TrendingDown,
-    Filter
-} from 'lucide-react';
+import { ChevronRight, CircleCheck as CheckCircle2, TriangleAlert as AlertTriangle, RefreshCw, ShieldCheck, Loader as Loader2, X, TrendingUp, TrendingDown, ListFilter as Filter } from 'lucide-react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import { useToast } from '@/contexts/ToastContext';
 import {
@@ -322,14 +311,10 @@ export function AuditoriaFechamentos() {
     const handleAprovar = async (sessaoId: number, observacoes: string) => {
         console.log('[Auditoria] Aprovando:', sessaoId, observacoes);
         try {
-            const result = await aprovarFechamento(sessaoId, observacoes);
-            if (result.success) {
-                toast({ message: 'Fechamento aprovado com sucesso!', type: 'success' });
-                await fetchHistorico();
-                setSelectedFechamento(null);
-            } else {
-                toast({ message: result.error || 'Erro ao aprovar', type: 'error' });
-            }
+            await aprovarFechamento(sessaoId, observacoes);
+            toast({ message: 'Fechamento aprovado com sucesso!', type: 'success' });
+            await fetchHistorico();
+            setSelectedFechamento(null);
         } catch (error: any) {
             console.error('[Auditoria] Erro:', error);
             toast({ message: error.message || 'Erro ao aprovar', type: 'error' });
@@ -340,14 +325,10 @@ export function AuditoriaFechamentos() {
     const handleRejeitar = async (sessaoId: number, justificativa: string) => {
         console.log('[Auditoria] Rejeitando:', sessaoId, justificativa);
         try {
-            const result = await rejeitarFechamento(sessaoId, justificativa, false);
-            if (result.success) {
-                toast({ message: 'Fechamento rejeitado!', type: 'warning' });
-                await fetchHistorico();
-                setSelectedFechamento(null);
-            } else {
-                toast({ message: result.error || 'Erro ao rejeitar', type: 'error' });
-            }
+            await rejeitarFechamento(sessaoId, justificativa, false);
+            toast({ message: 'Fechamento rejeitado!', type: 'warning' });
+            await fetchHistorico();
+            setSelectedFechamento(null);
         } catch (error: any) {
             console.error('[Auditoria] Erro:', error);
             toast({ message: error.message || 'Erro ao rejeitar', type: 'error' });
