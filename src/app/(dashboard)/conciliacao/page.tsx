@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Loader2, TrendingUp, RefreshCw, Filter, ArrowDownCircle, X, Wallet, History } from 'lucide-react';
+import { Loader2, TrendingUp, RefreshCw, Filter, ArrowDownCircle, X, Wallet, History, Smartphone } from 'lucide-react';
 import { useToast } from '@/contexts/ToastContext';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 
@@ -16,6 +16,19 @@ interface DepositoConciliacao {
     data_deposito: string;
     observacoes: string;
     usuario_nome?: string;
+}
+
+interface TransacaoTFL {
+    sessao_id: number;
+    loja_id: string;
+    data_turno: string;
+    total_entradas: number;
+    valor_cofre: number;
+    pix_externo: number;
+    valor_liquido: number;
+    auditoria_status: string;
+    auditoria_data: string;
+    operador_nome: string;
 }
 
 export default function ConciliacaoPage() {
@@ -41,7 +54,9 @@ export default function ConciliacaoPage() {
     // Dados principais
     const [totalEntradas, setTotalEntradas] = useState(0);
     const [totalDepositado, setTotalDepositado] = useState(0);
+    const [totalPixExterno, setTotalPixExterno] = useState(0);
     const [depositosDetalhes, setDepositosDetalhes] = useState<DepositoConciliacao[]>([]);
+    const [historicoTFL, setHistoricoTFL] = useState<TransacaoTFL[]>([]);
 
     // Filtros para histórico de depósitos
     const [filtroDepositoDataInicio, setFiltroDepositoDataInicio] = useState('');
@@ -116,7 +131,7 @@ export default function ConciliacaoPage() {
         }
     }, [supabase, lojaSelecionada]);
 
-    // Buscar dados de conciliação (entradas líquidas e depósitos)
+    // Buscar dados de conciliação (entradas líquidas, depósitos, PIX externo, histórico TFL)
     const buscarDadosConciliacao = useCallback(async (showLoading: boolean = true) => {
         if (!lojaSelecionada) return;
 
@@ -198,6 +213,84 @@ export default function ConciliacaoPage() {
             } else {
                 setDepositosDetalhes([]);
             }
+
+            // 3. PIX externo (via view ou consulta direta)
+            const { data: pixData, error: pixError } = await supabase
+                .from('vw_pix_externo_conciliacao')
+                .select('total_pix_externo')
+                .eq('loja_id', lojaSelecionada)
+                .gte('data_movimento', dataInicioSQL)
+                .lte('data_movimento', dataFimSQL);
+
+            if (pixError) {
+                // Fallback: calcular direto da tabela caixa_sessoes se a view não existir
+                const { data: fallbackPix, error: fallbackError } = await supabase
+                    .from('caixa_sessoes')
+                    .select('pix_externo_informado')
+                    .eq('loja_id', lojaSelecionada)
+                    .eq('auditoria_status', 'aprovado')
+                    .gte('data_turno', dataInicioSQL)
+                    .lte('data_turno', dataFimSQL);
+                if (!fallbackError && fallbackPix) {
+                    const total = fallbackPix.reduce((sum, p) => sum + (p.pix_externo_informado || 0), 0);
+                    setTotalPixExterno(total);
+                } else {
+                    setTotalPixExterno(0);
+                }
+            } else {
+                const total = pixData?.reduce((sum, p) => sum + (p.total_pix_externo || 0), 0) || 0;
+                setTotalPixExterno(total);
+            }
+
+            // 4. Histórico de transações TFL (entradas auditadas)
+            const { data: tflData, error: tflError } = await supabase
+                .from('vw_historico_tfl_conciliacao')
+                .select('*')
+                .eq('loja_id', lojaSelecionada)
+                .gte('data_turno', dataInicioSQL)
+                .lte('data_turno', dataFimSQL)
+                .order('data_turno', { ascending: false });
+
+            if (tflError) {
+                // Fallback: buscar diretamente da tabela caixa_sessoes
+                const { data: fallbackTFL, error: fallbackTFLError } = await supabase
+                    .from('caixa_sessoes')
+                    .select(`
+                        id,
+                        data_turno,
+                        resumo_total_entradas,
+                        valor_enviado_cofre,
+                        pix_externo_informado,
+                        operador_id,
+                        usuarios (nome)
+                    `)
+                    .eq('loja_id', lojaSelecionada)
+                    .eq('auditoria_status', 'aprovado')
+                    .gte('data_turno', dataInicioSQL)
+                    .lte('data_turno', dataFimSQL)
+                    .order('data_turno', { ascending: false });
+
+                if (!fallbackTFLError && fallbackTFL) {
+                    const mapped: TransacaoTFL[] = fallbackTFL.map((item: any) => ({
+                        sessao_id: item.id,
+                        loja_id: lojaSelecionada,
+                        data_turno: item.data_turno,
+                        total_entradas: item.resumo_total_entradas || 0,
+                        valor_cofre: item.valor_enviado_cofre || 0,
+                        pix_externo: item.pix_externo_informado || 0,
+                        valor_liquido: (item.resumo_total_entradas || 0) - (item.valor_enviado_cofre || 0),
+                        auditoria_status: 'aprovado',
+                        auditoria_data: '',
+                        operador_nome: item.usuarios?.nome || 'Sistema'
+                    }));
+                    setHistoricoTFL(mapped);
+                } else {
+                    setHistoricoTFL([]);
+                }
+            } else {
+                setHistoricoTFL(tflData || []);
+            }
+
         } catch (err: any) {
             console.error('Erro ao buscar dados de conciliação:', err);
             toast({ message: err.message || 'Erro ao carregar dados', type: 'error' });
@@ -209,24 +302,18 @@ export default function ConciliacaoPage() {
 
     // Função para limpar todos os filtros principais
     const limparFiltrosPrincipais = () => {
-        // Resetar seleção de filial para a primeira
         if (lojas.length > 0) {
             setLojaSelecionada(lojas[0].id);
         }
-        // Resetar mês atual
         const hoje = new Date();
         const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
         setMesReferencia(mesAtual);
-        // Resetar período personalizado
         setDataInicio('');
         setDataFim('');
-        // Resetar tipo de filtro para "mês"
         setFiltroTipo('mes');
-        // Limpar também os filtros de depósitos (opcional)
         setFiltroDepositoDataInicio('');
         setFiltroDepositoDataFim('');
         setFiltroValorMin('');
-        // Buscar dados após limpar (o useEffect cuidará disso)
     };
 
     // Aplicar filtros nos depósitos (client-side)
@@ -381,7 +468,7 @@ export default function ConciliacaoPage() {
             {/* Cards de Resumo */}
             {lojaSelecionada && (
                 <>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="card p-4 bg-success/5 border-success/20">
                             <div className="flex items-center gap-2 mb-2">
                                 <TrendingUp size={16} className="text-success" />
@@ -403,7 +490,54 @@ export default function ConciliacaoPage() {
                                 {depositosDetalhes.length} {depositosDetalhes.length === 1 ? 'depósito' : 'depósitos'} no período
                             </p>
                         </div>
+
+                        <div className="card p-4 bg-yellow-500/5 border-yellow-500/20">
+                            <div className="flex items-center gap-2 mb-2">
+                                <Smartphone size={16} className="text-yellow-500" />
+                                <p className="text-[10px] font-bold text-yellow-500 uppercase">PIX Externo (Jogos avulsos)</p>
+                            </div>
+                            <p className="text-2xl font-bold text-yellow-500">{formatarMoeda(totalPixExterno)}</p>
+                            <p className="text-[10px] text-muted mt-2">
+                                Total de PIX recebidos fora do sistema no período
+                            </p>
+                        </div>
                     </div>
+
+                    {/* Histórico de Transações TFL */}
+                    {historicoTFL.length > 0 && (
+                        <div className="card p-6">
+                            <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
+                                <History size={18} className="text-success" />
+                                Histórico de Entradas TFL (Auditadas)
+                            </h2>
+                            <div className="overflow-x-auto">
+                                <table className="w-full">
+                                    <thead>
+                                        <tr className="border-b border-border">
+                                            <th className="text-left py-2 px-2 text-xs font-bold text-muted uppercase">Data</th>
+                                            <th className="text-right py-2 px-2 text-xs font-bold text-muted uppercase">Total Entradas</th>
+                                            <th className="text-right py-2 px-2 text-xs font-bold text-muted uppercase">Valor Cofre</th>
+                                            <th className="text-right py-2 px-2 text-xs font-bold text-muted uppercase">Valor Líquido</th>
+                                            <th className="text-right py-2 px-2 text-xs font-bold text-muted uppercase">PIX Externo</th>
+                                            <th className="text-left py-2 px-2 text-xs font-bold text-muted uppercase">Operador</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {historicoTFL.map((item) => (
+                                            <tr key={item.sessao_id} className="border-b border-border/50 hover:bg-surface-subtle transition-colors">
+                                                <td className="py-2 px-2 text-sm">{formatarData(item.data_turno)}</td>
+                                                <td className="py-2 px-2 text-right text-sm">{formatarMoeda(item.total_entradas)}</td>
+                                                <td className="py-2 px-2 text-right text-sm text-danger">{formatarMoeda(item.valor_cofre)}</td>
+                                                <td className="py-2 px-2 text-right text-sm font-bold text-success">{formatarMoeda(item.valor_liquido)}</td>
+                                                <td className="py-2 px-2 text-right text-sm text-yellow-600">{formatarMoeda(item.pix_externo)}</td>
+                                                <td className="py-2 px-2 text-sm text-muted">{item.operador_nome || '-'}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Histórico de Depósitos */}
                     {depositosDetalhes.length > 0 && (
