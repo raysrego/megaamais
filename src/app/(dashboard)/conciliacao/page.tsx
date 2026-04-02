@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { Loader2, TrendingUp, RefreshCw, Filter, ArrowDownCircle, X, Wallet, History, Smartphone } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Loader2, TrendingUp, RefreshCw, Filter, ArrowDownCircle, X, Wallet, History, Smartphone, Calendar } from 'lucide-react';
 import { useToast } from '@/contexts/ToastContext';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 
@@ -64,8 +64,17 @@ export default function ConciliacaoPage() {
     const [filtroValorMin, setFiltroValorMin] = useState('');
     const [depositosFiltrados, setDepositosFiltrados] = useState<DepositoConciliacao[]>([]);
 
+    // Filtro de dia para histórico TFL
+    const [filtroTFLDia, setFiltroTFLDia] = useState('');
+
     // Estado para controlar a aba ativa: 'tfl' (principal) ou 'depositos'
     const [abaAtiva, setAbaAtiva] = useState<'tfl' | 'depositos'>('tfl');
+
+    // Filtrar histórico TFL por dia (client-side)
+    const historicoTFLFiltrado = useMemo(() => {
+        if (!filtroTFLDia) return historicoTFL;
+        return historicoTFL.filter(item => item.data_turno === filtroTFLDia);
+    }, [historicoTFL, filtroTFLDia]);
 
     // Carregar lojas do usuário
     const carregarLojas = useCallback(async () => {
@@ -289,6 +298,8 @@ export default function ConciliacaoPage() {
                 setHistoricoTFL(tflData || []);
             }
 
+            // Resetar filtro de dia TFL ao trocar período
+            setFiltroTFLDia('');
         } catch (err: any) {
             console.error('Erro ao buscar dados de conciliação:', err);
             toast({ message: err.message || 'Erro ao carregar dados', type: 'error' });
@@ -309,6 +320,7 @@ export default function ConciliacaoPage() {
         setFiltroDepositoDataInicio('');
         setFiltroDepositoDataFim('');
         setFiltroValorMin('');
+        setFiltroTFLDia('');
         setAbaAtiva('tfl');
     };
 
@@ -470,12 +482,32 @@ export default function ConciliacaoPage() {
                     {/* Aba: Entradas TFL */}
                     {abaAtiva === 'tfl' && (
                         <div className="card p-6">
-                            <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
-                                <History size={18} className="text-success" />
-                                Histórico de Entradas TFL (Auditadas)
-                            </h2>
-                            {historicoTFL.length === 0 ? (
-                                <p className="text-center text-muted text-sm py-8">Nenhum fechamento aprovado no período.</p>
+                            <div className="flex justify-between items-center mb-4">
+                                <h2 className="text-lg font-bold flex items-center gap-2">
+                                    <History size={18} className="text-success" />
+                                    Histórico de Entradas TFL (Auditadas)
+                                </h2>
+                                {/* Filtro de dia */}
+                                <div className="flex items-center gap-2">
+                                    <Calendar size={16} className="text-muted" />
+                                    <input
+                                        type="date"
+                                        value={filtroTFLDia}
+                                        onChange={e => setFiltroTFLDia(e.target.value)}
+                                        className="input text-sm w-40"
+                                        placeholder="Filtrar por dia"
+                                    />
+                                    {filtroTFLDia && (
+                                        <button onClick={() => setFiltroTFLDia('')} className="btn btn-ghost btn-sm p-1">
+                                            <X size={14} />
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                            {historicoTFLFiltrado.length === 0 ? (
+                                <p className="text-center text-muted text-sm py-8">
+                                    {historicoTFL.length === 0 ? 'Nenhum fechamento aprovado no período.' : 'Nenhum fechamento encontrado para o dia selecionado.'}
+                                </p>
                             ) : (
                                 <div className="overflow-x-auto">
                                     <table className="w-full">
@@ -490,7 +522,7 @@ export default function ConciliacaoPage() {
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {historicoTFL.map(item => (
+                                            {historicoTFLFiltrado.map(item => (
                                                 <tr key={item.sessao_id} className="border-b border-border/50 hover:bg-surface-subtle">
                                                     <td className="py-2 px-2 text-sm">{formatarData(item.data_turno)}</td>
                                                     <td className="py-2 px-2 text-right text-sm">{formatarMoeda(item.total_entradas)}</td>
