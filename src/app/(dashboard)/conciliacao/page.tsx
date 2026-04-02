@@ -144,7 +144,7 @@ export default function ConciliacaoPage() {
     }, [supabase, lojaSelecionada]);
 
     // Buscar dados de conciliação (entradas líquidas, depósitos, PIX externo, histórico TFL)
-    const buscarDadosConciliacao = useCallback(async (showLoading: boolean = true) => {
+    const buscarDadosConciliacao = useCallback(async (showLoading: boolean = true, showToast: boolean = false) => {
         if (!lojaSelecionada) return;
 
         if (showLoading) {
@@ -164,7 +164,9 @@ export default function ConciliacaoPage() {
                 dataFimSQL = `${mesReferencia}-${ultimoDia}`;
             } else {
                 if (!dataInicio || !dataFim) {
-                    toast({ message: 'Preencha as datas de início e fim para o período personalizado', type: 'warning' });
+                    if (showToast) {
+                        toast({ message: 'Preencha as datas de início e fim para o período personalizado', type: 'warning' });
+                    }
                     if (showLoading) setLoading(false);
                     else setRefreshing(false);
                     return;
@@ -338,9 +340,10 @@ export default function ConciliacaoPage() {
 
     useEffect(() => { carregarLojas(); }, [carregarLojas]);
 
+    // Busca automática quando os filtros mudam (sem toast)
     useEffect(() => {
         if (lojaSelecionada && !initialLoad) {
-            buscarDadosConciliacao(true);
+            buscarDadosConciliacao(true, false);
         }
     }, [lojaSelecionada, mesReferencia, filtroTipo, dataInicio, dataFim, initialLoad, buscarDadosConciliacao]);
 
@@ -358,6 +361,15 @@ export default function ConciliacaoPage() {
         setFiltroDepositoDataInicio('');
         setFiltroDepositoDataFim('');
         setFiltroValorMin('');
+    };
+
+    // Função para atualizar via botão (com toast)
+    const handleAtualizar = () => {
+        if (filtroTipo === 'periodo' && (!dataInicio || !dataFim)) {
+            toast({ message: 'Preencha as datas de início e fim para o período personalizado', type: 'warning' });
+            return;
+        }
+        buscarDadosConciliacao(false, true);
     };
 
     if (initialLoad || (loading && !totalEntradas && !totalDepositado && lojaSelecionada)) {
@@ -382,7 +394,7 @@ export default function ConciliacaoPage() {
                     </div>
                 </div>
                 <div className="flex gap-2">
-                    <button onClick={() => buscarDadosConciliacao(false)} disabled={refreshing} className="btn btn-ghost btn-sm">
+                    <button onClick={handleAtualizar} disabled={refreshing} className="btn btn-ghost btn-sm">
                         {refreshing ? <Loader2 className="animate-spin" size={14} /> : <RefreshCw size={14} />}
                         Atualizar
                     </button>
@@ -487,7 +499,6 @@ export default function ConciliacaoPage() {
                                     <History size={18} className="text-success" />
                                     Histórico de Entradas TFL (Auditadas)
                                 </h2>
-                                {/* Filtro de dia */}
                                 <div className="flex items-center gap-2">
                                     <Calendar size={16} className="text-muted" />
                                     <input
