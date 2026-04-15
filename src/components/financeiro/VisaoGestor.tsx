@@ -77,6 +77,9 @@ export function VisaoGestor() {
     const [mesSelecionado, setMesSelecionado] = useState(new Date().getMonth() + 1);
     const [visualizacaoAnual, setVisualizacaoAnual] = useState(false);
 
+    // NOVO: filtro de modalidade
+    const [modalidadeFilter, setModalidadeFilter] = useState<'all' | 'FIXO_MENSAL' | 'FIXO_VARIAVEL' | 'VARIAVEL'>('all');
+
     // Filtros para o DRE (intervalo personalizado)
     const hoje = new Date();
     const [dataInicio, setDataInicio] = useState(() => {
@@ -201,6 +204,19 @@ export function VisaoGestor() {
         }
     };
 
+    // Função para extrair modalidade de uma transação
+    const getModalidadeFromTransacao = useCallback((t: TransacaoFinanceira): string => {
+        if (t.recorrente && t.frequencia === 'mensal') return 'FIXO_MENSAL';
+        if (t.recorrente && t.frequencia === 'mensal_variavel') return 'FIXO_VARIAVEL';
+        if (t.recorrente) {
+            // fallback para buscar no catálogo
+            const cat = categorias.find(c => c.id === t.item_financeiro_id) || categorias.find(c => c.item === t.item);
+            if (cat?.tipo_recorrencia === 'FIXO_VARIAVEL') return 'FIXO_VARIAVEL';
+            return 'FIXO_MENSAL';
+        }
+        return 'VARIAVEL';
+    }, [categorias]);
+
     // Filtragem para abas de receitas/despesas (baseada em ano/mês)
     const transacoesDoPeriodo = useMemo(() => {
         try {
@@ -220,14 +236,41 @@ export function VisaoGestor() {
         }
     }, [transacoes, ano, mesSelecionado, visualizacaoAnual]);
 
-    // Lista filtrada por aba (receitas/despesas)
+    // Lista filtrada por aba (receitas/despesas) e modalidade
     const filteredList = useMemo(() => {
-        return transacoesDoPeriodo.filter(t => {
+        let lista = transacoesDoPeriodo.filter(t => {
             if (abaAtiva === 'receitas' && t.tipo !== 'receita') return false;
             if (abaAtiva === 'despesas' && t.tipo !== 'despesa') return false;
             return true;
         });
-    }, [transacoesDoPeriodo, abaAtiva]);
+
+        // Aplica filtro de modalidade, se necessário
+        if (modalidadeFilter !== 'all') {
+            lista = lista.filter(t => getModalidadeFromTransacao(t) === modalidadeFilter);
+        }
+
+        return lista;
+    }, [transacoesDoPeriodo, abaAtiva, modalidadeFilter, getModalidadeFromTransacao]);
+
+    // Contagem de itens por modalidade (para exibir no select)
+    const modalidadeCounts = useMemo(() => {
+        const listaBase = transacoesDoPeriodo.filter(t => {
+            if (abaAtiva === 'receitas' && t.tipo !== 'receita') return false;
+            if (abaAtiva === 'despesas' && t.tipo !== 'despesa') return false;
+            return true;
+        });
+        return {
+            total: listaBase.length,
+            FIXO_MENSAL: listaBase.filter(t => getModalidadeFromTransacao(t) === 'FIXO_MENSAL').length,
+            FIXO_VARIAVEL: listaBase.filter(t => getModalidadeFromTransacao(t) === 'FIXO_VARIAVEL').length,
+            VARIAVEL: listaBase.filter(t => getModalidadeFromTransacao(t) === 'VARIAVEL').length,
+        };
+    }, [transacoesDoPeriodo, abaAtiva, getModalidadeFromTransacao]);
+
+    // Reset filtro de modalidade ao trocar de aba (opcional, mas desejável)
+    useEffect(() => {
+        setModalidadeFilter('all');
+    }, [abaAtiva]);
 
     // Resumo para abas de receitas/despesas (usado nos KPIs superiores)
     const resumoCalculado = useMemo(() => {
@@ -752,7 +795,7 @@ export function VisaoGestor() {
 
                     {/* Controles específicos por aba */}
                     {abaAtiva !== 'fechamento' ? (
-                        <div className="flex gap-3 items-center">
+                        <div className="flex gap-3 items-center flex-wrap">
                             <button className="btn btn-sm btn-ghost text-muted hover:text-white" onClick={handleRefresh} disabled={loading} aria-label="Atualizar"><RefreshCcw size={16} className={loading ? 'animate-spin' : ''} /></button>
                             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10">
                                 <span className="text-xs font-semibold text-muted">Ano Completo:</span>
@@ -769,6 +812,22 @@ export function VisaoGestor() {
                             <button className="btn btn-sm btn-ghost text-muted hover:text-white" onClick={handlePrintTabela} aria-label="Imprimir tabela"><Printer size={16} /></button>
                             <div className="w-px h-6 bg-white/10" />
                             <button className="btn btn-sm btn-ghost text-blue-300 hover:text-white border border-blue-500/20" onClick={() => setShowReplicarModal(true)} disabled={loading} aria-label="Replicar mês anterior"><Copy size={14} /> Replicar Mês</button>
+                            
+                            {/* NOVO: filtro de modalidade */}
+                            <div className="relative">
+                                <select
+                                    className="input input-sm font-medium text-xs px-3 py-1 bg-white/5 border border-white/10 rounded-md"
+                                    value={modalidadeFilter}
+                                    onChange={(e) => setModalidadeFilter(e.target.value as typeof modalidadeFilter)}
+                                    aria-label="Filtrar por modalidade"
+                                >
+                                    <option value="all">Todas modalidades ({modalidadeCounts.total})</option>
+                                    <option value="FIXO_MENSAL">📆 Fixo Mensal ({modalidadeCounts.FIXO_MENSAL})</option>
+                                    <option value="FIXO_VARIAVEL">🔄 Fixo Variável ({modalidadeCounts.FIXO_VARIAVEL})</option>
+                                    <option value="VARIAVEL">⚡ Variável ({modalidadeCounts.VARIAVEL})</option>
+                                </select>
+                            </div>
+
                             <button className="btn btn-sm btn-accent" onClick={() => handleOpenModalNew(abaAtiva === 'receitas' ? 'receita' : 'despesa')} disabled={loading} aria-label="Novo lançamento"><Plus size={14} /> Novo Lançamento</button>
                         </div>
                     ) : (
@@ -943,8 +1002,18 @@ export function VisaoGestor() {
                                 </h4>
                                 <span className="text-xs font-bold text-muted">{filteredList.length} registros</span>
                             </div>
-                            <table>
-                                <thead><tr><th>Vencimento</th><th>Filial</th><th>Descrição</th><th>Modalidade</th><th className="text-right">Valor</th><th className="text-center">Status</th><th></th></tr></thead>
+                            <table className="w-full">
+                                <thead>
+                                    <tr>
+                                        <th>Vencimento</th>
+                                        <th>Filial</th>
+                                        <th>Descrição</th>
+                                        <th>Modalidade</th>
+                                        <th className="text-right">Valor</th>
+                                        <th className="text-center">Status</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
                                 <tbody>
                                     {filteredList.length===0 ? (
                                         <tr><td colSpan={7} className="text-center py-8 text-muted italic">Nenhum lançamento encontrado.</td></tr>
@@ -957,12 +1026,9 @@ export function VisaoGestor() {
                                                 <td className="font-semibold text-sm">{t.descricao||t.item||'-'}{t.item && t.descricao!==t.item && <span className="block text-[10px] text-muted font-normal">{t.item}</span>}</td>
                                                 <td className="text-[10px] font-bold uppercase">
                                                     {(()=>{
-                                                        if(t.recorrente && t.frequencia==='mensal') return <span className="bg-indigo-500/10 text-indigo-400 px-2 py-1 rounded-md">Fixo Mensal</span>;
-                                                        if(t.recorrente && t.frequencia==='mensal_variavel') return <span className="bg-pink-500/10 text-pink-400 px-2 py-1 rounded-md">Fixo Variável</span>;
-                                                        if(t.recorrente){
-                                                            const cat = categorias.find(c=>c.id===t.item_financeiro_id)||categorias.find(c=>c.item===t.item);
-                                                            return cat?.tipo_recorrencia==='FIXO_VARIAVEL' ? <span className="bg-pink-500/10 text-pink-400 px-2 py-1 rounded-md">Fixo Variável</span> : <span className="bg-indigo-500/10 text-indigo-400 px-2 py-1 rounded-md">Fixo Mensal</span>;
-                                                        }
+                                                        const modalidade = getModalidadeFromTransacao(t);
+                                                        if(modalidade === 'FIXO_MENSAL') return <span className="bg-indigo-500/10 text-indigo-400 px-2 py-1 rounded-md">Fixo Mensal</span>;
+                                                        if(modalidade === 'FIXO_VARIAVEL') return <span className="bg-pink-500/10 text-pink-400 px-2 py-1 rounded-md">Fixo Variável</span>;
                                                         return <span className="bg-orange-500/10 text-orange-400 px-2 py-1 rounded-md">Variável</span>;
                                                     })()}
                                                 </td>
