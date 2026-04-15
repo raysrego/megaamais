@@ -816,7 +816,7 @@ export function VisaoGestor() {
                             {/* NOVO: filtro de modalidade */}
                             <div className="relative">
                                 <select
-                                    className="input input-sm font-medium text-xs px-3 py-1 bg-white/5 border border-white/10 rounded-md"
+                                    className="input input-sm font-medium text-xs px-3 py-1 bg-blue/5 border border-white/10 rounded-md"
                                     value={modalidadeFilter}
                                     onChange={(e) => setModalidadeFilter(e.target.value as typeof modalidadeFilter)}
                                     aria-label="Filtrar por modalidade"
