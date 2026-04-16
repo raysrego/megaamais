@@ -14,7 +14,6 @@ import {
     Loader2
 } from 'lucide-react';
 import { MoneyInput } from '../ui/MoneyInput';
-import { supabase } from '../../lib/supabase';
 
 export type TipoLancamento = 'pix' | 'sangria' | 'trocados' | 'deposito' | 'boleto';
 
@@ -23,15 +22,11 @@ interface ModalLancamentoRapidoProps {
     initialData?: any;
     onClose: () => void;
     onSave: (data: any) => Promise<void>;
+    // Nova prop opcional: lista de categorias para despesas
+    categorias?: Array<{ id: number; nome: string }>;
 }
 
-interface CategoriaOperacional {
-    id: number;
-    nome: string;
-    tipo: string;
-}
-
-export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: ModalLancamentoRapidoProps) {
+export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave, categorias = [] }: ModalLancamentoRapidoProps) {
     const [valor, setValor] = useState<number>(0);
     const [dataVencimento, setDataVencimento] = useState<string>(
         new Date().toISOString().split('T')[0]
@@ -42,26 +37,8 @@ export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: Mo
     );
     const [classificacaoPix, setClassificacaoPix] = useState('CRED PIX QR COD EST');
     const [categoriaId, setCategoriaId] = useState<number | null>(null);
-    const [categorias, setCategorias] = useState<CategoriaOperacional[]>([]);
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
-
-    // Carregar categorias do tipo 'saida' para despesas
-    useEffect(() => {
-        const fetchCategorias = async () => {
-            const { data, error } = await supabase
-                .from('categorias_operacionais')
-                .select('id, nome, tipo')
-                .eq('tipo', 'saida')
-                .order('nome');
-            if (error) {
-                console.error('Erro ao carregar categorias:', error);
-                return;
-            }
-            setCategorias(data || []);
-        };
-        fetchCategorias();
-    }, []);
 
     // Preencher campos se for edição
     useEffect(() => {
@@ -98,7 +75,7 @@ export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: Mo
             return;
         }
 
-        if (isDespesa && !categoriaId) {
+        if (isDespesa && categorias.length > 0 && !categoriaId) {
             setError('Selecione uma categoria para esta despesa.');
             return;
         }
@@ -205,7 +182,7 @@ export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: Mo
                         />
                     </div>
 
-                    {/* Seleção de categoria para despesas */}
+                    {/* Exibir select de categorias APENAS se a prop categorias foi fornecida e houver itens */}
                     {isDespesa && categorias.length > 0 && (
                         <div className="form-group">
                             <label style={{ color: 'var(--text-muted)', marginBottom: '0.5rem', display: 'block' }}>Categoria da Despesa</label>
@@ -337,7 +314,7 @@ export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: Mo
                         <button
                             className="btn btn-primary"
                             onClick={handleSave}
-                            disabled={!valor || valor <= 0 || isSaving || (isDespesa && !categoriaId)}
+                            disabled={!valor || valor <= 0 || isSaving || (isDespesa && categorias.length > 0 && !categoriaId)}
                             style={{
                                 height: '56px',
                                 fontSize: '1rem',
