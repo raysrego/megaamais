@@ -14,14 +14,21 @@ import {
     Loader2
 } from 'lucide-react';
 import { MoneyInput } from '../ui/MoneyInput';
+import { supabase } from '../../lib/supabase';
 
 export type TipoLancamento = 'pix' | 'sangria' | 'trocados' | 'deposito' | 'boleto';
 
 interface ModalLancamentoRapidoProps {
     tipo: TipoLancamento;
-    initialData?: any; // <-- adicionado para edição
+    initialData?: any;
     onClose: () => void;
     onSave: (data: any) => Promise<void>;
+}
+
+interface CategoriaOperacional {
+    id: number;
+    nome: string;
+    tipo: string;
 }
 
 export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: ModalLancamentoRapidoProps) {
@@ -34,8 +41,27 @@ export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: Mo
         tipo === 'pix' ? 'pix' : 'especie'
     );
     const [classificacaoPix, setClassificacaoPix] = useState('CRED PIX QR COD EST');
+    const [categoriaId, setCategoriaId] = useState<number | null>(null);
+    const [categorias, setCategorias] = useState<CategoriaOperacional[]>([]);
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    // Carregar categorias do tipo 'saida' para despesas
+    useEffect(() => {
+        const fetchCategorias = async () => {
+            const { data, error } = await supabase
+                .from('categorias_operacionais')
+                .select('id, nome, tipo')
+                .eq('tipo', 'saida')
+                .order('nome');
+            if (error) {
+                console.error('Erro ao carregar categorias:', error);
+                return;
+            }
+            setCategorias(data || []);
+        };
+        fetchCategorias();
+    }, []);
 
     // Preencher campos se for edição
     useEffect(() => {
@@ -43,8 +69,8 @@ export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: Mo
             setValor(Math.abs(initialData.valor) || 0);
             setObservacao(initialData.observacao || '');
             setMetodo(initialData.metodo || (tipo === 'pix' ? 'pix' : 'especie'));
+            setCategoriaId(initialData.categoria_operacional_id || null);
             if (initialData.data_vencimento) {
-                // converter para YYYY-MM-DD se necessário
                 const date = new Date(initialData.data_vencimento);
                 if (!isNaN(date.getTime())) {
                     setDataVencimento(date.toISOString().split('T')[0]);
@@ -55,6 +81,8 @@ export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: Mo
             }
         }
     }, [initialData, tipo]);
+
+    const isDespesa = ['sangria', 'deposito', 'boleto'].includes(tipo);
 
     const config = {
         pix: { title: 'Lançamento Pix', icon: <Smartphone />, color: 'var(--success)', rgb: 'var(--success-rgb)', label: 'Valor Recebido' },
@@ -70,21 +98,25 @@ export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: Mo
             return;
         }
 
+        if (isDespesa && !categoriaId) {
+            setError('Selecione uma categoria para esta despesa.');
+            return;
+        }
+
         setError(null);
         setIsSaving(true);
 
         try {
-            // Monta os dados base
             const dados: any = {
                 tipo,
                 valor,
                 metodo,
                 data_vencimento: dataVencimento,
                 observacao: tipo === 'pix' ? `[${classificacaoPix}] ${observacao}`.trim() : observacao,
-                classificacao_pix: tipo === 'pix' ? classificacaoPix : null
+                classificacao_pix: tipo === 'pix' ? classificacaoPix : null,
+                categoria_operacional_id: isDespesa ? categoriaId : null,
             };
 
-            // Se for edição, incluir o ID
             if (initialData?.id) {
                 dados.id = initialData.id;
             }
@@ -159,7 +191,6 @@ export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: Mo
                         />
                     </div>
 
-                    {/* Campo de Data de Vencimento */}
                     <div className="form-group">
                         <label style={{ color: 'var(--text-muted)', marginBottom: '0.5rem', display: 'block' }}>
                             Data de Vencimento <span style={{ fontSize: '0.7rem', opacity: 0.7 }}>(pode ser retroativa)</span>
@@ -173,6 +204,25 @@ export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: Mo
                             style={{ width: '100%', height: '48px' }}
                         />
                     </div>
+
+                    {/* Seleção de categoria para despesas */}
+                    {isDespesa && categorias.length > 0 && (
+                        <div className="form-group">
+                            <label style={{ color: 'var(--text-muted)', marginBottom: '0.5rem', display: 'block' }}>Categoria da Despesa</label>
+                            <select
+                                value={categoriaId || ''}
+                                onChange={(e) => setCategoriaId(Number(e.target.value))}
+                                className="input"
+                                style={{ width: '100%', height: '48px' }}
+                                disabled={isSaving}
+                            >
+                                <option value="">Selecione uma categoria</option>
+                                {categorias.map(cat => (
+                                    <option key={cat.id} value={cat.id}>{cat.nome}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
 
                     {tipo === 'pix' && (
                         <div className="form-group slide-in">
@@ -287,7 +337,7 @@ export function ModalLancamentoRapido({ tipo, initialData, onClose, onSave }: Mo
                         <button
                             className="btn btn-primary"
                             onClick={handleSave}
-                            disabled={!valor || valor <= 0 || isSaving}
+                            disabled={!valor || valor <= 0 || isSaving || (isDespesa && !categoriaId)}
                             style={{
                                 height: '56px',
                                 fontSize: '1rem',
