@@ -772,6 +772,17 @@ export function VisaoGestor() {
                 <body>
                     <h1>Demonstração de Resultados - ${periodoDescricao}</h1>
                     
+                    <h2>Resultado Líquido</h2>
+                    <table>
+                        <tr><th>Descrição</th><th class="valor">Valor (R$)</th></tr>
+                        <tr><td>Total de Entradas</td><td class="valor">R$ ${totalReceitasDRE.toFixed(2).replace('.', ',')}</td></tr>
+                        <tr><td>Total de Saídas</td><td class="valor">R$ ${totalDespesasDRE.toFixed(2).replace('.', ',')}</td></tr>
+                        <tr class="total ${lucroLiquidoDRE >= 0 ? 'lucro' : 'prejuizo'}">
+                            <td><strong>Resultado</strong></td>
+                            <td class="valor"><strong>R$ ${lucroLiquidoDRE.toFixed(2).replace('.', ',')}</strong></td>
+                        </tr>
+                    </table>
+
                     <h2>Entradas (Receitas)</h2>
                     <table>
                         <thead><tr><th>Categoria / Detalhe</th><th class="valor">Valor (R$)</th></tr></thead>
@@ -794,16 +805,6 @@ export function VisaoGestor() {
                                 <td class="valor"><strong>R$ ${totalDespesasDRE.toFixed(2).replace('.', ',')}</strong></td>
                             </tr>
                         </tbody>
-                    </table>
-
-                    <h2>Resultado Líquido</h2>
-                    <table>
-                        <tr><td>Total de Entradas</td><td class="valor">R$ ${totalReceitasDRE.toFixed(2).replace('.', ',')}</td></tr>
-                        <tr><td>Total de Saídas</td><td class="valor">R$ ${totalDespesasDRE.toFixed(2).replace('.', ',')}</td></tr>
-                        <tr class="total ${lucroLiquidoDRE >= 0 ? 'lucro' : 'prejuizo'}">
-                            <td><strong>Resultado</strong></td>
-                            <td class="valor"><strong>R$ ${lucroLiquidoDRE.toFixed(2).replace('.', ',')}</strong></td>
-                        </tr>
                     </table>
                 </body>
             </html>
@@ -1005,9 +1006,10 @@ export function VisaoGestor() {
                 {loading ? (
                     <LoadingState type="list" />
                 ) : abaAtiva === 'fechamento' ? (
-                    // DRE com categorias expansíveis para receitas e despesas
-  {/* Resultado (linha inteira) */}
-                        <div className="lg:col-span-2 flex flex-col bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
+                    // DRE com Resultado Líquido acima de Receitas e Despesas
+                    <div className="flex flex-col gap-6">
+                        {/* Resultado Líquido (acima) */}
+                        <div className="flex flex-col bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
                             <div className="p-4 bg-slate-800 border-b border-slate-700 flex items-center gap-2 text-slate-200"><Scale size={20} /><h3 className="font-bold uppercase tracking-wider text-sm">Resultado Líquido</h3></div>
                             <div className="flex-1 flex flex-col items-center justify-center p-8 gap-6">
                                 <div className={`flex items-center justify-center w-24 h-24 rounded-full ${lucroLiquidoDRE>=0?'bg-emerald-500/20 text-emerald-400':'bg-red-500/20 text-red-400'}`}>
@@ -1028,96 +1030,96 @@ export function VisaoGestor() {
                                 </div>
                             </div>
                         </div>
+
+                        {/* Grid de Receitas e Despesas (abaixo) */}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            {/* Receitas */}
+                            <div className="flex flex-col bg-emerald-500/5 rounded-xl border border-emerald-500/10 overflow-hidden">
+                                <div className="p-4 bg-emerald-500/10 border-b border-emerald-500/10 flex justify-between items-center">
+                                    <div className="flex items-center gap-2 text-emerald-400"><TrendingUp size={20} /><h3 className="font-bold uppercase tracking-wider text-sm">Entradas (Receitas)</h3></div>
+                                    <span className="font-black text-lg text-emerald-400">R$ {totalReceitasDRE.toLocaleString('pt-BR')}</span>
+                                </div>
+                                <div className="p-4 space-y-2 overflow-y-auto max-h-[500px]">
+                                    {receitasPorCategoria.length === 0 ? (
+                                        <p className="text-center text-muted text-sm py-10">Nenhuma receita no período.</p>
+                                    ) : (
+                                        receitasPorCategoria.map(cat => {
+                                            const key = `receita_${cat.nome}`;
+                                            const isExpanded = categoriasExpandidas.has(key);
+                                            return (
+                                                <div key={cat.id} className="border border-white/10 rounded-lg overflow-hidden">
+                                                    <div 
+                                                        className="flex justify-between items-center p-3 bg-emerald-500/5 cursor-pointer hover:bg-emerald-500/10 transition-colors"
+                                                        onClick={() => toggleCategoriaExpandida('receita', cat.nome)}
+                                                    >
+                                                        <div className="flex items-center gap-2">
+                                                            {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                                                            <span className="font-bold text-emerald-100">{cat.nome}</span>
+                                                            <span className="text-xs text-muted">({cat.itens.length} item{cat.itens.length !== 1 ? 's' : ''})</span>
+                                                        </div>
+                                                        <span className="font-bold text-emerald-400">R$ {cat.total.toLocaleString('pt-BR')}</span>
+                                                    </div>
+                                                    {isExpanded && (
+                                                        <div className="p-3 space-y-2 border-t border-white/5">
+                                                            {cat.itens.map(item => (
+                                                                <div key={item.id} className="flex justify-between items-center text-sm pl-4">
+                                                                    <span className="text-muted">{item.detalhe}</span>
+                                                                    <span className="font-mono text-emerald-300">R$ {item.valor.toLocaleString('pt-BR')}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Despesas */}
+                            <div className="flex flex-col bg-red-500/5 rounded-xl border border-red-500/10 overflow-hidden">
+                                <div className="p-4 bg-red-500/10 border-b border-red-500/10 flex justify-between items-center">
+                                    <div className="flex items-center gap-2 text-red-400"><TrendingDown size={20} /><h3 className="font-bold uppercase tracking-wider text-sm">Saídas (Despesas)</h3></div>
+                                    <span className="font-black text-lg text-red-400">R$ {totalDespesasDRE.toLocaleString('pt-BR')}</span>
+                                </div>
+                                <div className="p-4 space-y-2 overflow-y-auto max-h-[500px]">
+                                    {despesasPorCategoria.length === 0 ? (
+                                        <p className="text-center text-muted text-sm py-10">Nenhuma despesa no período.</p>
+                                    ) : (
+                                        despesasPorCategoria.map(cat => {
+                                            const key = `despesa_${cat.nome}`;
+                                            const isExpanded = categoriasExpandidas.has(key);
+                                            return (
+                                                <div key={cat.id} className="border border-white/10 rounded-lg overflow-hidden">
+                                                    <div 
+                                                        className="flex justify-between items-center p-3 bg-red-500/5 cursor-pointer hover:bg-red-500/10 transition-colors"
+                                                        onClick={() => toggleCategoriaExpandida('despesa', cat.nome)}
+                                                    >
+                                                        <div className="flex items-center gap-2">
+                                                            {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                                                            <span className="font-bold text-red-100">{cat.nome}</span>
+                                                            <span className="text-xs text-muted">({cat.itens.length} item{cat.itens.length !== 1 ? 's' : ''})</span>
+                                                        </div>
+                                                        <span className="font-bold text-red-400">R$ {cat.total.toLocaleString('pt-BR')}</span>
+                                                    </div>
+                                                    {isExpanded && (
+                                                        <div className="p-3 space-y-2 border-t border-white/5">
+                                                            {cat.itens.map(item => (
+                                                                <div key={item.id} className="flex justify-between items-center text-sm pl-4">
+                                                                    <span className="text-muted">{item.detalhe}</span>
+                                                                    <span className="font-mono text-red-300">R$ {item.valor.toLocaleString('pt-BR')}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })
+                                    )}
+                                </div>
+                            </div>
+                        </div>
                     </div>
-            
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {/* Receitas */}
-                        <div className="flex flex-col bg-emerald-500/5 rounded-xl border border-emerald-500/10 overflow-hidden">
-                            <div className="p-4 bg-emerald-500/10 border-b border-emerald-500/10 flex justify-between items-center">
-                                <div className="flex items-center gap-2 text-emerald-400"><TrendingUp size={20} /><h3 className="font-bold uppercase tracking-wider text-sm">Entradas (Receitas)</h3></div>
-                                <span className="font-black text-lg text-emerald-400">R$ {totalReceitasDRE.toLocaleString('pt-BR')}</span>
-                            </div>
-                            <div className="p-4 space-y-2 overflow-y-auto max-h-[500px]">
-                                {receitasPorCategoria.length === 0 ? (
-                                    <p className="text-center text-muted text-sm py-10">Nenhuma receita no período.</p>
-                                ) : (
-                                    receitasPorCategoria.map(cat => {
-                                        const key = `receita_${cat.nome}`;
-                                        const isExpanded = categoriasExpandidas.has(key);
-                                        return (
-                                            <div key={cat.id} className="border border-white/10 rounded-lg overflow-hidden">
-                                                <div 
-                                                    className="flex justify-between items-center p-3 bg-emerald-500/5 cursor-pointer hover:bg-emerald-500/10 transition-colors"
-                                                    onClick={() => toggleCategoriaExpandida('receita', cat.nome)}
-                                                >
-                                                    <div className="flex items-center gap-2">
-                                                        {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                                                        <span className="font-bold text-emerald-100">{cat.nome}</span>
-                                                        <span className="text-xs text-muted">({cat.itens.length} item{cat.itens.length !== 1 ? 's' : ''})</span>
-                                                    </div>
-                                                    <span className="font-bold text-emerald-400">R$ {cat.total.toLocaleString('pt-BR')}</span>
-                                                </div>
-                                                {isExpanded && (
-                                                    <div className="p-3 space-y-2 border-t border-white/5">
-                                                        {cat.itens.map(item => (
-                                                            <div key={item.id} className="flex justify-between items-center text-sm pl-4">
-                                                                <span className="text-muted">{item.detalhe}</span>
-                                                                <span className="font-mono text-emerald-300">R$ {item.valor.toLocaleString('pt-BR')}</span>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        );
-                                    })
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Despesas */}
-                        <div className="flex flex-col bg-red-500/5 rounded-xl border border-red-500/10 overflow-hidden">
-                            <div className="p-4 bg-red-500/10 border-b border-red-500/10 flex justify-between items-center">
-                                <div className="flex items-center gap-2 text-red-400"><TrendingDown size={20} /><h3 className="font-bold uppercase tracking-wider text-sm">Saídas (Despesas)</h3></div>
-                                <span className="font-black text-lg text-red-400">R$ {totalDespesasDRE.toLocaleString('pt-BR')}</span>
-                            </div>
-                            <div className="p-4 space-y-2 overflow-y-auto max-h-[500px]">
-                                {despesasPorCategoria.length === 0 ? (
-                                    <p className="text-center text-muted text-sm py-10">Nenhuma despesa no período.</p>
-                                ) : (
-                                    despesasPorCategoria.map(cat => {
-                                        const key = `despesa_${cat.nome}`;
-                                        const isExpanded = categoriasExpandidas.has(key);
-                                        return (
-                                            <div key={cat.id} className="border border-white/10 rounded-lg overflow-hidden">
-                                                <div 
-                                                    className="flex justify-between items-center p-3 bg-red-500/5 cursor-pointer hover:bg-red-500/10 transition-colors"
-                                                    onClick={() => toggleCategoriaExpandida('despesa', cat.nome)}
-                                                >
-                                                    <div className="flex items-center gap-2">
-                                                        {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                                                        <span className="font-bold text-red-100">{cat.nome}</span>
-                                                        <span className="text-xs text-muted">({cat.itens.length} item{cat.itens.length !== 1 ? 's' : ''})</span>
-                                                    </div>
-                                                    <span className="font-bold text-red-400">R$ {cat.total.toLocaleString('pt-BR')}</span>
-                                                </div>
-                                                {isExpanded && (
-                                                    <div className="p-3 space-y-2 border-t border-white/5">
-                                                        {cat.itens.map(item => (
-                                                            <div key={item.id} className="flex justify-between items-center text-sm pl-4">
-                                                                <span className="text-muted">{item.detalhe}</span>
-                                                                <span className="font-mono text-red-300">R$ {item.valor.toLocaleString('pt-BR')}</span>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        );
-                                    })
-                                )}
-                            </div>
-                        </div>
-
-                      
                 ) : (
                     // Tabela de receitas/despesas (gráfico + lista)
                     <div className="flex flex-col">
