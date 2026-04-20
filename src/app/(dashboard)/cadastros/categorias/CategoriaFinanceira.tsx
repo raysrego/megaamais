@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
     Plus,
     Pencil,
@@ -19,7 +19,7 @@ import {
     Shield
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useItensFinanceiros, ItemFinanceiro } from '@/hooks/useItensFinanceiros';
+import { useItensFinanceiros, ItemFinanceiro, getCategoriasPai, getSubcategorias } from '@/hooks/useItensFinanceiros';
 import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmContext';
 import { useLoja } from '@/contexts/LojaContext';
@@ -57,13 +57,16 @@ export function CategoriaFinanceira() {
     const [showModal, setShowModal] = useState(false);
     const [editando, setEditando] = useState<ItemFinanceiro | null>(null);
     const [processing, setProcessing] = useState(false);
-    const [processandoRecorrencias, setProcessandoRecorrencias] = useState(false);
 
-    // Permitir alternar entre visualização Global ou Específica
-    const canSeeGlobal = isAdmin; // Apenas admin vê/edita globais por enquanto
+    const canSeeGlobal = isAdmin;
 
     const { toast } = useToast();
     const confirm = useConfirm();
+
+    // Lista de categorias que podem ser pai (todas que não têm parent_id, exceto a própria em edição)
+    const categoriasPaiDisponiveis = useMemo(() => {
+        return categorias.filter(c => !c.parent_id && (editando ? c.id !== editando.id : true));
+    }, [categorias, editando]);
 
     // Form State
     const [formData, setFormData] = useState<Omit<ItemFinanceiro, 'id'>>({
@@ -74,7 +77,8 @@ export function CategoriaFinanceira() {
         ordem: 0,
         valor_padrao: 0,
         dia_vencimento: 5,
-        loja_id: lojaAtual?.id || ''
+        loja_id: lojaAtual?.id || '',
+        parent_id: null
     });
 
     const handleOpenModal = (cat?: ItemFinanceiro) => {
@@ -88,7 +92,8 @@ export function CategoriaFinanceira() {
                 ordem: cat.ordem,
                 valor_padrao: cat.valor_padrao || 0,
                 dia_vencimento: cat.dia_vencimento || 5,
-                loja_id: cat.loja_id
+                loja_id: cat.loja_id,
+                parent_id: cat.parent_id || null
             });
         } else {
             setEditando(null);
@@ -100,7 +105,8 @@ export function CategoriaFinanceira() {
                 ordem: categorias.length > 0 ? Math.max(...categorias.map(c => c.ordem)) + 1 : 1,
                 valor_padrao: 0,
                 dia_vencimento: 5,
-                loja_id: filialFiltro || lojaAtual?.id || ''
+                loja_id: filialFiltro || lojaAtual?.id || '',
+                parent_id: null
             });
         }
         setShowModal(true);
@@ -112,22 +118,22 @@ export function CategoriaFinanceira() {
             return;
         }
 
-        if (formData.item === '') {
-            toast({ message: 'O item é obrigatório', type: 'warning' });
+        // Evitar loop: uma categoria não pode ser pai dela mesma (já filtrado no select)
+        if (formData.parent_id === editando?.id) {
+            toast({ message: 'Uma categoria não pode ser pai de si mesma.', type: 'error' });
             return;
         }
 
         try {
             setProcessing(true);
 
-            // Optimistic Update (visual apenas)
+            // Optimistic Update
             if (editando) {
                 addOptimisticItem({ type: 'update', payload: { id: editando.id, updates: formData } });
             } else {
                 addOptimisticItem({ type: 'add', payload: formData });
             }
 
-            // ✅ Salvar no banco ANTES de fechar modal
             if (editando) {
                 await atualizarCategoria(editando.id, formData);
             } else {
@@ -135,18 +141,12 @@ export function CategoriaFinanceira() {
             }
 
             toast({ message: `Item financeiro ${editando ? 'atualizado' : 'salvo'} com sucesso!`, type: 'success' });
-
-            // ✅ FIX v2.5.14: Aguardar refresh antes de fechar
             await fetchItens(filialFiltro);
-
-            // Fechar modal apenas após sucesso
             setShowModal(false);
         } catch (error: any) {
             toast({ message: 'Erro ao salvar: ' + error.message, type: 'error' });
-            // Se der erro, recarrega para desfazer optimistic updates incorretos
             await fetchItens(filialFiltro);
         } finally {
-            // ✅ FIX CRÍTICO: Sempre desbloquear botão
             setProcessing(false);
         }
     };
@@ -155,6 +155,13 @@ export function CategoriaFinanceira() {
         const itensProtegidos = ['Ágio Bolão (35%)', 'Jogos (8,61%)', 'Encalhe de Jogos'];
         if (itensProtegidos.includes(cat.item)) {
             toast({ message: 'Este item é vital para o sistema e não pode ser excluído.', type: 'error' });
+            return;
+        }
+
+        // Verificar se a categoria possui subcategorias
+        const temSubcategorias = categorias.some(c => c.parent_id === cat.id);
+        if (temSubcategorias) {
+            toast({ message: `Não é possível excluir "${cat.item}" pois existem subcategorias vinculadas.`, type: 'error' });
             return;
         }
 
@@ -181,6 +188,13 @@ export function CategoriaFinanceira() {
     const filtradas = categorias.filter(c =>
         c.item.toLowerCase().includes(busca.toLowerCase())
     );
+
+    // Função para obter o nome da categoria pai
+    const getNomePai = (parentId: number | null | undefined) => {
+        if (!parentId) return null;
+        const pai = categorias.find(c => c.id === parentId);
+        return pai?.item || null;
+    };
 
     return (
         <div className="animate-in fade-in duration-500">
@@ -213,7 +227,7 @@ export function CategoriaFinanceira() {
                         whileHover={{ scale: 1.02, y: -2 }}
                         whileTap={{ scale: 0.98 }}
                         className="btn btn-primary"
-                        onClick={() => handleOpenModal()} // Keep existing handleOpenModal logic
+                        onClick={() => handleOpenModal()}
                     >
                         <Plus size={18} /> Novo Item
                     </motion.button>
@@ -245,7 +259,7 @@ export function CategoriaFinanceira() {
                             <th>Item</th>
                             {isAdmin && <th>Filial</th>}
                             <th>Fluxo</th>
-                            <th className="text-center">Modalidade</th>
+                            <th className="text-center">Recorrência</th>
                             <th className="w-24 text-right">Ações</th>
                         </tr>
                     </thead>
@@ -265,90 +279,105 @@ export function CategoriaFinanceira() {
                                         title={busca ? `Nenhum item encontrado para "${busca}"` : "Nenhum item financeiro"}
                                         description={busca ? "Tente ajustar sua busca ou adicione um novo item." : "Não encontramos categorias cadastradas. Comece adicionando seu primeiro item financeiro."}
                                         actionLabel="Cadastrar Novo Item"
-                                        onAction={() => handleOpenModal()} // Use existing handleOpenModal
+                                        onAction={() => handleOpenModal()}
                                     />
                                 </td>
                             </tr>
                         ) : (
                             <AnimatePresence mode="popLayout">
-                                {filtradas.map((cat, index) => (
-                                    <motion.tr
-                                        key={cat.id}
-                                        initial={{ opacity: 0, x: -10 }}
-                                        animate={{ opacity: 1, x: 0 }}
-                                        transition={{ delay: index * 0.03 }}
-                                        className="hover:bg-white/2 transition-colors"
-                                    >
-                                        <td className="text-center text-xs font-bold text-muted">{cat.ordem}</td>
-                                        <td>
-                                            <div className="font-bold text-white">{cat.item}</div>
-                                            {cat.fixo && cat.valor_padrao != null && (
-                                                <div className="text-[10px] text-muted-foreground">Valor Estimado: R$ {cat.valor_padrao.toLocaleString('pt-BR')}</div>
-                                            )}
-                                        </td>
-                                        {isAdmin && (
+                                {filtradas.map((cat, index) => {
+                                    const nomePai = getNomePai(cat.parent_id);
+                                    return (
+                                        <motion.tr
+                                            key={cat.id}
+                                            initial={{ opacity: 0, x: -10 }}
+                                            animate={{ opacity: 1, x: 0 }}
+                                            transition={{ delay: index * 0.03 }}
+                                            className="hover:bg-white/2 transition-colors"
+                                        >
+                                            <td className="text-center text-xs font-bold text-muted">{cat.ordem}</td>
                                             <td>
-                                                {cat.loja_id ? (
-                                                    <span className="text-[10px] font-bold text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full border border-blue-500/20">
-                                                        {lojasDisponiveis.find(l => l.id === cat.loja_id)?.nome_fantasia || 'Desconhecida'}
+                                                <div className="font-bold text-white">
+                                                    {cat.parent_id && (
+                                                        <span className="text-muted text-xs mr-1">↳</span>
+                                                    )}
+                                                    {cat.item}
+                                                </div>
+                                                {nomePai && (
+                                                    <div className="text-[10px] text-muted">
+                                                        Pai: {nomePai}
+                                                    </div>
+                                                )}
+                                                {cat.fixo && cat.valor_padrao != null && (
+                                                    <div className="text-[10px] text-muted-foreground">
+                                                        Valor Padrão: R$ {cat.valor_padrao.toLocaleString('pt-BR')}
+                                                    </div>
+                                                )}
+                                            </td>
+                                            {isAdmin && (
+                                                <td>
+                                                    {cat.loja_id ? (
+                                                        <span className="text-[10px] font-bold text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full border border-blue-500/20">
+                                                            {lojasDisponiveis.find(l => l.id === cat.loja_id)?.nome_fantasia || 'Desconhecida'}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-[10px] font-black text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded-full border border-purple-500/20 flex items-center gap-1 w-fit">
+                                                            <Shield size={10} /> GLOBAL
+                                                        </span>
+                                                    )}
+                                                </td>
+                                            )}
+                                            <td>
+                                                <div className={`flex items-center gap-2 text-xs font-bold uppercase ${cat.tipo === 'receita' ? 'text-success' : 'text-danger'}`}>
+                                                    {cat.tipo === 'receita' ? (
+                                                        <><ArrowUpCircle size={14} /> Entrada</>
+                                                    ) : (
+                                                        <><ArrowDownCircle size={14} /> Saída</>
+                                                    )}
+                                                </div>
+                                            </td>
+                                            <td className="text-center">
+                                                {cat.tipo_recorrencia === 'FIXO_MENSAL' && (
+                                                    <span className="text-[10px] font-black px-2 py-1 rounded-md bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                                                        FIXO MENSAL
                                                     </span>
-                                                ) : (
-                                                    <span className="text-[10px] font-black text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded-full border border-purple-500/20 flex items-center gap-1 w-fit">
-                                                        <Shield size={10} /> GLOBAL
+                                                )}
+                                                {cat.tipo_recorrencia === 'FIXO_VARIAVEL' && (
+                                                    <span className="text-[10px] font-black px-2 py-1 rounded-md bg-pink-500/10 text-pink-400 border border-pink-500/20">
+                                                        FIXO VARIÁVEL
+                                                    </span>
+                                                )}
+                                                {(!cat.tipo_recorrencia || cat.tipo_recorrencia === 'VARIAVEL') && (
+                                                    <span className="text-[10px] font-black px-2 py-1 rounded-md bg-orange-500/10 text-orange-400 border border-orange-500/20">
+                                                        VARIÁVEL
                                                     </span>
                                                 )}
                                             </td>
-                                        )}
-                                        <td>
-                                            <div className={`flex items-center gap-2 text-xs font-bold uppercase ${cat.tipo === 'receita' ? 'text-success' : 'text-danger'}`}>
-                                                {cat.tipo === 'receita' ? (
-                                                    <><ArrowUpCircle size={14} /> Entrada</>
-                                                ) : (
-                                                    <><ArrowDownCircle size={14} /> Saída</>
-                                                )}
-                                            </div>
-                                        </td>
-                                        <td className="text-center">
-                                            {cat.tipo_recorrencia === 'FIXO_MENSAL' && (
-                                                <span className="text-[10px] font-black px-2 py-1 rounded-md bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                                                    FIXO MENSAL
-                                                </span>
-                                            )}
-                                            {cat.tipo_recorrencia === 'FIXO_VARIAVEL' && (
-                                                <span className="text-[10px] font-black px-2 py-1 rounded-md bg-pink-500/10 text-pink-400 border border-pink-500/20">
-                                                    FIXO VARIÁVEL
-                                                </span>
-                                            )}
-                                            {(!cat.tipo_recorrencia || cat.tipo_recorrencia === 'VARIAVEL') && (
-                                                <span className="text-[10px] font-black px-2 py-1 rounded-md bg-orange-500/10 text-orange-400 border border-orange-500/20">
-                                                    VARIÁVEL
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td className="text-right">
-                                            <div className="flex justify-end gap-1">
-                                                <button
-                                                    className="btn btn-ghost btn-xs p-1.5"
-                                                    onClick={() => handleOpenModal(cat)}
-                                                >
-                                                    <Pencil size={14} />
-                                                </button>
-                                                {['Ágio Bolão (35%)', 'Jogos (8,61%)', 'Encalhe de Jogos'].includes(cat.item) ? (
-                                                    <div className="p-1.5 text-muted/30" title="Item Vital (Bloqueado)">
-                                                        <Lock size={14} />
-                                                    </div>
-                                                ) : (
+                                            <td className="text-right">
+                                                <div className="flex justify-end gap-1">
                                                     <button
-                                                        className="btn btn-ghost btn-xs p-1.5 text-danger hover:bg-danger/10"
-                                                        onClick={() => handleDelete(cat)}
+                                                        className="btn btn-ghost btn-xs p-1.5"
+                                                        onClick={() => handleOpenModal(cat)}
                                                     >
-                                                        <Trash2 size={14} />
+                                                        <Pencil size={14} />
                                                     </button>
-                                                )}
-                                            </div>
-                                        </td>
-                                    </motion.tr>
-                                ))}
+                                                    {['Ágio Bolão (35%)', 'Jogos (8,61%)', 'Encalhe de Jogos'].includes(cat.item) ? (
+                                                        <div className="p-1.5 text-muted/30" title="Item Vital (Bloqueado)">
+                                                            <Lock size={14} />
+                                                        </div>
+                                                    ) : (
+                                                        <button
+                                                            className="btn btn-ghost btn-xs p-1.5 text-danger hover:bg-danger/10"
+                                                            onClick={() => handleDelete(cat)}
+                                                        >
+                                                            <Trash2 size={14} />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </td>
+                                        </motion.tr>
+                                    );
+                                })}
                             </AnimatePresence>
                         )}
                     </tbody>
@@ -359,7 +388,7 @@ export function CategoriaFinanceira() {
             <div className="mt-8 p-4 rounded-xl bg-blue-500/5 border border-blue-500/20 flex gap-3 items-start">
                 <AlertTriangle size={18} className="text-blue-400 shrink-0 mt-0.5" />
                 <div className="text-xs text-blue-200/60 leading-relaxed">
-                    <strong>Dica de Gestão:</strong> O plano de contas é a espinha dorsal do seu DRE. Categorias marcadas como <strong>Fixo Mensal</strong> (ex: Aluguel, Internet) serão automatizadas pelo motor de recorrência na virada do mês, reduzindo o trabalho manual do seu gerente.
+                    <strong>Dica de Gestão:</strong> O plano de contas é a espinha dorsal do seu DRE. Categorias marcadas como <strong>Fixo Mensal</strong> (ex: Aluguel, Internet) serão automatizadas pelo motor de recorrência na virada do mês. Utilize a hierarquia (categoria pai → subcategoria) para organizar melhor seus custos, como "Folha de Pagamento" → "Salário", "INSS", etc.
                 </div>
             </div>
 
@@ -397,7 +426,7 @@ export function CategoriaFinanceira() {
                                         className="input w-full border-blue-500/30 bg-blue-500/5 font-bold"
                                         value={formData.loja_id || ''}
                                         onChange={e => setFormData({ ...formData, loja_id: e.target.value || null })}
-                                        disabled={!!editando && !!formData.loja_id} // Evita mover item local -> global na edição para não confundir histórico
+                                        disabled={!!editando && !!formData.loja_id} // Evita mover item local -> global na edição
                                     >
                                         <option value="">🌐 GLOBAL (Todas as Filiais)</option>
                                         <option disabled>────── Filiais ──────</option>
@@ -426,6 +455,24 @@ export function CategoriaFinanceira() {
                                     value={formData.item}
                                     onChange={e => setFormData({ ...formData, item: e.target.value })}
                                 />
+                            </div>
+
+                            {/* Categoria Pai (opcional) */}
+                            <div className="form-group">
+                                <label className="label">Categoria Pai (opcional)</label>
+                                <select
+                                    className="input w-full"
+                                    value={formData.parent_id || ''}
+                                    onChange={e => setFormData({ ...formData, parent_id: e.target.value ? Number(e.target.value) : null })}
+                                >
+                                    <option value="">Nenhuma (é categoria principal)</option>
+                                    {categoriasPaiDisponiveis.map(cat => (
+                                        <option key={cat.id} value={cat.id}>{cat.item}</option>
+                                    ))}
+                                </select>
+                                <p className="text-[10px] text-muted mt-1">
+                                    Selecione se este item for uma subcategoria (ex: "Salário" é filho de "Folha de Pagamento")
+                                </p>
                             </div>
 
                             <div className="grid grid-cols-2 gap-4">
@@ -500,6 +547,7 @@ export function CategoriaFinanceira() {
                                         </label>
                                         <input
                                             type="number"
+                                            step="0.01"
                                             className="input w-full border-white/10 focus:border-indigo-500/50"
                                             value={formData.valor_padrao}
                                             onChange={e => setFormData({ ...formData, valor_padrao: parseFloat(e.target.value) || 0 })}
@@ -541,9 +589,8 @@ export function CategoriaFinanceira() {
                             </button>
                         </div>
                     </div>
-                </div >
-            )
-            }
-        </div >
+                </div>
+            )}
+        </div>
     );
 }
