@@ -921,7 +921,7 @@ export function VisaoGestor() {
                     </div>
 
                     {abaAtiva !== 'fechamento' ? (
-                        <div className="flex gap-3 items-center flex-wrap">
+                        <div className="flex flex-wrap gap-3 items-center">
                             <button className="btn btn-sm btn-ghost text-muted hover:text-white" onClick={handleRefresh} disabled={loading}><RefreshCcw size={16} className={loading ? 'animate-spin' : ''} /></button>
                             
                             <div className="flex items-center gap-2 px-1 py-1.5 rounded-lg bg-white/5 border border-white/10">
@@ -967,7 +967,7 @@ export function VisaoGestor() {
                             <button className="btn btn-sm btn-accent" onClick={() => handleOpenModalNew(abaAtiva === 'receitas' ? 'receita' : 'despesa')} disabled={loading}><Plus size={14} /> Novo Lançamento</button>
                         </div>
                     ) : (
-                        <div className="flex gap-3 items-center flex-wrap">
+                       <div className="flex flex-wrap gap-3 items-center">
                             <div className="flex items-center gap-2 bg-white/5 px-2 py-1.5 rounded-lg">
                                 <span className="text-xs text-muted">Filtro:</span>
                                 <button className={`px-2 py-1 text-xs rounded ${modoFiltroDRE === 'mensal' ? 'bg-blue-500 text-white' : 'bg-white/10 text-muted'}`} onClick={() => setModoFiltroDRE('mensal')}>Mês/Ano</button>
@@ -976,10 +976,10 @@ export function VisaoGestor() {
 
                             {modoFiltroDRE === 'mensal' ? (
                                 <>
-                                    <select className="input input-sm font-bold text-xs px-2 py-1" value={ano} onChange={e => setAno(parseInt(e.target.value))}>
+                                    <select className="input input-sm font-medium text-xs px-2 py-1 bg-blue/5 border border-white/10 rounded-md min-w-[180px]" value={ano} onChange={e => setAno(parseInt(e.target.value))}>
                                         {[...new Set([new Date().getFullYear(), ano, ...anosDisponiveis])].sort((a,b)=>b-a).map(anoVal => <option key={anoVal} value={anoVal}>{anoVal}</option>)}
                                     </select>
-                                    <select className="input input-sm font-bold text-xs px-2 py-1" value={mesSelecionado} onChange={e => setMesSelecionado(parseInt(e.target.value))}>
+                                    <select className="input input-sm font-medium text-xs px-2 py-1 bg-blue/5 border border-white/10 rounded-md min-w-[180px]" value={mesSelecionado} onChange={e => setMesSelecionado(parseInt(e.target.value))}>
                                         {Array.from({length:12},(_,i)=>i+1).map(m=><option key={m} value={m}>{new Date(ano,m-1,1).toLocaleString('pt-BR',{month:'long'})}</option>)}
                                     </select>
                                     <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-white/5">
