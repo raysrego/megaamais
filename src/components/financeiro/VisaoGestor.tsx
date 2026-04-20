@@ -19,7 +19,8 @@ import {
     FileText,
     Printer,
     Copy,
-    RotateCcw
+    ChevronDown,
+    ChevronRight
 } from 'lucide-react';
 import { MoneyInput } from '../ui/MoneyInput';
 import { FinancialGrowthChart } from './FinancialGrowthChart';
@@ -50,7 +51,6 @@ function getErrorMessage(error: unknown): string {
     return 'Erro desconhecido';
 }
 
-// Função para escapar campos CSV
 function escapeCSV(str: string): string {
     if (str === undefined || str === null) return '';
     const stringValue = String(str);
@@ -72,23 +72,21 @@ export function VisaoGestor() {
 
     const mounted = useRef(true);
 
-    // Estado para controle de exclusão
     const [exclusaoState, setExclusaoState] = useState<ExclusaoState>({
         emProgresso: false,
         id: null,
         erro: null
     });
 
-    // Filtros para abas de receitas/despesas (mês/ano)
+    // Filtros
     const [ano, setAno] = useState(new Date().getFullYear());
     const [anosDisponiveis, setAnosDisponiveis] = useState<number[]>([new Date().getFullYear()]);
     const [mesSelecionado, setMesSelecionado] = useState(new Date().getMonth() + 1);
     const [visualizacaoAnual, setVisualizacaoAnual] = useState(false);
-
-    // NOVO: filtro de modalidade
     const [modalidadeFilter, setModalidadeFilter] = useState<'all' | 'FIXO_MENSAL' | 'FIXO_VARIAVEL' | 'VARIAVEL'>('all');
+    const [categoriaFilter, setCategoriaFilter] = useState<number | 'all'>('all');
 
-    // Filtros para o DRE (intervalo personalizado)
+    // Filtros DRE
     const hoje = new Date();
     const [dataInicio, setDataInicio] = useState(() => {
         const d = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
@@ -111,11 +109,14 @@ export function VisaoGestor() {
     const [editingTransaction, setEditingTransaction] = useState<TransacaoFinanceira | null>(null);
     const [dataUltimaAtualizacao, setDataUltimaAtualizacao] = useState<Date | null>(null);
 
-    // Form Data
+    // State para categorias expandidas no DRE
+    const [categoriasExpandidas, setCategoriasExpandidas] = useState<Set<string>>(new Set());
+
+    // Form Data (com categoria e detalhe)
     const [formData, setFormData] = useState({
-        descricao: '',
+        categoriaId: null as number | null,
+        detalhe: '',
         valor: 0,
-        item: '',
         vencimento: new Date().toISOString().split('T')[0],
         recorrente: false,
         frequencia: 'mensal',
@@ -124,14 +125,14 @@ export function VisaoGestor() {
         modalidade: 'VARIAVEL' as 'FIXO_MENSAL' | 'FIXO_VARIAVEL' | 'VARIAVEL'
     });
 
-    // Sincronizar loja_id no modal quando lojaAtual mudar (se o modal estiver fechado, isso não afeta; se aberto, atualiza)
+    // Sincronizar loja_id
     useEffect(() => {
         if (!showModal && lojaAtual) {
             setFormData(prev => ({ ...prev, loja_id: lojaAtual?.id || '' }));
         }
     }, [lojaAtual, showModal]);
 
-    // Função segura para buscar transações (com verificação de componente montado)
+    // Buscar transações segura
     const buscarTransacoesSeguro = useCallback(async (
         anoParam: number,
         mesParam: number,
@@ -145,15 +146,12 @@ export function VisaoGestor() {
         } catch (error: any) {
             console.error('[FINANCEIRO] Erro ao buscar transações:', error);
             if (mounted.current) {
-                toast({
-                    message: 'Erro ao carregar dados: ' + getErrorMessage(error),
-                    type: 'error'
-                });
+                toast({ message: 'Erro ao carregar dados: ' + getErrorMessage(error), type: 'error' });
             }
         }
     }, [fetchTransacoes, toast]);
 
-    // Efeito para carregar dados iniciais
+    // Carregar dados iniciais
     useEffect(() => {
         mounted.current = true;
 
@@ -165,7 +163,7 @@ export function VisaoGestor() {
 
         fetchItens(lojaAtual?.id || null).catch(error => {
             if (mounted.current) {
-                console.error('[FINANCEIRO] Erro ao buscar itens:', error);
+                console.error('[FINANCEIRO] Erro ao buscar categorias:', error);
                 toast({ message: 'Erro ao carregar categorias', type: 'error' });
             }
         });
@@ -186,7 +184,6 @@ export function VisaoGestor() {
         };
     }, [ano, lojaAtual?.id, mesSelecionado, visualizacaoAnual, buscarTransacoesSeguro, fetchItens, fetchAnosDisponiveis, toast]);
 
-    // Refresh manual
     const handleRefresh = useCallback(async () => {
         await buscarTransacoesSeguro(ano, visualizacaoAnual ? 0 : mesSelecionado, lojaAtual?.id || null);
         if (mounted.current) {
@@ -194,32 +191,28 @@ export function VisaoGestor() {
         }
     }, [ano, mesSelecionado, visualizacaoAnual, lojaAtual?.id, buscarTransacoesSeguro, toast]);
 
-    // Auto-preenchimento ao selecionar item do catálogo
-    const handleItemChange = (itemNome: string) => {
-        const cat = categorias.find(c => c.item === itemNome);
+    // Auto-preenchimento ao selecionar categoria
+    const handleCategoriaChange = (categoriaId: number) => {
+        const cat = categorias.find(c => c.id === categoriaId);
         if (cat) {
-            setFormData(prev => {
-                const newData = { ...prev, item: itemNome, modalidade: cat.tipo_recorrencia || 'VARIAVEL' };
-                const lastItem = categorias.find(c => c.item === prev.item);
-                if (!prev.descricao || prev.descricao === lastItem?.item) {
-                    newData.descricao = cat.item;
-                }
-                if (cat.fixo && cat.valor_padrao) {
-                    newData.valor = cat.valor_padrao;
-                }
-                if (cat.dia_vencimento) {
-                    const d = new Date();
-                    d.setDate(cat.dia_vencimento);
-                    newData.vencimento = d.toISOString().split('T')[0];
-                }
-                return newData;
-            });
-        } else {
-            setFormData(prev => ({ ...prev, item: itemNome }));
+            setFormData(prev => ({
+                ...prev,
+                categoriaId: cat.id,
+                modalidade: cat.tipo_recorrencia || 'VARIAVEL',
+                detalhe: prev.detalhe || cat.item, // se não tiver detalhe, usa o nome da categoria
+                valor: cat.fixo && cat.valor_padrao ? cat.valor_padrao : prev.valor,
+                vencimento: cat.dia_vencimento
+                    ? (() => {
+                        const d = new Date();
+                        d.setDate(cat.dia_vencimento);
+                        return d.toISOString().split('T')[0];
+                    })()
+                    : prev.vencimento
+            }));
         }
     };
 
-    // Função para extrair modalidade de uma transação (com memoização por id)
+    // Modalidade com cache
     const modalidadeCache = useRef<Map<number, string>>(new Map());
     const getModalidadeFromTransacao = useCallback((t: TransacaoFinanceira): string => {
         if (modalidadeCache.current.has(t.id)) {
@@ -229,7 +222,7 @@ export function VisaoGestor() {
         if (t.recorrente && t.frequencia === 'mensal') modalidade = 'FIXO_MENSAL';
         else if (t.recorrente && t.frequencia === 'mensal_variavel') modalidade = 'FIXO_VARIAVEL';
         else if (t.recorrente) {
-            const cat = categorias.find(c => c.id === t.item_financeiro_id) || categorias.find(c => c.item === t.item);
+            const cat = categorias.find(c => c.id === t.item_financeiro_id);
             modalidade = cat?.tipo_recorrencia === 'FIXO_VARIAVEL' ? 'FIXO_VARIAVEL' : 'FIXO_MENSAL';
         } else {
             modalidade = 'VARIAVEL';
@@ -238,12 +231,11 @@ export function VisaoGestor() {
         return modalidade;
     }, [categorias]);
 
-    // Limpar cache quando as categorias mudarem
     useEffect(() => {
         modalidadeCache.current.clear();
     }, [categorias]);
 
-    // Filtragem para abas de receitas/despesas (baseada em ano/mês)
+    // Transações do período (ano/mês)
     const transacoesDoPeriodo = useMemo(() => {
         try {
             return transacoes.filter(t => {
@@ -262,7 +254,7 @@ export function VisaoGestor() {
         }
     }, [transacoes, ano, mesSelecionado, visualizacaoAnual]);
 
-    // Lista filtrada por aba (receitas/despesas) e modalidade
+    // Lista filtrada por aba, modalidade e categoria
     const filteredList = useMemo(() => {
         let lista = transacoesDoPeriodo.filter(t => {
             if (abaAtiva === 'receitas' && t.tipo !== 'receita') return false;
@@ -274,16 +266,20 @@ export function VisaoGestor() {
             lista = lista.filter(t => getModalidadeFromTransacao(t) === modalidadeFilter);
         }
 
-        return lista;
-    }, [transacoesDoPeriodo, abaAtiva, modalidadeFilter, getModalidadeFromTransacao]);
+        if (categoriaFilter !== 'all') {
+            lista = lista.filter(t => t.item_financeiro_id === categoriaFilter);
+        }
 
-    // Total e contagem da lista filtrada (para exibir no cabeçalho da tabela)
+        return lista;
+    }, [transacoesDoPeriodo, abaAtiva, modalidadeFilter, categoriaFilter, getModalidadeFromTransacao]);
+
+    // Total e quantidade filtrados
     const totalFiltrado = useMemo(() => {
         const soma = filteredList.reduce((acc, t) => acc + (t.valor || 0), 0);
         return { soma, quantidade: filteredList.length };
     }, [filteredList]);
 
-    // Contagem de itens por modalidade (para exibir no select)
+    // Contagens para os filtros
     const modalidadeCounts = useMemo(() => {
         const listaBase = transacoesDoPeriodo.filter(t => {
             if (abaAtiva === 'receitas' && t.tipo !== 'receita') return false;
@@ -298,45 +294,47 @@ export function VisaoGestor() {
         };
     }, [transacoesDoPeriodo, abaAtiva, getModalidadeFromTransacao]);
 
-    // Reset filtro de modalidade ao trocar de aba
+    const categoriaCounts = useMemo(() => {
+        const listaBase = transacoesDoPeriodo.filter(t => {
+            if (abaAtiva === 'receitas' && t.tipo !== 'receita') return false;
+            if (abaAtiva === 'despesas' && t.tipo !== 'despesa') return false;
+            return true;
+        });
+        const counts = new Map<number, number>();
+        listaBase.forEach(t => {
+            if (t.item_financeiro_id) {
+                counts.set(t.item_financeiro_id, (counts.get(t.item_financeiro_id) || 0) + 1);
+            }
+        });
+        return counts;
+    }, [transacoesDoPeriodo, abaAtiva]);
+
+    // Reset filtros ao trocar de aba
     useEffect(() => {
         setModalidadeFilter('all');
+        setCategoriaFilter('all');
     }, [abaAtiva]);
 
-    // Resumo para abas de receitas/despesas (usado nos KPIs superiores)
+    // Resumo para KPIs
     const resumoCalculado = useMemo(() => {
         const receitas = transacoesDoPeriodo.filter(t => t.tipo === 'receita');
         const despesas = transacoesDoPeriodo.filter(t => t.tipo === 'despesa');
 
         const sum = (list: any[]) => list.reduce((acc, t) => acc + (t.valor || 0), 0);
-        const byCategory = (list: any[]) => {
-            const map = new Map<string, number>();
-            list.forEach(i => {
-                if (!i.item) return;
-                map.set(i.item, (map.get(i.item) || 0) + (i.valor || 0));
-            });
-            return Array.from(map.entries()).map(([k, v]) => ({ item: k, total: v }));
-        };
-
         return {
             receitas: sum(receitas),
-            despesas: sum(despesas),
-            detalheReceitas: byCategory(receitas),
-            detalheDespesas: byCategory(despesas)
+            despesas: sum(despesas)
         };
     }, [transacoesDoPeriodo]);
 
-    // Gráfico para abas de receitas/despesas
+    // Gráfico
     const chartData = useMemo(() => {
-        const monthsData = Array.from({ length: 12 }, (_, i) => {
-            const monthNum = i + 1;
-            return {
-                month: ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'][i],
-                fullLabel: new Date(ano, i, 1).toLocaleString('pt-BR', { month: 'long' }),
-                value: 0,
-                lojas: {} as Record<string, number>
-            };
-        });
+        const monthsData = Array.from({ length: 12 }, (_, i) => ({
+            month: ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'][i],
+            fullLabel: new Date(ano, i, 1).toLocaleString('pt-BR', { month: 'long' }),
+            value: 0,
+            lojas: {} as Record<string, number>
+        }));
 
         transacoes.forEach(t => {
             if (!t.data_vencimento) return;
@@ -352,11 +350,8 @@ export function VisaoGestor() {
 
             monthsData[tMes].value += t.valor || 0;
 
-            if (!lojaAtual) {
-                const lojaId = t.loja_id;
-                if (lojaId) {
-                    monthsData[tMes].lojas[lojaId] = (monthsData[tMes].lojas[lojaId] || 0) + (t.valor || 0);
-                }
+            if (!lojaAtual && t.loja_id) {
+                monthsData[tMes].lojas[t.loja_id] = (monthsData[tMes].lojas[t.loja_id] || 0) + (t.valor || 0);
             }
         });
 
@@ -372,7 +367,7 @@ export function VisaoGestor() {
         };
     }) : undefined;
 
-    // ----- LÓGICA EXCLUSIVA PARA O DRE (filtro dinâmico) -----
+    // DRE com categorias e detalhes
     const transacoesDoPeriodoDRE = useMemo(() => {
         if (modoFiltroDRE === 'mensal') {
             return transacoesDoPeriodo;
@@ -390,34 +385,56 @@ export function VisaoGestor() {
         const despesas = transacoesDoPeriodoDRE.filter(t => t.tipo === 'despesa');
 
         const sum = (list: any[]) => list.reduce((acc, t) => acc + (t.valor || 0), 0);
-        const byCategory = (list: any[]) => {
-            const map = new Map<string, number>();
-            list.forEach(i => {
-                if (!i.item) return;
-                map.set(i.item, (map.get(i.item) || 0) + (i.valor || 0));
+
+        // Agrupar despesas por categoria (item_financeiro_id)
+        const despesasPorCategoria = new Map<number, { id: number; nome: string; total: number; itens: Array<{ id: number; detalhe: string; valor: number; data: string }> }>();
+        
+        despesas.forEach(d => {
+            const catId = d.item_financeiro_id;
+            if (!catId) return;
+            
+            const categoria = categorias.find(c => c.id === catId);
+            if (!categoria) return;
+            
+            if (!despesasPorCategoria.has(catId)) {
+                despesasPorCategoria.set(catId, {
+                    id: catId,
+                    nome: categoria.item,
+                    total: 0,
+                    itens: []
+                });
+            }
+            const grupo = despesasPorCategoria.get(catId)!;
+            grupo.total += d.valor || 0;
+            grupo.itens.push({
+                id: d.id,
+                detalhe: d.item || d.descricao || 'Sem detalhe',
+                valor: d.valor || 0,
+                data: d.data_vencimento || ''
             });
-            return Array.from(map.entries()).map(([k, v]) => ({ item: k, total: v }));
-        };
+        });
+
+        // Ordenar por total decrescente
+        const categoriasOrdenadas = Array.from(despesasPorCategoria.values()).sort((a, b) => b.total - a.total);
 
         return {
             receitas: sum(receitas),
             despesas: sum(despesas),
-            detalheReceitas: byCategory(receitas),
-            detalheDespesas: byCategory(despesas)
+            detalheReceitas: [], // manter compatibilidade
+            despesasPorCategoria: categoriasOrdenadas
         };
-    }, [transacoesDoPeriodoDRE]);
+    }, [transacoesDoPeriodoDRE, categorias]);
 
     const lucroLiquidoDRE = resumoDRE.receitas - resumoDRE.despesas;
-    // -----------------------------------------------------------------
 
-    // Handlers de CRUD
+    // CRUD Handlers
     const handleOpenModalNew = (tipo: 'receita' | 'despesa') => {
         setModalType(tipo);
         setEditingTransaction(null);
         setFormData({
-            descricao: '',
+            categoriaId: null,
+            detalhe: '',
             valor: 0,
-            item: '',
             vencimento: new Date().toISOString().split('T')[0],
             recorrente: false,
             frequencia: 'mensal',
@@ -431,11 +448,11 @@ export function VisaoGestor() {
     const handleEditClick = (t: TransacaoFinanceira) => {
         setEditingTransaction(t);
         setModalType(t.tipo);
-        const cat = categorias.find(c => c.id === t.item_financeiro_id) || categorias.find(c => c.item === t.item);
+        const cat = categorias.find(c => c.id === t.item_financeiro_id);
         setFormData({
-            descricao: t.descricao || '',
+            categoriaId: t.item_financeiro_id || null,
+            detalhe: t.item || '',
             valor: t.valor || 0,
-            item: t.item || '',
             vencimento: t.data_vencimento || new Date().toISOString().split('T')[0],
             recorrente: t.recorrente || false,
             frequencia: t.frequencia || 'mensal',
@@ -483,8 +500,8 @@ export function VisaoGestor() {
             toast({ message: "⚠️ Selecione a Filial.", type: 'error' });
             return;
         }
-        if (!formData.item) {
-            toast({ message: "⚠️ Selecione um item do catálogo.", type: 'error' });
+        if (modalType === 'despesa' && !formData.categoriaId) {
+            toast({ message: "⚠️ Selecione uma categoria para a despesa.", type: 'error' });
             return;
         }
         if (formData.valor <= 0) {
@@ -495,21 +512,25 @@ export function VisaoGestor() {
         setProcessing(true);
 
         try {
-            const catAtual = categorias.find(c => c.item === formData.item);
+            const catAtual = formData.categoriaId ? categorias.find(c => c.id === formData.categoriaId) : null;
             const isRecorrente = formData.modalidade === 'FIXO_MENSAL' || formData.modalidade === 'FIXO_VARIAVEL';
             const freqFinal = formData.modalidade === 'FIXO_MENSAL' ? 'mensal'
                 : formData.modalidade === 'FIXO_VARIAVEL' ? 'mensal_variavel' : null;
 
+            // Definir o campo 'item' como o detalhe (ou o nome da categoria se detalhe vazio)
+            const itemFinal = formData.detalhe.trim() || (catAtual?.item || '');
+            const descricaoFinal = formData.observacao || itemFinal;
+
             const payload = {
                 tipo: modalType,
-                descricao: formData.descricao || formData.item,
+                descricao: descricaoFinal,
                 valor: formData.valor,
-                item: formData.item,
+                item: itemFinal,
                 data_vencimento: formData.vencimento,
                 recorrente: isRecorrente,
                 frequencia: freqFinal,
                 loja_id: formData.loja_id,
-                item_financeiro_id: catAtual?.id || null,
+                item_financeiro_id: formData.categoriaId,
                 status: (editingTransaction?.status || 'pendente') as StatusTransacao,
                 data_pagamento: editingTransaction?.data_pagamento || null
             };
@@ -554,18 +575,21 @@ export function VisaoGestor() {
         }
     };
 
-    // Handlers de exportação e impressão (CSV seguro)
+    // Export CSV
     const handleExport = () => {
         try {
-            const headers = ["Data", "Descrição", "Categoria", "Tipo", "Valor", "Status"];
-            const rows = filteredList.map(t => [
-                escapeCSV(t.data_vencimento || ''),
-                escapeCSV(t.descricao || t.item || ''),
-                escapeCSV(t.item || ''),
-                escapeCSV(t.tipo || ''),
-                escapeCSV((t.valor || 0).toFixed(2)),
-                escapeCSV(t.status || '')
-            ]);
+            const headers = ["Data", "Categoria", "Detalhe", "Tipo", "Valor", "Status"];
+            const rows = filteredList.map(t => {
+                const categoria = categorias.find(c => c.id === t.item_financeiro_id);
+                return [
+                    escapeCSV(t.data_vencimento || ''),
+                    escapeCSV(categoria?.item || 'Sem categoria'),
+                    escapeCSV(t.item || ''),
+                    escapeCSV(t.tipo || ''),
+                    escapeCSV((t.valor || 0).toFixed(2)),
+                    escapeCSV(t.status || '')
+                ];
+            });
 
             const csvContent = headers.join(",") + "\n" + rows.map(row => row.join(",")).join("\n");
             const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
@@ -583,7 +607,7 @@ export function VisaoGestor() {
         }
     };
 
-    // Impressão da tabela para as abas de receitas/despesas
+    // Impressão da tabela
     const handlePrintTabela = () => {
         if (filteredList.length === 0) {
             toast({ message: 'Nenhum dado para imprimir.', type: 'warning' });
@@ -624,23 +648,26 @@ export function VisaoGestor() {
                             <tr>
                                 <th>Vencimento</th>
                                 <th>Filial</th>
-                                <th>Descrição</th>
                                 <th>Categoria</th>
+                                <th>Detalhe</th>
                                 <th class="valor">Valor (R$)</th>
                                 <th>Status</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${filteredList.map(t => `
+                            ${filteredList.map(t => {
+                                const categoria = categorias.find(c => c.id === t.item_financeiro_id);
+                                return `
                                 <tr>
                                     <td>${t.data_vencimento ? t.data_vencimento.split('-').reverse().join('/') : '-'}</td>
                                     <td>${lojasDisponiveis.find(l => l.id === t.loja_id)?.nome_fantasia || 'N/A'}</td>
-                                    <td>${t.descricao || t.item || '-'}</td>
-                                    <td>${t.item || ''}</td>
+                                    <td>${categoria?.item || 'Sem categoria'}</td>
+                                    <td>${t.item || '-'}</td>
                                     <td class="valor">R$ ${(t.valor || 0).toFixed(2).replace('.', ',')}</td>
                                     <td>${(t.status || 'pendente').toUpperCase()}</td>
                                 </tr>
-                            `).join('')}
+                                `;
+                            }).join('')}
                             <tr class="total">
                                 <td colspan="4">Total</td>
                                 <td class="valor">R$ ${totalFiltrado.soma.toFixed(2).replace('.', ',')}</td>
@@ -655,11 +682,10 @@ export function VisaoGestor() {
         printWindow.document.write(html);
         printWindow.document.close();
         printWindow.print();
-        // Fechar automaticamente após impressão (ou após o usuário fechar o diálogo)
         printWindow.onafterprint = () => printWindow.close();
     };
 
-    // Impressão do DRE
+    // Impressão DRE
     const handlePrintDRE = () => {
         if (transacoesDoPeriodoDRE.length === 0) {
             toast({ message: 'Nenhum dado no período selecionado.', type: 'warning' });
@@ -684,6 +710,8 @@ export function VisaoGestor() {
                 .total { font-weight: bold; background-color: #e8e8e8; }
                 .lucro { color: green; }
                 .prejuizo { color: red; }
+                .categoria { font-weight: bold; background-color: #f9f9f9; }
+                .detalhe { padding-left: 20px; }
             </style>
         `;
 
@@ -696,26 +724,36 @@ export function VisaoGestor() {
             periodoDescricao = `${new Date(dataInicio).toLocaleDateString()} a ${new Date(dataFim).toLocaleDateString()}`;
         }
 
+        const despesasHtml = resumoDRE.despesasPorCategoria.map(cat => `
+            <tr class="categoria">
+                <td><strong>${cat.nome}</strong></td>
+                <td class="valor"><strong>R$ ${cat.total.toFixed(2).replace('.', ',')}</strong></td>
+            </tr>
+            ${cat.itens.map(item => `
+                <tr class="detalhe">
+                    <td style="padding-left: 20px;">└ ${item.detalhe}</td>
+                    <td class="valor">R$ ${item.valor.toFixed(2).replace('.', ',')}</td>
+                </tr>
+            `).join('')}
+        `).join('');
+
         const html = `
             <html>
                 <head><title>DRE - ${periodoDescricao}</title>${estilo}</head>
                 <body>
                     <h1>Demonstração de Resultados - ${periodoDescricao}</h1>
                     <h2>Entradas</h2>
-                    <table>
-                        <thead><tr><th>Categoria</th><th class="valor">Valor (R$)</th></tr></thead>
-                        <tbody>
-                            ${resumoDRE.detalheReceitas.map(c => `<tr><td>${c.item}</td><td class="valor">R$ ${c.total.toFixed(2).replace('.', ',')}</td></tr>`).join('')}
-                            <tr class="total"><td>Total de Entradas</td><td class="valor">R$ ${resumoDRE.receitas.toFixed(2).replace('.', ',')}</td></tr>
-                        </tbody>
-                    </table>
+                    <p>Total de Receitas: <strong>R$ ${resumoDRE.receitas.toFixed(2).replace('.', ',')}</strong></p>
 
-                    <h2>Saídas</h2>
+                    <h2>Saídas por Categoria</h2>
                     <table>
-                        <thead><tr><th>Categoria</th><th class="valor">Valor (R$)</th></tr></thead>
+                        <thead><tr><th>Categoria / Detalhe</th><th class="valor">Valor (R$)</th></tr></thead>
                         <tbody>
-                            ${resumoDRE.detalheDespesas.map(c => `<tr><td>${c.item}</td><td class="valor">R$ ${c.total.toFixed(2).replace('.', ',')}</td></tr>`).join('')}
-                            <tr class="total"><td>Total de Saídas</td><td class="valor">R$ ${resumoDRE.despesas.toFixed(2).replace('.', ',')}</td></tr>
+                            ${despesasHtml || '<tr><td colspan="2">Nenhuma despesa no período.</td></tr>'}
+                            <tr class="total">
+                                <td><strong>Total de Saídas</strong></td>
+                                <td class="valor"><strong>R$ ${resumoDRE.despesas.toFixed(2).replace('.', ',')}</strong></td>
+                            </tr>
                         </tbody>
                     </table>
 
@@ -723,7 +761,10 @@ export function VisaoGestor() {
                     <table>
                         <tr><td>Total de Entradas</td><td class="valor">R$ ${resumoDRE.receitas.toFixed(2).replace('.', ',')}</td></tr>
                         <tr><td>Total de Saídas</td><td class="valor">R$ ${resumoDRE.despesas.toFixed(2).replace('.', ',')}</td></tr>
-                        <tr class="total ${lucroLiquidoDRE >= 0 ? 'lucro' : 'prejuizo'}"><td>Resultado</td><td class="valor">R$ ${lucroLiquidoDRE.toFixed(2).replace('.', ',')}</td></tr>
+                        <tr class="total ${lucroLiquidoDRE >= 0 ? 'lucro' : 'prejuizo'}">
+                            <td><strong>Resultado</strong></td>
+                            <td class="valor"><strong>R$ ${lucroLiquidoDRE.toFixed(2).replace('.', ',')}</strong></td>
+                        </tr>
                     </table>
                 </body>
             </html>
@@ -742,8 +783,19 @@ export function VisaoGestor() {
 
     const isBeingDeleted = (id: number) => exclusaoState.emProgresso && exclusaoState.id === id;
 
-    const comissaoBruta = resumoCalculado.receitas;
-    const lucroLiquidoReal = comissaoBruta - resumoCalculado.despesas;
+    const lucroLiquidoReal = resumoCalculado.receitas - resumoCalculado.despesas;
+
+    const toggleCategoriaExpandida = (categoriaNome: string) => {
+        setCategoriasExpandidas(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(categoriaNome)) {
+                newSet.delete(categoriaNome);
+            } else {
+                newSet.add(categoriaNome);
+            }
+            return newSet;
+        });
+    };
 
     return (
         <div className="financeiro-real">
@@ -774,7 +826,7 @@ export function VisaoGestor() {
                 )}
             </PageHeader>
 
-            {/* KPIs superiores */}
+            {/* KPIs */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                 <KPICard
                     label="Receitas"
@@ -808,12 +860,11 @@ export function VisaoGestor() {
 
             {/* Abas */}
             <div className="flex gap-2 mb-4">
-                <button className={`btn ${abaAtiva === 'receitas' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setAbaAtiva('receitas')} aria-label="Receitas"><TrendingUp size={16} /> Receitas</button>
-                <button className={`btn ${abaAtiva === 'despesas' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setAbaAtiva('despesas')} aria-label="Despesas"><TrendingDown size={16} /> Despesas</button>
-                <button className={`btn ${abaAtiva === 'fechamento' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setAbaAtiva('fechamento')} aria-label="Fechamento DRE"><BarChart3 size={16} /> Fechamento (DRE)</button>
+                <button className={`btn ${abaAtiva === 'receitas' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setAbaAtiva('receitas')}><TrendingUp size={16} /> Receitas</button>
+                <button className={`btn ${abaAtiva === 'despesas' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setAbaAtiva('despesas')}><TrendingDown size={16} /> Despesas</button>
+                <button className={`btn ${abaAtiva === 'fechamento' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setAbaAtiva('fechamento')}><BarChart3 size={16} /> Fechamento (DRE)</button>
             </div>
 
-            {/* Conteúdo da aba ativa */}
             <div className="card transition-all duration-300">
                 <div className="flex justify-between items-center mb-4">
                     <div>
@@ -829,113 +880,87 @@ export function VisaoGestor() {
                         )}
                     </div>
 
-                    {/* Controles específicos por aba */}
                     {abaAtiva !== 'fechamento' ? (
                         <div className="flex gap-3 items-center flex-wrap">
-                            <button className="btn btn-sm btn-ghost text-muted hover:text-white" onClick={handleRefresh} disabled={loading} aria-label="Atualizar"><RefreshCcw size={16} className={loading ? 'animate-spin' : ''} /></button>
+                            <button className="btn btn-sm btn-ghost text-muted hover:text-white" onClick={handleRefresh} disabled={loading}><RefreshCcw size={16} className={loading ? 'animate-spin' : ''} /></button>
                             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10">
                                 <span className="text-xs font-semibold text-muted">Ano Completo:</span>
-                                <div className={`relative w-10 h-5 rounded-full cursor-pointer transition-all ${visualizacaoAnual ? 'bg-blue-500' : 'bg-white/20'}`} onClick={() => setVisualizacaoAnual(!visualizacaoAnual)} role="switch" aria-checked={visualizacaoAnual} aria-label="Alternar visualização anual">
+                                <div className={`relative w-10 h-5 rounded-full cursor-pointer transition-all ${visualizacaoAnual ? 'bg-blue-500' : 'bg-white/20'}`} onClick={() => setVisualizacaoAnual(!visualizacaoAnual)} role="switch">
                                     <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${visualizacaoAnual ? 'left-5' : 'left-0.5'}`} />
                                 </div>
                             </div>
                             <div className="w-px h-6 bg-white/10" />
-                            <select className="input input-sm font-bold text-xs px-3 py-1" value={ano} onChange={e => setAno(parseInt(e.target.value))} aria-label="Ano">
+                            <select className="input input-sm font-bold text-xs px-3 py-1" value={ano} onChange={e => setAno(parseInt(e.target.value))}>
                                 {[...new Set([new Date().getFullYear(), ano, ...anosDisponiveis])].sort((a,b)=>b-a).map(anoVal => <option key={anoVal} value={anoVal}>{anoVal}</option>)}
                             </select>
                             <div className="w-px h-6 bg-white/10" />
-                            <button className="btn btn-sm btn-ghost text-muted hover:text-white" onClick={handleExport} disabled={filteredList.length===0} aria-label="Exportar CSV"><FileText size={16} /></button>
-                            <button className="btn btn-sm btn-ghost text-muted hover:text-white" onClick={handlePrintTabela} aria-label="Imprimir tabela"><Printer size={16} /></button>
+                            <button className="btn btn-sm btn-ghost text-muted hover:text-white" onClick={handleExport} disabled={filteredList.length===0}><FileText size={16} /></button>
+                            <button className="btn btn-sm btn-ghost text-muted hover:text-white" onClick={handlePrintTabela}><Printer size={16} /></button>
                             <div className="w-px h-6 bg-white/10" />
-                            <button className="btn btn-sm btn-ghost text-blue-300 hover:text-white border border-blue-500/20" onClick={() => setShowReplicarModal(true)} disabled={loading} aria-label="Replicar mês anterior"><Copy size={14} /> Replicar Mês</button>
+                            <button className="btn btn-sm btn-ghost text-blue-300 hover:text-white border border-blue-500/20" onClick={() => setShowReplicarModal(true)} disabled={loading}><Copy size={14} /> Replicar Mês</button>
                             
                             {/* Filtro de modalidade */}
-                            <div className="relative">
-                                <select
-                                    className="input input-sm font-medium text-xs px-3 py-1 bg-blue/5 border border-white/10 rounded-md"
-                                    value={modalidadeFilter}
-                                    onChange={(e) => setModalidadeFilter(e.target.value as typeof modalidadeFilter)}
-                                    aria-label="Filtrar por modalidade"
-                                >
-                                    <option value="all">Todas modalidades ({modalidadeCounts.total})</option>
-                                    <option value="FIXO_MENSAL">📆 Fixo Mensal ({modalidadeCounts.FIXO_MENSAL})</option>
-                                    <option value="FIXO_VARIAVEL">🔄 Fixo Variável ({modalidadeCounts.FIXO_VARIAVEL})</option>
-                                    <option value="VARIAVEL">⚡ Variável ({modalidadeCounts.VARIAVEL})</option>
-                                </select>
-                            </div>
+                            <select
+                                className="input input-sm font-medium text-xs px-3 py-1 bg-blue/5 border border-white/10 rounded-md"
+                                value={modalidadeFilter}
+                                onChange={(e) => setModalidadeFilter(e.target.value as typeof modalidadeFilter)}
+                            >
+                                <option value="all">Todas modalidades ({modalidadeCounts.total})</option>
+                                <option value="FIXO_MENSAL">📆 Fixo Mensal ({modalidadeCounts.FIXO_MENSAL})</option>
+                                <option value="FIXO_VARIAVEL">🔄 Fixo Variável ({modalidadeCounts.FIXO_VARIAVEL})</option>
+                                <option value="VARIAVEL">⚡ Variável ({modalidadeCounts.VARIAVEL})</option>
+                            </select>
 
-                            <button className="btn btn-sm btn-accent" onClick={() => handleOpenModalNew(abaAtiva === 'receitas' ? 'receita' : 'despesa')} disabled={loading} aria-label="Novo lançamento"><Plus size={14} /> Novo Lançamento</button>
+                            {/* Filtro de categoria (apenas para despesas) */}
+                            {abaAtiva === 'despesas' && categorias.filter(c => c.tipo === 'despesa').length > 0 && (
+                                <select
+                                    className="input input-sm font-medium text-xs px-3 py-1 bg-purple/5 border border-white/10 rounded-md"
+                                    value={categoriaFilter === 'all' ? 'all' : String(categoriaFilter)}
+                                    onChange={(e) => setCategoriaFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                                >
+                                    <option value="all">Todas categorias</option>
+                                    {categorias.filter(c => c.tipo === 'despesa').map(cat => (
+                                        <option key={cat.id} value={cat.id}>
+                                            {cat.item} ({categoriaCounts.get(cat.id) || 0})
+                                        </option>
+                                    ))}
+                                </select>
+                            )}
+
+                            <button className="btn btn-sm btn-accent" onClick={() => handleOpenModalNew(abaAtiva === 'receitas' ? 'receita' : 'despesa')} disabled={loading}><Plus size={14} /> Novo Lançamento</button>
                         </div>
                     ) : (
                         <div className="flex gap-3 items-center flex-wrap">
                             <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-lg">
                                 <span className="text-xs text-muted">Filtro:</span>
-                                <button
-                                    className={`px-2 py-1 text-xs rounded ${modoFiltroDRE === 'mensal' ? 'bg-blue-500 text-white' : 'bg-white/10 text-muted'}`}
-                                    onClick={() => setModoFiltroDRE('mensal')}
-                                >
-                                    Mês/Ano
-                                </button>
-                                <button
-                                    className={`px-2 py-1 text-xs rounded ${modoFiltroDRE === 'personalizado' ? 'bg-blue-500 text-white' : 'bg-white/10 text-muted'}`}
-                                    onClick={() => setModoFiltroDRE('personalizado')}
-                                >
-                                    Personalizado
-                                </button>
+                                <button className={`px-2 py-1 text-xs rounded ${modoFiltroDRE === 'mensal' ? 'bg-blue-500 text-white' : 'bg-white/10 text-muted'}`} onClick={() => setModoFiltroDRE('mensal')}>Mês/Ano</button>
+                                <button className={`px-2 py-1 text-xs rounded ${modoFiltroDRE === 'personalizado' ? 'bg-blue-500 text-white' : 'bg-white/10 text-muted'}`} onClick={() => setModoFiltroDRE('personalizado')}>Personalizado</button>
                             </div>
 
                             {modoFiltroDRE === 'mensal' ? (
                                 <>
-                                    <select
-                                        className="input input-sm font-bold text-xs px-3 py-1"
-                                        value={ano}
-                                        onChange={e => setAno(parseInt(e.target.value))}
-                                        aria-label="Ano"
-                                    >
+                                    <select className="input input-sm font-bold text-xs px-3 py-1" value={ano} onChange={e => setAno(parseInt(e.target.value))}>
                                         {[...new Set([new Date().getFullYear(), ano, ...anosDisponiveis])].sort((a,b)=>b-a).map(anoVal => <option key={anoVal} value={anoVal}>{anoVal}</option>)}
                                     </select>
-                                    <select
-                                        className="input input-sm font-bold text-xs px-3 py-1"
-                                        value={mesSelecionado}
-                                        onChange={e => setMesSelecionado(parseInt(e.target.value))}
-                                        aria-label="Mês"
-                                    >
+                                    <select className="input input-sm font-bold text-xs px-3 py-1" value={mesSelecionado} onChange={e => setMesSelecionado(parseInt(e.target.value))}>
                                         {Array.from({length:12},(_,i)=>i+1).map(m=><option key={m} value={m}>{new Date(ano,m-1,1).toLocaleString('pt-BR',{month:'long'})}</option>)}
                                     </select>
                                     <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5">
                                         <span className="text-xs">Ano Completo:</span>
-                                        <div className={`relative w-10 h-5 rounded-full cursor-pointer transition-all ${visualizacaoAnual ? 'bg-blue-500' : 'bg-white/20'}`} onClick={() => setVisualizacaoAnual(!visualizacaoAnual)} role="switch" aria-checked={visualizacaoAnual}>
+                                        <div className={`relative w-10 h-5 rounded-full cursor-pointer transition-all ${visualizacaoAnual ? 'bg-blue-500' : 'bg-white/20'}`} onClick={() => setVisualizacaoAnual(!visualizacaoAnual)} role="switch">
                                             <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${visualizacaoAnual ? 'left-5' : 'left-0.5'}`} />
                                         </div>
                                     </div>
                                 </>
                             ) : (
                                 <>
-                                    <input
-                                        type="date"
-                                        className="input input-sm"
-                                        value={dataInicio}
-                                        onChange={e => setDataInicio(e.target.value)}
-                                        aria-label="Data início"
-                                    />
+                                    <input type="date" className="input input-sm" value={dataInicio} onChange={e => setDataInicio(e.target.value)} />
                                     <span className="text-muted">até</span>
-                                    <input
-                                        type="date"
-                                        className="input input-sm"
-                                        value={dataFim}
-                                        onChange={e => setDataFim(e.target.value)}
-                                        aria-label="Data fim"
-                                    />
+                                    <input type="date" className="input input-sm" value={dataFim} onChange={e => setDataFim(e.target.value)} />
                                 </>
                             )}
 
-                            <button
-                                className="btn btn-sm btn-primary"
-                                onClick={handlePrintDRE}
-                                aria-label="Imprimir DRE"
-                            >
-                                <Printer size={16} /> Imprimir DRE
-                            </button>
+                            <button className="btn btn-sm btn-primary" onClick={handlePrintDRE}><Printer size={16} /> Imprimir DRE</button>
                         </div>
                     )}
                 </div>
@@ -943,58 +968,61 @@ export function VisaoGestor() {
                 {loading ? (
                     <LoadingState type="list" />
                 ) : abaAtiva === 'fechamento' ? (
-                    // Conteúdo do DRE
+                    // DRE com categorias expansíveis
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        {/* Coluna Entradas */}
+                        {/* Entradas */}
                         <div className="flex flex-col bg-emerald-500/5 rounded-xl border border-emerald-500/10 overflow-hidden">
                             <div className="p-4 bg-emerald-500/10 border-b border-emerald-500/10 flex justify-between items-center">
                                 <div className="flex items-center gap-2 text-emerald-400"><TrendingUp size={20} /><h3 className="font-bold uppercase tracking-wider text-sm">Entradas</h3></div>
                                 <span className="font-black text-lg text-emerald-400">R$ {resumoDRE.receitas.toLocaleString('pt-BR')}</span>
                             </div>
-                            <div className="p-4 space-y-3 overflow-y-auto max-h-[500px]">
-                                {resumoDRE.detalheReceitas.length === 0 ? (
-                                    <p className="text-center text-muted text-xs py-10">Nenhuma entrada no período.</p>
-                                ) : (
-                                    resumoDRE.detalheReceitas.sort((a,b)=>b.total-a.total).map((c, i) => (
-                                        <div key={c.item + i} className="flex justify-between items-center p-3 rounded-lg bg-emerald-500/5 hover:bg-emerald-500/10 transition-colors border border-emerald-500/5">
-                                            <span className="text-sm font-medium text-emerald-100">{c.item}</span>
-                                            <span className="font-bold text-emerald-400">R$ {c.total.toLocaleString('pt-BR')}</span>
-                                        </div>
-                                    ))
-                                )}
-                            </div>
+                            <div className="p-4 text-center text-muted text-sm">Total de receitas do período</div>
                         </div>
-                        {/* Coluna Saídas */}
-                        <div className="flex flex-col bg-red-500/5 rounded-xl border border-red-500/10 overflow-hidden">
+
+                        {/* Saídas por categoria */}
+                        <div className="flex flex-col bg-red-500/5 rounded-xl border border-red-500/10 overflow-hidden lg:col-span-2">
                             <div className="p-4 bg-red-500/10 border-b border-red-500/10 flex justify-between items-center">
-                                <div className="flex items-center gap-2 text-red-400"><TrendingDown size={20} /><h3 className="font-bold uppercase tracking-wider text-sm">Saídas</h3></div>
+                                <div className="flex items-center gap-2 text-red-400"><TrendingDown size={20} /><h3 className="font-bold uppercase tracking-wider text-sm">Saídas por Categoria</h3></div>
                                 <span className="font-black text-lg text-red-400">R$ {resumoDRE.despesas.toLocaleString('pt-BR')}</span>
                             </div>
-                            <div className="p-4 space-y-3 overflow-y-auto max-h-[500px]">
-                                {resumoDRE.detalheDespesas.length === 0 ? (
-                                    <p className="text-center text-muted text-xs py-10">Nenhuma saída no período.</p>
+                            <div className="p-4 space-y-2 overflow-y-auto max-h-[600px]">
+                                {resumoDRE.despesasPorCategoria.length === 0 ? (
+                                    <p className="text-center text-muted text-sm py-10">Nenhuma despesa no período.</p>
                                 ) : (
-                                    resumoDRE.detalheDespesas.sort((a,b)=>b.total-a.total).map((c, i) => {
-                                        const catInfo = categorias.find(cat=>cat.item===c.item);
+                                    resumoDRE.despesasPorCategoria.map(cat => {
+                                        const isExpanded = categoriasExpandidas.has(cat.nome);
                                         return (
-                                            <div key={c.item + i} className="flex flex-col p-3 rounded-lg bg-red-500/5 hover:bg-red-500/10 transition-colors border border-red-500/5">
-                                                <div className="flex justify-between items-center mb-1">
-                                                    <span className="text-sm font-medium text-red-100">{c.item}</span>
-                                                    <span className="font-bold text-red-400">R$ {c.total.toLocaleString('pt-BR')}</span>
+                                            <div key={cat.id} className="border border-white/10 rounded-lg overflow-hidden">
+                                                <div 
+                                                    className="flex justify-between items-center p-3 bg-red-500/5 cursor-pointer hover:bg-red-500/10 transition-colors"
+                                                    onClick={() => toggleCategoriaExpandida(cat.nome)}
+                                                >
+                                                    <div className="flex items-center gap-2">
+                                                        {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                                                        <span className="font-bold text-red-100">{cat.nome}</span>
+                                                        <span className="text-xs text-muted">({cat.itens.length} item{cat.itens.length !== 1 ? 's' : ''})</span>
+                                                    </div>
+                                                    <span className="font-bold text-red-400">R$ {cat.total.toLocaleString('pt-BR')}</span>
                                                 </div>
-                                                <div className="flex justify-start">
-                                                    <span className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded ${catInfo?.fixo ? 'bg-indigo-500/20 text-indigo-300' : 'bg-orange-500/20 text-orange-300'}`}>
-                                                        {catInfo?.fixo ? 'Custo Fixo' : 'Custo Variável'}
-                                                    </span>
-                                                </div>
+                                                {isExpanded && (
+                                                    <div className="p-3 space-y-2 border-t border-white/5">
+                                                        {cat.itens.map(item => (
+                                                            <div key={item.id} className="flex justify-between items-center text-sm pl-4">
+                                                                <span className="text-muted">{item.detalhe}</span>
+                                                                <span className="font-mono text-red-300">R$ {item.valor.toLocaleString('pt-BR')}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
                                             </div>
                                         );
                                     })
                                 )}
                             </div>
                         </div>
-                        {/* Coluna Resultado */}
-                        <div className="flex flex-col bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
+
+                        {/* Resultado */}
+                        <div className="lg:col-span-3 flex flex-col bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
                             <div className="p-4 bg-slate-800 border-b border-slate-700 flex items-center gap-2 text-slate-200"><Scale size={20} /><h3 className="font-bold uppercase tracking-wider text-sm">Resultado Líquido</h3></div>
                             <div className="flex-1 flex flex-col items-center justify-center p-8 gap-6">
                                 <div className={`flex items-center justify-center w-24 h-24 rounded-full ${lucroLiquidoDRE>=0?'bg-emerald-500/20 text-emerald-400':'bg-red-500/20 text-red-400'}`}>
@@ -1017,8 +1045,8 @@ export function VisaoGestor() {
                         </div>
                     </div>
                 ) : (
-                    // Conteúdo das abas de receitas/despesas (gráfico + tabela)
-                    <div className="flex flex-col animate-in fade-in slide-in-from-bottom-4 duration-500">
+                    // Tabela de receitas/despesas
+                    <div className="flex flex-col">
                         <div className="mb-6 px-2">
                             <FinancialGrowthChart
                                 data={chartData}
@@ -1035,7 +1063,6 @@ export function VisaoGestor() {
                                 <h4 className="text-xs font-black uppercase text-muted tracking-widest">
                                     {visualizacaoAnual ? `Movimentações de ${ano} (Ano Completo)` : `Movimentações de ${new Date(ano, mesSelecionado-1, 1).toLocaleString('pt-BR', { month: 'long' })}`}
                                 </h4>
-                                {/* Exibe total filtrado ao lado do título */}
                                 <div className="flex items-center gap-4 text-sm">
                                     <span className="text-muted">{totalFiltrado.quantidade} registro{totalFiltrado.quantidade !== 1 ? 's' : ''}</span>
                                     <span className={`font-bold ${abaAtiva === 'receitas' ? 'text-success' : 'text-danger'}`}>
@@ -1048,7 +1075,8 @@ export function VisaoGestor() {
                                     <tr>
                                         <th>Vencimento</th>
                                         <th>Filial</th>
-                                        <th>Descrição</th>
+                                        <th>Categoria</th>
+                                        <th>Detalhe</th>
                                         <th>Modalidade</th>
                                         <th className="text-right">Valor</th>
                                         <th className="text-center">Status</th>
@@ -1057,15 +1085,17 @@ export function VisaoGestor() {
                                 </thead>
                                 <tbody>
                                     {filteredList.length === 0 ? (
-                                        <tr><td colSpan={7} className="text-center py-8 text-muted italic">Nenhum lançamento encontrado.</td></tr>
+                                        <tr><td colSpan={8} className="text-center py-8 text-muted italic">Nenhum lançamento encontrado.</td></tr>
                                     ) : (
                                         filteredList.map(t => {
                                             const deletando = isBeingDeleted(t.id);
+                                            const categoria = categorias.find(c => c.id === t.item_financeiro_id);
                                             return (
                                                 <tr key={t.id} className={`group hover:bg-white/5 transition-colors ${deletando?'opacity-50 pointer-events-none':''}`}>
                                                     <td className="text-xs font-mono text-muted">{t.data_vencimento?t.data_vencimento.split('-').reverse().join('/'):'-'}</td>
                                                     <td className="text-[10px] font-bold text-text-secondary">{lojasDisponiveis.find(l=>l.id===t.loja_id)?.nome_fantasia||'N/A'}</td>
-                                                    <td className="font-semibold text-sm">{t.descricao||t.item||'-'}{t.item && t.descricao!==t.item && <span className="block text-[10px] text-muted font-normal">{t.item}</span>}</td>
+                                                    <td className="text-xs font-semibold">{categoria?.item || 'Sem categoria'}</td>
+                                                    <td className="text-sm">{t.item || '-'}</td>
                                                     <td className="text-[10px] font-bold uppercase">
                                                         {(()=>{
                                                             const modalidade = getModalidadeFromTransacao(t);
@@ -1077,9 +1107,9 @@ export function VisaoGestor() {
                                                     <td className={`text-right font-black ${t.tipo==='receita'?'text-success':'text-danger'}`}>R$ {(t.valor||0).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
                                                     <td className="text-center"><span className={`badge ${t.status==='pago'?'success':'warning'} text-[10px]`}>{(t.status||'pendente').toUpperCase()}</span></td>
                                                     <td className="text-right flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                        {t.status==='pendente' && <button className="btn btn-ghost btn-xs text-success hover:bg-success/20" onClick={()=>handleBaixaClick(t)} disabled={deletando} aria-label="Dar baixa"><CheckCircle2 size={14}/></button>}
-                                                        <button className="btn btn-ghost btn-xs text-blue-400 hover:bg-blue-400/20" onClick={()=>handleEditClick(t)} disabled={deletando} aria-label="Editar"><Pencil size={14}/></button>
-                                                        <button className={`btn btn-ghost btn-xs text-danger hover:bg-danger/20 relative ${deletando?'cursor-not-allowed opacity-50':''}`} onClick={()=>handleDeleteClick(t)} disabled={deletando} aria-label="Excluir">{deletando?<Loader2 size={14} className="animate-spin"/>:<Trash2 size={14}/>}</button>
+                                                        {t.status==='pendente' && <button className="btn btn-ghost btn-xs text-success hover:bg-success/20" onClick={()=>handleBaixaClick(t)} disabled={deletando}><CheckCircle2 size={14}/></button>}
+                                                        <button className="btn btn-ghost btn-xs text-blue-400 hover:bg-blue-400/20" onClick={()=>handleEditClick(t)} disabled={deletando}><Pencil size={14}/></button>
+                                                        <button className={`btn btn-ghost btn-xs text-danger hover:bg-danger/20 relative ${deletando?'cursor-not-allowed opacity-50':''}`} onClick={()=>handleDeleteClick(t)} disabled={deletando}>{deletando?<Loader2 size={14} className="animate-spin"/>:<Trash2 size={14}/>}</button>
                                                     </td>
                                                 </tr>
                                             );
@@ -1091,7 +1121,7 @@ export function VisaoGestor() {
                                 <div className="mt-4 p-3 bg-danger/10 border border-danger/20 rounded-lg flex items-center gap-2">
                                     <AlertCircle size={16} className="text-danger" />
                                     <span className="text-xs text-danger">Erro na exclusão: {exclusaoState.erro}. Tente novamente.</span>
-                                    <button className="btn btn-xs btn-ghost text-danger ml-auto" onClick={()=>setExclusaoState(prev=>({...prev,erro:null}))} aria-label="Fechar"><X size={12}/></button>
+                                    <button className="btn btn-xs btn-ghost text-danger ml-auto" onClick={()=>setExclusaoState(prev=>({...prev,erro:null}))}><X size={12}/></button>
                                 </div>
                             )}
                         </div>
@@ -1099,41 +1129,65 @@ export function VisaoGestor() {
                 )}
             </div>
 
-            {/* Modais */}
+            {/* Modal de replicação */}
             <ReplicarUltimoMesModal isOpen={showReplicarModal} onClose={()=>setShowReplicarModal(false)} lojaId={lojaAtual?.id||null} anoAtual={ano} mesAtual={mesSelecionado} onSuccess={()=>buscarTransacoesSeguro(ano,visualizacaoAnual?0:mesSelecionado,lojaAtual?.id||null)} />
+            
+            {/* Modal de baixa */}
             <ModalBaixaFinanceira isOpen={modalBaixaOpen} onClose={()=>{setModalBaixaOpen(false);setTransacaoParaBaixa(null);}} transaction={transacaoParaBaixa} onConfirm={handleConfirmBaixa} />
 
-            {/* Modal de cadastro/edição */}
+            {/* Modal de lançamento (com categoria e detalhe) */}
             {showModal && (
                 <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:9998,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={(e)=>{if(e.target===e.currentTarget&&!processing) setShowModal(false);}}>
-                    <div className="card" style={{width:'100%',maxWidth:'500px',padding:'1.5rem'}}>
+                    <div className="card" style={{width:'100%',maxWidth:'550px',padding:'1.5rem'}}>
                         <div className="flex justify-between items-center mb-4 pb-2 border-b border-white/10">
                             <h3 className="text-lg font-bold">{editingTransaction?'Editar Lançamento':(modalType==='receita'?'Nova Receita':'Nova Despesa')}</h3>
-                            <button onClick={()=>setShowModal(false)} disabled={processing} className="text-muted hover:text-white disabled:opacity-50" aria-label="Fechar"><X size={18}/></button>
+                            <button onClick={()=>setShowModal(false)} disabled={processing} className="text-muted hover:text-white"><X size={18}/></button>
                         </div>
                         <div className="flex flex-col gap-4">
                             {(isAdmin||lojasDisponiveis.length>1) && (
-                                <div className="form-group pb-2 border-b border-white/5">
-                                    <label className="text-blue-400">Filial de Destino</label>
-                                    <select className="input border-blue-500/30 bg-blue-500/5 font-bold" value={formData.loja_id} onChange={e=>setFormData({...formData,loja_id:e.target.value})} disabled={processing} aria-label="Filial">
+                                <div className="form-group">
+                                    <label className="text-blue-400">Filial *</label>
+                                    <select className="input border-blue-500/30 bg-blue-500/5 font-bold" value={formData.loja_id} onChange={e=>setFormData({...formData,loja_id:e.target.value})} disabled={processing}>
                                         <option value="">Selecione a Filial...</option>
                                         {lojasDisponiveis.map(loja=><option key={loja.id} value={loja.id}>{loja.nome_fantasia}</option>)}
                                     </select>
-                                    {!formData.loja_id && <p className="text-[9px] text-danger mt-1 italic font-bold">⚠️ Campo obrigatório</p>}
                                 </div>
                             )}
+                            
+                            {/* Categoria (obrigatória para despesas) */}
                             <div className="form-group">
-                                <label>Descrição (Item do Catálogo)</label>
-                                <div className="relative">
-                                    <input className="input pr-10" list="categorias-list" value={formData.item} onChange={e=>handleItemChange(e.target.value)} placeholder="Digite ou selecione..." autoComplete="off" disabled={processing} aria-label="Item do catálogo" />
-                                    <datalist id="categorias-list">{categorias.filter(c=>c.tipo===modalType).map(c=><option key={c.id} value={c.item}/>)}</datalist>
-                                </div>
-                                <p className="text-[10px] text-muted mt-1">Os itens acima já trazem valores e modalidades sugeridas.</p>
+                                <label>Categoria {modalType === 'despesa' && '*'}</label>
+                                <select
+                                    className="input"
+                                    value={formData.categoriaId || ''}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        if (val) handleCategoriaChange(Number(val));
+                                        else setFormData({...formData, categoriaId: null});
+                                    }}
+                                    disabled={processing}
+                                >
+                                    <option value="">Selecione uma categoria</option>
+                                    {categorias.filter(c => c.tipo === modalType).map(cat => (
+                                        <option key={cat.id} value={cat.id}>{cat.item}</option>
+                                    ))}
+                                </select>
+                                {modalType === 'despesa' && !formData.categoriaId && <p className="text-[9px] text-danger mt-1">⚠️ Obrigatório para despesas</p>}
                             </div>
+
+                            {/* Detalhamento (texto livre) */}
                             <div className="form-group">
-                                <label>Descrição Complementar (Opcional)</label>
-                                <input className="input" value={formData.descricao} onChange={e=>setFormData({...formData,descricao:e.target.value})} placeholder="Ex: Ref. ao conserto da porta" disabled={processing} aria-label="Descrição complementar" />
+                                <label>Detalhamento (opcional)</label>
+                                <input
+                                    className="input"
+                                    value={formData.detalhe}
+                                    onChange={e => setFormData({...formData, detalhe: e.target.value})}
+                                    placeholder="Ex: Salário - João Silva, INSS, Vale Transporte..."
+                                    disabled={processing}
+                                />
+                                <p className="text-[10px] text-muted mt-1">Use para especificar funcionário, tipo de encargo, etc.</p>
                             </div>
+
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="form-group">
                                     <label>Valor (R$)</label>
@@ -1141,9 +1195,10 @@ export function VisaoGestor() {
                                 </div>
                                 <div className="form-group">
                                     <label>Vencimento</label>
-                                    <input type="date" className="input" value={formData.vencimento} onChange={e=>setFormData({...formData,vencimento:e.target.value})} disabled={processing} aria-label="Data de vencimento" />
+                                    <input type="date" className="input" value={formData.vencimento} onChange={e=>setFormData({...formData,vencimento:e.target.value})} disabled={processing} />
                                 </div>
                             </div>
+
                             <div className="form-group">
                                 <label>Tipo de Recorrência</label>
                                 <div className="grid grid-cols-3 gap-2">
@@ -1154,7 +1209,7 @@ export function VisaoGestor() {
                                     ].map(opt=>{
                                         const isSelected=formData.modalidade===opt.key;
                                         return (
-                                            <button key={opt.key} type="button" style={isSelected?{background:opt.bg,borderColor:opt.border,color:opt.text}:{}} className={`p-2 rounded-lg border text-left transition-all text-xs ${isSelected?'':'border-white/10 text-muted hover:border-white/20'}`} onClick={()=>setFormData({...formData,modalidade:opt.key as any})} disabled={processing} aria-label={opt.label}>
+                                            <button key={opt.key} type="button" style={isSelected?{background:opt.bg,borderColor:opt.border,color:opt.text}:{}} className={`p-2 rounded-lg border text-left transition-all text-xs ${isSelected?'':'border-white/10 text-muted hover:border-white/20'}`} onClick={()=>setFormData({...formData,modalidade:opt.key as any})} disabled={processing}>
                                                 <span className="font-bold block">{opt.label}</span>
                                                 <span className="text-[10px] opacity-70">{opt.desc}</span>
                                             </button>
@@ -1162,10 +1217,17 @@ export function VisaoGestor() {
                                     })}
                                 </div>
                             </div>
+
+                            <div className="form-group">
+                                <label>Observação (opcional)</label>
+                                <textarea className="input" rows={2} value={formData.observacao} onChange={e=>setFormData({...formData,observacao:e.target.value})} placeholder="Informações adicionais" disabled={processing} />
+                            </div>
                         </div>
                         <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-white/10">
-                            <button className="btn btn-ghost" onClick={()=>setShowModal(false)} disabled={processing} aria-label="Cancelar">Cancelar</button>
-                            <button className={`btn ${modalType==='receita'?'btn-primary':'btn-danger'}`} onClick={handleSave} disabled={processing||!formData.loja_id||!formData.item||formData.valor<=0} aria-label="Salvar">{processing?<><Loader2 size={14} className="animate-spin mr-1"/> Salvando...</>:'Salvar'}</button>
+                            <button className="btn btn-ghost" onClick={()=>setShowModal(false)} disabled={processing}>Cancelar</button>
+                            <button className={`btn ${modalType==='receita'?'btn-primary':'btn-danger'}`} onClick={handleSave} disabled={processing||!formData.loja_id||(modalType==='despesa'&&!formData.categoriaId)||formData.valor<=0}>
+                                {processing?<><Loader2 size={14} className="animate-spin mr-1"/> Salvando...</>:'Salvar'}
+                            </button>
                         </div>
                     </div>
                 </div>
