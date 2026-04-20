@@ -109,7 +109,7 @@ export function VisaoGestor() {
     const [editingTransaction, setEditingTransaction] = useState<TransacaoFinanceira | null>(null);
     const [dataUltimaAtualizacao, setDataUltimaAtualizacao] = useState<Date | null>(null);
 
-    // State para categorias expandidas no DRE
+    // State para categorias expandidas no DRE (diferenciando receitas e despesas)
     const [categoriasExpandidas, setCategoriasExpandidas] = useState<Set<string>>(new Set());
 
     // Form Data (com categoria e detalhe)
@@ -199,7 +199,7 @@ export function VisaoGestor() {
                 ...prev,
                 categoriaId: cat.id,
                 modalidade: cat.tipo_recorrencia || 'VARIAVEL',
-                detalhe: prev.detalhe || cat.item, // se não tiver detalhe, usa o nome da categoria
+                detalhe: prev.detalhe || cat.item,
                 valor: cat.fixo && cat.valor_padrao ? cat.valor_padrao : prev.valor,
                 vencimento: cat.dia_vencimento
                     ? (() => {
@@ -367,7 +367,7 @@ export function VisaoGestor() {
         };
     }) : undefined;
 
-    // DRE com categorias e detalhes
+    // DRE com categorias e detalhes (receitas e despesas)
     const transacoesDoPeriodoDRE = useMemo(() => {
         if (modoFiltroDRE === 'mensal') {
             return transacoesDoPeriodo;
@@ -380,31 +380,55 @@ export function VisaoGestor() {
         }
     }, [modoFiltroDRE, transacoesDoPeriodo, transacoes, dataInicio, dataFim]);
 
-    const resumoDRE = useMemo(() => {
+    // Agrupar receitas por categoria
+    const receitasPorCategoria = useMemo(() => {
         const receitas = transacoesDoPeriodoDRE.filter(t => t.tipo === 'receita');
-        const despesas = transacoesDoPeriodoDRE.filter(t => t.tipo === 'despesa');
-
-        const sum = (list: any[]) => list.reduce((acc, t) => acc + (t.valor || 0), 0);
-
-        // Agrupar despesas por categoria (item_financeiro_id)
-        const despesasPorCategoria = new Map<number, { id: number; nome: string; total: number; itens: Array<{ id: number; detalhe: string; valor: number; data: string }> }>();
+        const grupos = new Map<number, { id: number; nome: string; total: number; itens: Array<{ id: number; detalhe: string; valor: number; data: string }> }>();
         
-        despesas.forEach(d => {
-            const catId = d.item_financeiro_id;
+        receitas.forEach(r => {
+            const catId = r.item_financeiro_id;
             if (!catId) return;
-            
             const categoria = categorias.find(c => c.id === catId);
             if (!categoria) return;
-            
-            if (!despesasPorCategoria.has(catId)) {
-                despesasPorCategoria.set(catId, {
+            if (!grupos.has(catId)) {
+                grupos.set(catId, {
                     id: catId,
                     nome: categoria.item,
                     total: 0,
                     itens: []
                 });
             }
-            const grupo = despesasPorCategoria.get(catId)!;
+            const grupo = grupos.get(catId)!;
+            grupo.total += r.valor || 0;
+            grupo.itens.push({
+                id: r.id,
+                detalhe: r.item || r.descricao || 'Sem detalhe',
+                valor: r.valor || 0,
+                data: r.data_vencimento || ''
+            });
+        });
+        return Array.from(grupos.values()).sort((a, b) => b.total - a.total);
+    }, [transacoesDoPeriodoDRE, categorias]);
+
+    // Agrupar despesas por categoria
+    const despesasPorCategoria = useMemo(() => {
+        const despesas = transacoesDoPeriodoDRE.filter(t => t.tipo === 'despesa');
+        const grupos = new Map<number, { id: number; nome: string; total: number; itens: Array<{ id: number; detalhe: string; valor: number; data: string }> }>();
+        
+        despesas.forEach(d => {
+            const catId = d.item_financeiro_id;
+            if (!catId) return;
+            const categoria = categorias.find(c => c.id === catId);
+            if (!categoria) return;
+            if (!grupos.has(catId)) {
+                grupos.set(catId, {
+                    id: catId,
+                    nome: categoria.item,
+                    total: 0,
+                    itens: []
+                });
+            }
+            const grupo = grupos.get(catId)!;
             grupo.total += d.valor || 0;
             grupo.itens.push({
                 id: d.id,
@@ -413,19 +437,12 @@ export function VisaoGestor() {
                 data: d.data_vencimento || ''
             });
         });
-
-        // Ordenar por total decrescente
-        const categoriasOrdenadas = Array.from(despesasPorCategoria.values()).sort((a, b) => b.total - a.total);
-
-        return {
-            receitas: sum(receitas),
-            despesas: sum(despesas),
-            detalheReceitas: [], // manter compatibilidade
-            despesasPorCategoria: categoriasOrdenadas
-        };
+        return Array.from(grupos.values()).sort((a, b) => b.total - a.total);
     }, [transacoesDoPeriodoDRE, categorias]);
 
-    const lucroLiquidoDRE = resumoDRE.receitas - resumoDRE.despesas;
+    const totalReceitasDRE = receitasPorCategoria.reduce((acc, cat) => acc + cat.total, 0);
+    const totalDespesasDRE = despesasPorCategoria.reduce((acc, cat) => acc + cat.total, 0);
+    const lucroLiquidoDRE = totalReceitasDRE - totalDespesasDRE;
 
     // CRUD Handlers
     const handleOpenModalNew = (tipo: 'receita' | 'despesa') => {
@@ -517,7 +534,6 @@ export function VisaoGestor() {
             const freqFinal = formData.modalidade === 'FIXO_MENSAL' ? 'mensal'
                 : formData.modalidade === 'FIXO_VARIAVEL' ? 'mensal_variavel' : null;
 
-            // Definir o campo 'item' como o detalhe (ou o nome da categoria se detalhe vazio)
             const itemFinal = formData.detalhe.trim() || (catAtual?.item || '');
             const descricaoFinal = formData.observacao || itemFinal;
 
@@ -724,7 +740,20 @@ export function VisaoGestor() {
             periodoDescricao = `${new Date(dataInicio).toLocaleDateString()} a ${new Date(dataFim).toLocaleDateString()}`;
         }
 
-        const despesasHtml = resumoDRE.despesasPorCategoria.map(cat => `
+        const receitasHtml = receitasPorCategoria.map(cat => `
+            <tr class="categoria">
+                <td><strong>${cat.nome}</strong></td>
+                <td class="valor"><strong>R$ ${cat.total.toFixed(2).replace('.', ',')}</strong></td>
+            </tr>
+            ${cat.itens.map(item => `
+                <tr class="detalhe">
+                    <td style="padding-left: 20px;">└ ${item.detalhe}</td>
+                    <td class="valor">R$ ${item.valor.toFixed(2).replace('.', ',')}</td>
+                </tr>
+            `).join('')}
+        `).join('');
+
+        const despesasHtml = despesasPorCategoria.map(cat => `
             <tr class="categoria">
                 <td><strong>${cat.nome}</strong></td>
                 <td class="valor"><strong>R$ ${cat.total.toFixed(2).replace('.', ',')}</strong></td>
@@ -742,25 +771,35 @@ export function VisaoGestor() {
                 <head><title>DRE - ${periodoDescricao}</title>${estilo}</head>
                 <body>
                     <h1>Demonstração de Resultados - ${periodoDescricao}</h1>
-                    <h2>Entradas</h2>
-                    <p>Total de Receitas: <strong>R$ ${resumoDRE.receitas.toFixed(2).replace('.', ',')}</strong></p>
+                    
+                    <h2>Entradas (Receitas)</h2>
+                    <table>
+                        <thead><tr><th>Categoria / Detalhe</th><th class="valor">Valor (R$)</th></tr></thead>
+                        <tbody>
+                            ${receitasHtml || '<tr><td colspan="2">Nenhuma receita no período.</td></tr>'}
+                            <tr class="total">
+                                <td><strong>Total de Entradas</strong></td>
+                                <td class="valor"><strong>R$ ${totalReceitasDRE.toFixed(2).replace('.', ',')}</strong></td>
+                            </tr>
+                        </tbody>
+                    </table>
 
-                    <h2>Saídas por Categoria</h2>
+                    <h2>Saídas (Despesas)</h2>
                     <table>
                         <thead><tr><th>Categoria / Detalhe</th><th class="valor">Valor (R$)</th></tr></thead>
                         <tbody>
                             ${despesasHtml || '<tr><td colspan="2">Nenhuma despesa no período.</td></tr>'}
                             <tr class="total">
                                 <td><strong>Total de Saídas</strong></td>
-                                <td class="valor"><strong>R$ ${resumoDRE.despesas.toFixed(2).replace('.', ',')}</strong></td>
+                                <td class="valor"><strong>R$ ${totalDespesasDRE.toFixed(2).replace('.', ',')}</strong></td>
                             </tr>
                         </tbody>
                     </table>
 
                     <h2>Resultado Líquido</h2>
                     <table>
-                        <tr><td>Total de Entradas</td><td class="valor">R$ ${resumoDRE.receitas.toFixed(2).replace('.', ',')}</td></tr>
-                        <tr><td>Total de Saídas</td><td class="valor">R$ ${resumoDRE.despesas.toFixed(2).replace('.', ',')}</td></tr>
+                        <tr><td>Total de Entradas</td><td class="valor">R$ ${totalReceitasDRE.toFixed(2).replace('.', ',')}</td></tr>
+                        <tr><td>Total de Saídas</td><td class="valor">R$ ${totalDespesasDRE.toFixed(2).replace('.', ',')}</td></tr>
                         <tr class="total ${lucroLiquidoDRE >= 0 ? 'lucro' : 'prejuizo'}">
                             <td><strong>Resultado</strong></td>
                             <td class="valor"><strong>R$ ${lucroLiquidoDRE.toFixed(2).replace('.', ',')}</strong></td>
@@ -785,13 +824,14 @@ export function VisaoGestor() {
 
     const lucroLiquidoReal = resumoCalculado.receitas - resumoCalculado.despesas;
 
-    const toggleCategoriaExpandida = (categoriaNome: string) => {
+    const toggleCategoriaExpandida = (prefixo: string, nome: string) => {
+        const key = `${prefixo}_${nome}`;
         setCategoriasExpandidas(prev => {
             const newSet = new Set(prev);
-            if (newSet.has(categoriaNome)) {
-                newSet.delete(categoriaNome);
+            if (newSet.has(key)) {
+                newSet.delete(key);
             } else {
-                newSet.add(categoriaNome);
+                newSet.add(key);
             }
             return newSet;
         });
@@ -866,7 +906,7 @@ export function VisaoGestor() {
             </div>
 
             <div className="card transition-all duration-300">
-                <div className="flex justify-between items-center mb-4">
+                <div className="flex justify-between items-center mb-4 flex-wrap gap-3">
                     <div>
                         <h3 className="chart-title mb-0">
                             {abaAtiva === 'receitas' ? 'Melhoria de Fluxo (Receitas)' :
@@ -883,42 +923,36 @@ export function VisaoGestor() {
                     {abaAtiva !== 'fechamento' ? (
                         <div className="flex gap-3 items-center flex-wrap">
                             <button className="btn btn-sm btn-ghost text-muted hover:text-white" onClick={handleRefresh} disabled={loading}><RefreshCcw size={16} className={loading ? 'animate-spin' : ''} /></button>
+                            
                             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10">
                                 <span className="text-xs font-semibold text-muted">Ano Completo:</span>
                                 <div className={`relative w-10 h-5 rounded-full cursor-pointer transition-all ${visualizacaoAnual ? 'bg-blue-500' : 'bg-white/20'}`} onClick={() => setVisualizacaoAnual(!visualizacaoAnual)} role="switch">
                                     <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${visualizacaoAnual ? 'left-5' : 'left-0.5'}`} />
                                 </div>
                             </div>
-                            <div className="w-px h-6 bg-white/10" />
+
                             <select className="input input-sm font-bold text-xs px-3 py-1" value={ano} onChange={e => setAno(parseInt(e.target.value))}>
                                 {[...new Set([new Date().getFullYear(), ano, ...anosDisponiveis])].sort((a,b)=>b-a).map(anoVal => <option key={anoVal} value={anoVal}>{anoVal}</option>)}
                             </select>
-                            <div className="w-px h-6 bg-white/10" />
-                            <button className="btn btn-sm btn-ghost text-muted hover:text-white" onClick={handleExport} disabled={filteredList.length===0}><FileText size={16} /></button>
-                            <button className="btn btn-sm btn-ghost text-muted hover:text-white" onClick={handlePrintTabela}><Printer size={16} /></button>
-                            <div className="w-px h-6 bg-white/10" />
-                            <button className="btn btn-sm btn-ghost text-blue-300 hover:text-white border border-blue-500/20" onClick={() => setShowReplicarModal(true)} disabled={loading}><Copy size={14} /> Replicar Mês</button>
-                            
-                            {/* Filtro de modalidade */}
+
                             <select
                                 className="input input-sm font-medium text-xs px-3 py-1 bg-blue/5 border border-white/10 rounded-md"
                                 value={modalidadeFilter}
                                 onChange={(e) => setModalidadeFilter(e.target.value as typeof modalidadeFilter)}
                             >
-                                <option value="all">Todas modalidades ({modalidadeCounts.total})</option>
+                                <option value="all">Recorrência: Todas ({modalidadeCounts.total})</option>
                                 <option value="FIXO_MENSAL">📆 Fixo Mensal ({modalidadeCounts.FIXO_MENSAL})</option>
                                 <option value="FIXO_VARIAVEL">🔄 Fixo Variável ({modalidadeCounts.FIXO_VARIAVEL})</option>
                                 <option value="VARIAVEL">⚡ Variável ({modalidadeCounts.VARIAVEL})</option>
                             </select>
 
-                            {/* Filtro de categoria (apenas para despesas) */}
                             {abaAtiva === 'despesas' && categorias.filter(c => c.tipo === 'despesa').length > 0 && (
                                 <select
                                     className="input input-sm font-medium text-xs px-3 py-1 bg-purple/5 border border-white/10 rounded-md"
                                     value={categoriaFilter === 'all' ? 'all' : String(categoriaFilter)}
                                     onChange={(e) => setCategoriaFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))}
                                 >
-                                    <option value="all">Todas categorias</option>
+                                    <option value="all">Categoria: Todas</option>
                                     {categorias.filter(c => c.tipo === 'despesa').map(cat => (
                                         <option key={cat.id} value={cat.id}>
                                             {cat.item} ({categoriaCounts.get(cat.id) || 0})
@@ -927,6 +961,9 @@ export function VisaoGestor() {
                                 </select>
                             )}
 
+                            <button className="btn btn-sm btn-ghost text-muted hover:text-white" onClick={handleExport} disabled={filteredList.length===0}><FileText size={16} /></button>
+                            <button className="btn btn-sm btn-ghost text-muted hover:text-white" onClick={handlePrintTabela}><Printer size={16} /></button>
+                            <button className="btn btn-sm btn-ghost text-blue-300 hover:text-white border border-blue-500/20" onClick={() => setShowReplicarModal(true)} disabled={loading}><Copy size={14} /> Replicar Mês</button>
                             <button className="btn btn-sm btn-accent" onClick={() => handleOpenModalNew(abaAtiva === 'receitas' ? 'receita' : 'despesa')} disabled={loading}><Plus size={14} /> Novo Lançamento</button>
                         </div>
                     ) : (
@@ -968,34 +1005,69 @@ export function VisaoGestor() {
                 {loading ? (
                     <LoadingState type="list" />
                 ) : abaAtiva === 'fechamento' ? (
-                    // DRE com categorias expansíveis
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        {/* Entradas */}
+                    // DRE com categorias expansíveis para receitas e despesas
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Receitas */}
                         <div className="flex flex-col bg-emerald-500/5 rounded-xl border border-emerald-500/10 overflow-hidden">
                             <div className="p-4 bg-emerald-500/10 border-b border-emerald-500/10 flex justify-between items-center">
-                                <div className="flex items-center gap-2 text-emerald-400"><TrendingUp size={20} /><h3 className="font-bold uppercase tracking-wider text-sm">Entradas</h3></div>
-                                <span className="font-black text-lg text-emerald-400">R$ {resumoDRE.receitas.toLocaleString('pt-BR')}</span>
+                                <div className="flex items-center gap-2 text-emerald-400"><TrendingUp size={20} /><h3 className="font-bold uppercase tracking-wider text-sm">Entradas (Receitas)</h3></div>
+                                <span className="font-black text-lg text-emerald-400">R$ {totalReceitasDRE.toLocaleString('pt-BR')}</span>
                             </div>
-                            <div className="p-4 text-center text-muted text-sm">Total de receitas do período</div>
+                            <div className="p-4 space-y-2 overflow-y-auto max-h-[500px]">
+                                {receitasPorCategoria.length === 0 ? (
+                                    <p className="text-center text-muted text-sm py-10">Nenhuma receita no período.</p>
+                                ) : (
+                                    receitasPorCategoria.map(cat => {
+                                        const key = `receita_${cat.nome}`;
+                                        const isExpanded = categoriasExpandidas.has(key);
+                                        return (
+                                            <div key={cat.id} className="border border-white/10 rounded-lg overflow-hidden">
+                                                <div 
+                                                    className="flex justify-between items-center p-3 bg-emerald-500/5 cursor-pointer hover:bg-emerald-500/10 transition-colors"
+                                                    onClick={() => toggleCategoriaExpandida('receita', cat.nome)}
+                                                >
+                                                    <div className="flex items-center gap-2">
+                                                        {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                                                        <span className="font-bold text-emerald-100">{cat.nome}</span>
+                                                        <span className="text-xs text-muted">({cat.itens.length} item{cat.itens.length !== 1 ? 's' : ''})</span>
+                                                    </div>
+                                                    <span className="font-bold text-emerald-400">R$ {cat.total.toLocaleString('pt-BR')}</span>
+                                                </div>
+                                                {isExpanded && (
+                                                    <div className="p-3 space-y-2 border-t border-white/5">
+                                                        {cat.itens.map(item => (
+                                                            <div key={item.id} className="flex justify-between items-center text-sm pl-4">
+                                                                <span className="text-muted">{item.detalhe}</span>
+                                                                <span className="font-mono text-emerald-300">R$ {item.valor.toLocaleString('pt-BR')}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
                         </div>
 
-                        {/* Saídas por categoria */}
-                        <div className="flex flex-col bg-red-500/5 rounded-xl border border-red-500/10 overflow-hidden lg:col-span-2">
+                        {/* Despesas */}
+                        <div className="flex flex-col bg-red-500/5 rounded-xl border border-red-500/10 overflow-hidden">
                             <div className="p-4 bg-red-500/10 border-b border-red-500/10 flex justify-between items-center">
-                                <div className="flex items-center gap-2 text-red-400"><TrendingDown size={20} /><h3 className="font-bold uppercase tracking-wider text-sm">Saídas por Categoria</h3></div>
-                                <span className="font-black text-lg text-red-400">R$ {resumoDRE.despesas.toLocaleString('pt-BR')}</span>
+                                <div className="flex items-center gap-2 text-red-400"><TrendingDown size={20} /><h3 className="font-bold uppercase tracking-wider text-sm">Saídas (Despesas)</h3></div>
+                                <span className="font-black text-lg text-red-400">R$ {totalDespesasDRE.toLocaleString('pt-BR')}</span>
                             </div>
-                            <div className="p-4 space-y-2 overflow-y-auto max-h-[600px]">
-                                {resumoDRE.despesasPorCategoria.length === 0 ? (
+                            <div className="p-4 space-y-2 overflow-y-auto max-h-[500px]">
+                                {despesasPorCategoria.length === 0 ? (
                                     <p className="text-center text-muted text-sm py-10">Nenhuma despesa no período.</p>
                                 ) : (
-                                    resumoDRE.despesasPorCategoria.map(cat => {
-                                        const isExpanded = categoriasExpandidas.has(cat.nome);
+                                    despesasPorCategoria.map(cat => {
+                                        const key = `despesa_${cat.nome}`;
+                                        const isExpanded = categoriasExpandidas.has(key);
                                         return (
                                             <div key={cat.id} className="border border-white/10 rounded-lg overflow-hidden">
                                                 <div 
                                                     className="flex justify-between items-center p-3 bg-red-500/5 cursor-pointer hover:bg-red-500/10 transition-colors"
-                                                    onClick={() => toggleCategoriaExpandida(cat.nome)}
+                                                    onClick={() => toggleCategoriaExpandida('despesa', cat.nome)}
                                                 >
                                                     <div className="flex items-center gap-2">
                                                         {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
@@ -1021,8 +1093,8 @@ export function VisaoGestor() {
                             </div>
                         </div>
 
-                        {/* Resultado */}
-                        <div className="lg:col-span-3 flex flex-col bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
+                        {/* Resultado (linha inteira) */}
+                        <div className="lg:col-span-2 flex flex-col bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
                             <div className="p-4 bg-slate-800 border-b border-slate-700 flex items-center gap-2 text-slate-200"><Scale size={20} /><h3 className="font-bold uppercase tracking-wider text-sm">Resultado Líquido</h3></div>
                             <div className="flex-1 flex flex-col items-center justify-center p-8 gap-6">
                                 <div className={`flex items-center justify-center w-24 h-24 rounded-full ${lucroLiquidoDRE>=0?'bg-emerald-500/20 text-emerald-400':'bg-red-500/20 text-red-400'}`}>
@@ -1038,14 +1110,14 @@ export function VisaoGestor() {
                                     </p>
                                 </div>
                                 <div className="w-full grid grid-cols-2 gap-4 mt-4 pt-6 border-t border-white/5">
-                                    <div className="text-center"><p className="text-[10px] text-muted uppercase">Margem</p><p className="font-bold text-white">{resumoDRE.receitas>0?((lucroLiquidoDRE/resumoDRE.receitas)*100).toFixed(1):'0'}%</p></div>
+                                    <div className="text-center"><p className="text-[10px] text-muted uppercase">Margem</p><p className="font-bold text-white">{totalReceitasDRE>0?((lucroLiquidoDRE/totalReceitasDRE)*100).toFixed(1):'0'}%</p></div>
                                     <div className="text-center"><p className="text-[10px] text-muted uppercase">Balanço</p><p className={`font-bold ${lucroLiquidoDRE>=0?'text-emerald-400':'text-red-400'}`}>{lucroLiquidoDRE>=0?'Positivo':'Negativo'}</p></div>
                                 </div>
                             </div>
                         </div>
                     </div>
                 ) : (
-                    // Tabela de receitas/despesas
+                    // Tabela de receitas/despesas (gráfico + lista)
                     <div className="flex flex-col">
                         <div className="mb-6 px-2">
                             <FinancialGrowthChart
@@ -1077,7 +1149,7 @@ export function VisaoGestor() {
                                         <th>Filial</th>
                                         <th>Categoria</th>
                                         <th>Detalhe</th>
-                                        <th>Modalidade</th>
+                                        <th>Recorrência</th>
                                         <th className="text-right">Valor</th>
                                         <th className="text-center">Status</th>
                                         <th></th>
@@ -1129,10 +1201,8 @@ export function VisaoGestor() {
                 )}
             </div>
 
-            {/* Modal de replicação */}
+            {/* Modais */}
             <ReplicarUltimoMesModal isOpen={showReplicarModal} onClose={()=>setShowReplicarModal(false)} lojaId={lojaAtual?.id||null} anoAtual={ano} mesAtual={mesSelecionado} onSuccess={()=>buscarTransacoesSeguro(ano,visualizacaoAnual?0:mesSelecionado,lojaAtual?.id||null)} />
-            
-            {/* Modal de baixa */}
             <ModalBaixaFinanceira isOpen={modalBaixaOpen} onClose={()=>{setModalBaixaOpen(false);setTransacaoParaBaixa(null);}} transaction={transacaoParaBaixa} onConfirm={handleConfirmBaixa} />
 
             {/* Modal de lançamento (com categoria e detalhe) */}
