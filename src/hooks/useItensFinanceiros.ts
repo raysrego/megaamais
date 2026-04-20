@@ -12,9 +12,17 @@ export interface ItemFinanceiro {
     ordem: number;
     valor_padrao?: number;
     dia_vencimento?: number;
-    loja_id?: string | null; // Opcional: Se null, é Global (visível para todas)
+    loja_id?: string | null;
+    parent_id?: number | null;   // 👈 Suporte a hierarquia (categoria pai)
     created_at?: string;
 }
+
+// Funções utilitárias (podem ser usadas nos componentes)
+export const getCategoriasPai = (itens: ItemFinanceiro[]): ItemFinanceiro[] => 
+    itens.filter(item => !item.parent_id);
+
+export const getSubcategorias = (itens: ItemFinanceiro[], parentId: number): ItemFinanceiro[] => 
+    itens.filter(item => item.parent_id === parentId);
 
 export function useItensFinanceiros() {
     const supabase = createBrowserSupabaseClient();
@@ -25,12 +33,14 @@ export function useItensFinanceiros() {
 
     const [optimisticItens, addOptimisticItem] = useOptimistic(
         itens,
-        (state, action: { type: 'add' | 'update' | 'delete', payload: any }) => {
+        (state, action: { type: 'add' | 'update' | 'delete'; payload: any }) => {
             switch (action.type) {
                 case 'add':
                     return [...state, { ...action.payload, id: Math.random() }].sort((a, b) => a.ordem - b.ordem);
                 case 'update':
-                    return state.map(item => item.id === action.payload.id ? { ...item, ...action.payload.updates } : item).sort((a, b) => a.ordem - b.ordem);
+                    return state.map(item =>
+                        item.id === action.payload.id ? { ...item, ...action.payload.updates } : item
+                    ).sort((a, b) => a.ordem - b.ordem);
                 case 'delete':
                     return state.filter(item => item.id !== action.payload);
                 default:
@@ -40,7 +50,6 @@ export function useItensFinanceiros() {
     );
 
     const fetchItens = useCallback(async (lojaId?: string | null) => {
-        // Cancelar requisição anterior se houver
         if (abortControllerRef.current) {
             abortControllerRef.current.abort();
         }
@@ -54,47 +63,36 @@ export function useItensFinanceiros() {
             let query = supabase
                 .from('financeiro_itens_plano')
                 .select('*')
-                .eq('arquivado', false) // ✅ Filtra apenas ativos
+                .eq('arquivado', false)
                 .order('ordem', { ascending: true });
 
             if (lojaId && lojaId.trim() !== '') {
-                // ✅ Query Otimizada para usar o índice composto (loja_id, arquivado, ordem)
-                // O OR é suportado, mas precisamos garantir que não anule o uso do índice.
+                // Retorna itens da loja específica OU globais (loja_id IS NULL)
                 query = query.or(`loja_id.eq.${lojaId},loja_id.is.null`);
             } else {
-                // Se não tiver loja, traz apenas os globais (loja_id IS NULL)
+                // Sem loja específica: apenas globais
                 query = query.is('loja_id', null);
             }
 
             const { data, error } = await query.abortSignal(signal);
 
             if (error) {
-                if (error.code === '20') return; // Abort error
+                if (error.code === '20') return; // AbortError
                 throw error;
             }
 
-            // Garantia extra de unicidade no Frontend
+            // Remove duplicatas (garantia extra)
             const uniqueItens = data ? Array.from(new Map(data.map(item => [item.id, item])).values()) : [];
-
-            setItens(uniqueItens as any[]);
+            setItens(uniqueItens as ItemFinanceiro[]);
         } catch (error: any) {
             if (error.name === 'AbortError' || error.message?.includes('AbortError')) {
-                return; // Ignore aborts silently
+                return;
             }
-            console.error('Erro ao buscar itens:', JSON.stringify(error, null, 2));
+            console.error('Erro ao buscar itens:', error);
         } finally {
             setLoading(false);
         }
-
-        // Cleanup function (cancel previous request if new one starts)
-        // Note: fetchItens is called imperatively, so we can't easily return cleanup here.
-        // But preventing the state update on unmount or race condition is handled by logic/optimistic.
-        // For true cancellation, we'd need to store the controller ref.
     }, [supabase]);
-
-    // O fetch será controlado pelo componente via useEffect lá, 
-    // ou podemos adicionar um useEffect aqui que dependa explicitamente de um parâmetro.
-    // Removendo a chamada automática sem argumentos para evitar erros de inicialização.
 
     const salvarItem = async (item: Omit<ItemFinanceiro, 'id'>) => {
         try {
@@ -124,10 +122,7 @@ export function useItensFinanceiros() {
 
             if (error) throw error;
 
-            // ✅ FIX v2.5.14: Forçar atualização IMEDIATA do estado local
-            // Isso garante que mudanças de tipo_recorrencia reflitam nos badges sem refresh
-            setItens(prev => prev.map(c => c.id === id ? data : c).sort((a, b) => a.ordem - b.ordem));
-
+            setItens(prev => prev.map(c => (c.id === id ? data : c)).sort((a, b) => a.ordem - b.ordem));
             return data;
         } catch (error) {
             console.error('Erro ao atualizar item:', error);
@@ -137,7 +132,7 @@ export function useItensFinanceiros() {
 
     const excluirItem = async (id: number) => {
         try {
-            // Primeiro, desvincula lançamentos que referenciam este item (evita FK constraint)
+            // Desvincula transações que usam este item (evita FK)
             await supabase
                 .from('financeiro_contas')
                 .update({ item_financeiro_id: null })
@@ -166,6 +161,9 @@ export function useItensFinanceiros() {
         atualizarItem,
         excluirItem,
         addOptimisticItem,
-        startTransition
+        startTransition,
+        // Utilitários expostos para conveniência
+        getCategoriasPai: () => getCategoriasPai(itens),
+        getSubcategorias: (parentId: number) => getSubcategorias(itens, parentId),
     };
 }
