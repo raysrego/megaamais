@@ -924,19 +924,19 @@ export function VisaoGestor() {
                         <div className="flex gap-3 items-center flex-wrap">
                             <button className="btn btn-sm btn-ghost text-muted hover:text-white" onClick={handleRefresh} disabled={loading}><RefreshCcw size={16} className={loading ? 'animate-spin' : ''} /></button>
                             
-                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10">
+                            <div className="flex items-center gap-2 px-1 py-1.5 rounded-lg bg-white/5 border border-white/10">
                                 <span className="text-xs font-semibold text-muted">Ano Completo:</span>
                                 <div className={`relative w-10 h-5 rounded-full cursor-pointer transition-all ${visualizacaoAnual ? 'bg-blue-500' : 'bg-white/20'}`} onClick={() => setVisualizacaoAnual(!visualizacaoAnual)} role="switch">
                                     <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${visualizacaoAnual ? 'left-5' : 'left-0.5'}`} />
                                 </div>
                             </div>
 
-                            <select className="input input-sm font-bold text-xs px-3 py-1" value={ano} onChange={e => setAno(parseInt(e.target.value))}>
+                            <select className="input input-sm font-bold text-xs px-2 py-1" value={ano} onChange={e => setAno(parseInt(e.target.value))}>
                                 {[...new Set([new Date().getFullYear(), ano, ...anosDisponiveis])].sort((a,b)=>b-a).map(anoVal => <option key={anoVal} value={anoVal}>{anoVal}</option>)}
                             </select>
 
                             <select
-                                className="input input-sm font-medium text-xs px-3 py-1 bg-blue/5 border border-white/10 rounded-md"
+                                className="input input-sm font-medium text-xs px-2 py-1 bg-blue/5 border border-white/10 rounded-md"
                                 value={modalidadeFilter}
                                 onChange={(e) => setModalidadeFilter(e.target.value as typeof modalidadeFilter)}
                             >
@@ -948,7 +948,7 @@ export function VisaoGestor() {
 
                             {abaAtiva === 'despesas' && categorias.filter(c => c.tipo === 'despesa').length > 0 && (
                                 <select
-                                    className="input input-sm font-medium text-xs px-3 py-1 bg-purple/5 border border-white/10 rounded-md"
+                                    className="input input-sm font-medium text-xs px-2 py-1 bg-purple/5 border border-white/10 rounded-md"
                                     value={categoriaFilter === 'all' ? 'all' : String(categoriaFilter)}
                                     onChange={(e) => setCategoriaFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))}
                                 >
@@ -968,7 +968,7 @@ export function VisaoGestor() {
                         </div>
                     ) : (
                         <div className="flex gap-3 items-center flex-wrap">
-                            <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-lg">
+                            <div className="flex items-center gap-2 bg-white/5 px-2 py-1.5 rounded-lg">
                                 <span className="text-xs text-muted">Filtro:</span>
                                 <button className={`px-2 py-1 text-xs rounded ${modoFiltroDRE === 'mensal' ? 'bg-blue-500 text-white' : 'bg-white/10 text-muted'}`} onClick={() => setModoFiltroDRE('mensal')}>Mês/Ano</button>
                                 <button className={`px-2 py-1 text-xs rounded ${modoFiltroDRE === 'personalizado' ? 'bg-blue-500 text-white' : 'bg-white/10 text-muted'}`} onClick={() => setModoFiltroDRE('personalizado')}>Personalizado</button>
@@ -976,13 +976,13 @@ export function VisaoGestor() {
 
                             {modoFiltroDRE === 'mensal' ? (
                                 <>
-                                    <select className="input input-sm font-bold text-xs px-3 py-1" value={ano} onChange={e => setAno(parseInt(e.target.value))}>
+                                    <select className="input input-sm font-bold text-xs px-2 py-1" value={ano} onChange={e => setAno(parseInt(e.target.value))}>
                                         {[...new Set([new Date().getFullYear(), ano, ...anosDisponiveis])].sort((a,b)=>b-a).map(anoVal => <option key={anoVal} value={anoVal}>{anoVal}</option>)}
                                     </select>
-                                    <select className="input input-sm font-bold text-xs px-3 py-1" value={mesSelecionado} onChange={e => setMesSelecionado(parseInt(e.target.value))}>
+                                    <select className="input input-sm font-bold text-xs px-2 py-1" value={mesSelecionado} onChange={e => setMesSelecionado(parseInt(e.target.value))}>
                                         {Array.from({length:12},(_,i)=>i+1).map(m=><option key={m} value={m}>{new Date(ano,m-1,1).toLocaleString('pt-BR',{month:'long'})}</option>)}
                                     </select>
-                                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5">
+                                    <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-white/5">
                                         <span className="text-xs">Ano Completo:</span>
                                         <div className={`relative w-10 h-5 rounded-full cursor-pointer transition-all ${visualizacaoAnual ? 'bg-blue-500' : 'bg-white/20'}`} onClick={() => setVisualizacaoAnual(!visualizacaoAnual)} role="switch">
                                             <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${visualizacaoAnual ? 'left-5' : 'left-0.5'}`} />
