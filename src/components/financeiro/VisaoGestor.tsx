@@ -27,7 +27,7 @@ import { FinancialGrowthChart } from './FinancialGrowthChart';
 import { ReplicarUltimoMesModal } from './ReplicarUltimoMesModal';
 import { ModalBaixaFinanceira } from './ModalBaixaFinanceira';
 import { useFinanceiro, TransacaoFinanceira } from '@/hooks/useFinanceiro';
-import { useItensFinanceiros } from '@/hooks/useItensFinanceiros';
+import { useItensFinanceiros, ItemFinanceiro } from '@/hooks/useItensFinanceiros';
 import { useLoja } from '@/contexts/LojaContext';
 import { usePerfil } from '@/hooks/usePerfil';
 import { PageHeader } from '@/components/ui/PageHeader';
@@ -84,7 +84,8 @@ export function VisaoGestor() {
     const [mesSelecionado, setMesSelecionado] = useState(new Date().getMonth() + 1);
     const [visualizacaoAnual, setVisualizacaoAnual] = useState(false);
     const [modalidadeFilter, setModalidadeFilter] = useState<'all' | 'FIXO_MENSAL' | 'FIXO_VARIAVEL' | 'VARIAVEL'>('all');
-    const [categoriaFilter, setCategoriaFilter] = useState<number | 'all'>('all');
+    // Filtro por categoria pai (armazena o ID da categoria raiz)
+    const [categoriaPaiFilter, setCategoriaPaiFilter] = useState<number | 'all'>('all');
 
     // Filtros DRE
     const hoje = new Date();
@@ -112,9 +113,10 @@ export function VisaoGestor() {
     // State para categorias expandidas no DRE (diferenciando receitas e despesas)
     const [categoriasExpandidas, setCategoriasExpandidas] = useState<Set<string>>(new Set());
 
-    // Form Data (com categoria e detalhe)
+    // Form Data (com categoria pai e subcategoria)
     const [formData, setFormData] = useState({
-        categoriaId: null as number | null,
+        categoriaPaiId: null as number | null,
+        subcategoriaId: null as number | null,
         detalhe: '',
         valor: 0,
         vencimento: new Date().toISOString().split('T')[0],
@@ -124,6 +126,17 @@ export function VisaoGestor() {
         loja_id: lojaAtual?.id || '',
         modalidade: 'VARIAVEL' as 'FIXO_MENSAL' | 'FIXO_VARIAVEL' | 'VARIAVEL'
     });
+
+    // Derivar listas de categorias pai (apenas as que não têm parent_id)
+    const categoriasPai = useMemo(() => {
+        return categorias.filter(c => !c.parent_id && c.tipo === modalType);
+    }, [categorias, modalType]);
+
+    // Subcategorias baseadas na categoria pai selecionada
+    const subcategoriasDisponiveis = useMemo(() => {
+        if (!formData.categoriaPaiId) return [];
+        return categorias.filter(c => c.parent_id === formData.categoriaPaiId);
+    }, [categorias, formData.categoriaPaiId]);
 
     // Sincronizar loja_id
     useEffect(() => {
@@ -191,13 +204,12 @@ export function VisaoGestor() {
         }
     }, [ano, mesSelecionado, visualizacaoAnual, lojaAtual?.id, buscarTransacoesSeguro, toast]);
 
-    // Auto-preenchimento ao selecionar categoria
+    // Auto-preenchimento ao selecionar uma subcategoria (ou categoria pai)
     const handleCategoriaChange = (categoriaId: number) => {
         const cat = categorias.find(c => c.id === categoriaId);
         if (cat) {
             setFormData(prev => ({
                 ...prev,
-                categoriaId: cat.id,
                 modalidade: cat.tipo_recorrencia || 'VARIAVEL',
                 detalhe: prev.detalhe || cat.item,
                 valor: cat.fixo && cat.valor_padrao ? cat.valor_padrao : prev.valor,
@@ -254,7 +266,17 @@ export function VisaoGestor() {
         }
     }, [transacoes, ano, mesSelecionado, visualizacaoAnual]);
 
-    // Lista filtrada por aba, modalidade e categoria
+    // Função para obter a categoria raiz (pai) de uma transação
+    const getCategoriaRaiz = useCallback((t: TransacaoFinanceira): ItemFinanceiro | null => {
+        const cat = categorias.find(c => c.id === t.item_financeiro_id);
+        if (!cat) return null;
+        if (cat.parent_id) {
+            return categorias.find(c => c.id === cat.parent_id) || null;
+        }
+        return cat;
+    }, [categorias]);
+
+    // Lista filtrada por aba, modalidade e categoria pai (inclui subcategorias)
     const filteredList = useMemo(() => {
         let lista = transacoesDoPeriodo.filter(t => {
             if (abaAtiva === 'receitas' && t.tipo !== 'receita') return false;
@@ -266,12 +288,15 @@ export function VisaoGestor() {
             lista = lista.filter(t => getModalidadeFromTransacao(t) === modalidadeFilter);
         }
 
-        if (categoriaFilter !== 'all') {
-            lista = lista.filter(t => t.item_financeiro_id === categoriaFilter);
+        if (categoriaPaiFilter !== 'all') {
+            // Buscar todos os IDs das subcategorias desta categoria pai
+            const subIds = categorias.filter(c => c.parent_id === categoriaPaiFilter).map(c => c.id);
+            const idsParaFiltrar = [categoriaPaiFilter, ...subIds];
+            lista = lista.filter(t => t.item_financeiro_id && idsParaFiltrar.includes(t.item_financeiro_id));
         }
 
         return lista;
-    }, [transacoesDoPeriodo, abaAtiva, modalidadeFilter, categoriaFilter, getModalidadeFromTransacao]);
+    }, [transacoesDoPeriodo, abaAtiva, modalidadeFilter, categoriaPaiFilter, getModalidadeFromTransacao, categorias]);
 
     // Total e quantidade filtrados
     const totalFiltrado = useMemo(() => {
@@ -294,25 +319,10 @@ export function VisaoGestor() {
         };
     }, [transacoesDoPeriodo, abaAtiva, getModalidadeFromTransacao]);
 
-    const categoriaCounts = useMemo(() => {
-        const listaBase = transacoesDoPeriodo.filter(t => {
-            if (abaAtiva === 'receitas' && t.tipo !== 'receita') return false;
-            if (abaAtiva === 'despesas' && t.tipo !== 'despesa') return false;
-            return true;
-        });
-        const counts = new Map<number, number>();
-        listaBase.forEach(t => {
-            if (t.item_financeiro_id) {
-                counts.set(t.item_financeiro_id, (counts.get(t.item_financeiro_id) || 0) + 1);
-            }
-        });
-        return counts;
-    }, [transacoesDoPeriodo, abaAtiva]);
-
     // Reset filtros ao trocar de aba
     useEffect(() => {
         setModalidadeFilter('all');
-        setCategoriaFilter('all');
+        setCategoriaPaiFilter('all');
     }, [abaAtiva]);
 
     // Resumo para KPIs
@@ -367,7 +377,7 @@ export function VisaoGestor() {
         };
     }) : undefined;
 
-    // DRE com categorias e detalhes (receitas e despesas)
+    // DRE com categorias e detalhes (receitas e despesas) – agora agrupando por categoria pai
     const transacoesDoPeriodoDRE = useMemo(() => {
         if (modoFiltroDRE === 'mensal') {
             return transacoesDoPeriodo;
@@ -380,68 +390,108 @@ export function VisaoGestor() {
         }
     }, [modoFiltroDRE, transacoesDoPeriodo, transacoes, dataInicio, dataFim]);
 
-    // Agrupar receitas por categoria
-    const receitasPorCategoria = useMemo(() => {
-        const receitas = transacoesDoPeriodoDRE.filter(t => t.tipo === 'receita');
-        const grupos = new Map<number, { id: number; nome: string; total: number; itens: Array<{ id: number; detalhe: string; valor: number; data: string }> }>();
-        
-        receitas.forEach(r => {
-            const catId = r.item_financeiro_id;
-            if (!catId) return;
-            const categoria = categorias.find(c => c.id === catId);
-            if (!categoria) return;
-            if (!grupos.has(catId)) {
-                grupos.set(catId, {
-                    id: catId,
-                    nome: categoria.item,
+    // Agrupar receitas por categoria pai e depois por subcategoria
+    const receitasPorCategoriaRaiz = useMemo(() => {
+        const grupos = new Map<number, {
+            id: number;
+            nome: string;
+            total: number;
+            subcategorias: Map<number, { id: number; nome: string; total: number; itens: any[] }>;
+        }>();
+
+        transacoesDoPeriodoDRE.filter(t => t.tipo === 'receita').forEach(r => {
+            const cat = categorias.find(c => c.id === r.item_financeiro_id);
+            if (!cat) return;
+            const raizId = cat.parent_id || cat.id;
+            const raizNome = cat.parent_id ? (categorias.find(c => c.id === cat.parent_id)?.item || cat.item) : cat.item;
+            if (!grupos.has(raizId)) {
+                grupos.set(raizId, {
+                    id: raizId,
+                    nome: raizNome,
+                    total: 0,
+                    subcategorias: new Map()
+                });
+            }
+            const grupo = grupos.get(raizId)!;
+            grupo.total += r.valor;
+
+            const subId = cat.id;
+            if (!grupo.subcategorias.has(subId)) {
+                grupo.subcategorias.set(subId, {
+                    id: subId,
+                    nome: cat.item,
                     total: 0,
                     itens: []
                 });
             }
-            const grupo = grupos.get(catId)!;
-            grupo.total += r.valor || 0;
-            grupo.itens.push({
+            const sub = grupo.subcategorias.get(subId)!;
+            sub.total += r.valor;
+            sub.itens.push({
                 id: r.id,
                 detalhe: r.item || r.descricao || 'Sem detalhe',
-                valor: r.valor || 0,
+                valor: r.valor,
                 data: r.data_vencimento || ''
             });
         });
-        return Array.from(grupos.values()).sort((a, b) => b.total - a.total);
+
+        return Array.from(grupos.values()).map(g => ({
+            ...g,
+            subcategorias: Array.from(g.subcategorias.values()).sort((a, b) => b.total - a.total)
+        })).sort((a, b) => b.total - a.total);
     }, [transacoesDoPeriodoDRE, categorias]);
 
-    // Agrupar despesas por categoria
-    const despesasPorCategoria = useMemo(() => {
-        const despesas = transacoesDoPeriodoDRE.filter(t => t.tipo === 'despesa');
-        const grupos = new Map<number, { id: number; nome: string; total: number; itens: Array<{ id: number; detalhe: string; valor: number; data: string }> }>();
-        
-        despesas.forEach(d => {
-            const catId = d.item_financeiro_id;
-            if (!catId) return;
-            const categoria = categorias.find(c => c.id === catId);
-            if (!categoria) return;
-            if (!grupos.has(catId)) {
-                grupos.set(catId, {
-                    id: catId,
-                    nome: categoria.item,
+    // Agrupar despesas por categoria pai e subcategoria
+    const despesasPorCategoriaRaiz = useMemo(() => {
+        const grupos = new Map<number, {
+            id: number;
+            nome: string;
+            total: number;
+            subcategorias: Map<number, { id: number; nome: string; total: number; itens: any[] }>;
+        }>();
+
+        transacoesDoPeriodoDRE.filter(t => t.tipo === 'despesa').forEach(d => {
+            const cat = categorias.find(c => c.id === d.item_financeiro_id);
+            if (!cat) return;
+            const raizId = cat.parent_id || cat.id;
+            const raizNome = cat.parent_id ? (categorias.find(c => c.id === cat.parent_id)?.item || cat.item) : cat.item;
+            if (!grupos.has(raizId)) {
+                grupos.set(raizId, {
+                    id: raizId,
+                    nome: raizNome,
+                    total: 0,
+                    subcategorias: new Map()
+                });
+            }
+            const grupo = grupos.get(raizId)!;
+            grupo.total += d.valor;
+
+            const subId = cat.id;
+            if (!grupo.subcategorias.has(subId)) {
+                grupo.subcategorias.set(subId, {
+                    id: subId,
+                    nome: cat.item,
                     total: 0,
                     itens: []
                 });
             }
-            const grupo = grupos.get(catId)!;
-            grupo.total += d.valor || 0;
-            grupo.itens.push({
+            const sub = grupo.subcategorias.get(subId)!;
+            sub.total += d.valor;
+            sub.itens.push({
                 id: d.id,
                 detalhe: d.item || d.descricao || 'Sem detalhe',
-                valor: d.valor || 0,
+                valor: d.valor,
                 data: d.data_vencimento || ''
             });
         });
-        return Array.from(grupos.values()).sort((a, b) => b.total - a.total);
+
+        return Array.from(grupos.values()).map(g => ({
+            ...g,
+            subcategorias: Array.from(g.subcategorias.values()).sort((a, b) => b.total - a.total)
+        })).sort((a, b) => b.total - a.total);
     }, [transacoesDoPeriodoDRE, categorias]);
 
-    const totalReceitasDRE = receitasPorCategoria.reduce((acc, cat) => acc + cat.total, 0);
-    const totalDespesasDRE = despesasPorCategoria.reduce((acc, cat) => acc + cat.total, 0);
+    const totalReceitasDRE = receitasPorCategoriaRaiz.reduce((acc, cat) => acc + cat.total, 0);
+    const totalDespesasDRE = despesasPorCategoriaRaiz.reduce((acc, cat) => acc + cat.total, 0);
     const lucroLiquidoDRE = totalReceitasDRE - totalDespesasDRE;
 
     // CRUD Handlers
@@ -449,7 +499,8 @@ export function VisaoGestor() {
         setModalType(tipo);
         setEditingTransaction(null);
         setFormData({
-            categoriaId: null,
+            categoriaPaiId: null,
+            subcategoriaId: null,
             detalhe: '',
             valor: 0,
             vencimento: new Date().toISOString().split('T')[0],
@@ -466,8 +517,11 @@ export function VisaoGestor() {
         setEditingTransaction(t);
         setModalType(t.tipo);
         const cat = categorias.find(c => c.id === t.item_financeiro_id);
+        const categoriaPaiId = cat?.parent_id || null;
+        const subcategoriaId = cat?.id || null;
         setFormData({
-            categoriaId: t.item_financeiro_id || null,
+            categoriaPaiId,
+            subcategoriaId,
             detalhe: t.item || '',
             valor: t.valor || 0,
             vencimento: t.data_vencimento || new Date().toISOString().split('T')[0],
@@ -517,8 +571,8 @@ export function VisaoGestor() {
             toast({ message: "⚠️ Selecione a Filial.", type: 'error' });
             return;
         }
-        if (modalType === 'despesa' && !formData.categoriaId) {
-            toast({ message: "⚠️ Selecione uma categoria para a despesa.", type: 'error' });
+        if (modalType === 'despesa' && !formData.categoriaPaiId && !formData.subcategoriaId) {
+            toast({ message: "⚠️ Selecione uma categoria (pai ou subcategoria) para a despesa.", type: 'error' });
             return;
         }
         if (formData.valor <= 0) {
@@ -529,7 +583,9 @@ export function VisaoGestor() {
         setProcessing(true);
 
         try {
-            const catAtual = formData.categoriaId ? categorias.find(c => c.id === formData.categoriaId) : null;
+            // Determinar o ID da categoria a ser salvo: prioriza subcategoria, senão usa categoria pai
+            const categoriaFinalId = formData.subcategoriaId || formData.categoriaPaiId;
+            const catAtual = categoriaFinalId ? categorias.find(c => c.id === categoriaFinalId) : null;
             const isRecorrente = formData.modalidade === 'FIXO_MENSAL' || formData.modalidade === 'FIXO_VARIAVEL';
             const freqFinal = formData.modalidade === 'FIXO_MENSAL' ? 'mensal'
                 : formData.modalidade === 'FIXO_VARIAVEL' ? 'mensal_variavel' : null;
@@ -546,7 +602,7 @@ export function VisaoGestor() {
                 recorrente: isRecorrente,
                 frequencia: freqFinal,
                 loja_id: formData.loja_id,
-                item_financeiro_id: formData.categoriaId,
+                item_financeiro_id: categoriaFinalId,
                 status: (editingTransaction?.status || 'pendente') as StatusTransacao,
                 data_pagamento: editingTransaction?.data_pagamento || null
             };
@@ -596,10 +652,11 @@ export function VisaoGestor() {
         try {
             const headers = ["Data", "Categoria", "Detalhe", "Tipo", "Valor", "Status"];
             const rows = filteredList.map(t => {
-                const categoria = categorias.find(c => c.id === t.item_financeiro_id);
+                const cat = categorias.find(c => c.id === t.item_financeiro_id);
+                const nomeExibicao = cat ? (cat.parent_id ? `${categorias.find(p => p.id === cat.parent_id)?.item} › ${cat.item}` : cat.item) : 'Sem categoria';
                 return [
                     escapeCSV(t.data_vencimento || ''),
-                    escapeCSV(categoria?.item || 'Sem categoria'),
+                    escapeCSV(nomeExibicao),
                     escapeCSV(t.item || ''),
                     escapeCSV(t.tipo || ''),
                     escapeCSV((t.valor || 0).toFixed(2)),
@@ -672,12 +729,13 @@ export function VisaoGestor() {
                         </thead>
                         <tbody>
                             ${filteredList.map(t => {
-                                const categoria = categorias.find(c => c.id === t.item_financeiro_id);
+                                const cat = categorias.find(c => c.id === t.item_financeiro_id);
+                                const nomeExibicao = cat ? (cat.parent_id ? `${categorias.find(p => p.id === cat.parent_id)?.item} › ${cat.item}` : cat.item) : 'Sem categoria';
                                 return `
                                 <tr>
                                     <td>${t.data_vencimento ? t.data_vencimento.split('-').reverse().join('/') : '-'}</td>
                                     <td>${lojasDisponiveis.find(l => l.id === t.loja_id)?.nome_fantasia || 'N/A'}</td>
-                                    <td>${categoria?.item || 'Sem categoria'}</td>
+                                    <td>${nomeExibicao}</td>
                                     <td>${t.item || '-'}</td>
                                     <td class="valor">R$ ${(t.valor || 0).toFixed(2).replace('.', ',')}</td>
                                     <td>${(t.status || 'pendente').toUpperCase()}</td>
@@ -701,7 +759,7 @@ export function VisaoGestor() {
         printWindow.onafterprint = () => printWindow.close();
     };
 
-    // Impressão DRE
+    // Impressão DRE (agora com hierarquia)
     const handlePrintDRE = () => {
         if (transacoesDoPeriodoDRE.length === 0) {
             toast({ message: 'Nenhum dado no período selecionado.', type: 'warning' });
@@ -727,7 +785,8 @@ export function VisaoGestor() {
                 .lucro { color: green; }
                 .prejuizo { color: red; }
                 .categoria { font-weight: bold; background-color: #f9f9f9; }
-                .detalhe { padding-left: 20px; }
+                .subcategoria { font-weight: bold; background-color: #f0f0f0; padding-left: 20px; }
+                .detalhe { padding-left: 40px; }
             </style>
         `;
 
@@ -740,31 +799,27 @@ export function VisaoGestor() {
             periodoDescricao = `${new Date(dataInicio).toLocaleDateString()} a ${new Date(dataFim).toLocaleDateString()}`;
         }
 
-        const receitasHtml = receitasPorCategoria.map(cat => `
-            <tr class="categoria">
-                <td><strong>${cat.nome}</strong></td>
-                <td class="valor"><strong>R$ ${cat.total.toFixed(2).replace('.', ',')}</strong></td>
-            </tr>
-            ${cat.itens.map(item => `
-                <tr class="detalhe">
-                    <td style="padding-left: 20px;">└ ${item.detalhe}</td>
-                    <td class="valor">R$ ${item.valor.toFixed(2).replace('.', ',')}</td>
+        const renderCategorias = (categoriasRaiz: any[], tipo: 'receita' | 'despesa') => {
+            if (categoriasRaiz.length === 0) return '<tr><td colspan="2">Nenhum lançamento.</td></tr>';
+            return categoriasRaiz.map(raiz => `
+                <tr class="categoria">
+                    <td><strong>${raiz.nome}</strong></td>
+                    <td class="valor"><strong>R$ ${raiz.total.toFixed(2).replace('.', ',')}</strong></td>
                 </tr>
-            `).join('')}
-        `).join('');
-
-        const despesasHtml = despesasPorCategoria.map(cat => `
-            <tr class="categoria">
-                <td><strong>${cat.nome}</strong></td>
-                <td class="valor"><strong>R$ ${cat.total.toFixed(2).replace('.', ',')}</strong></td>
-            </tr>
-            ${cat.itens.map(item => `
-                <tr class="detalhe">
-                    <td style="padding-left: 20px;">└ ${item.detalhe}</td>
-                    <td class="valor">R$ ${item.valor.toFixed(2).replace('.', ',')}</td>
-                </tr>
-            `).join('')}
-        `).join('');
+                ${raiz.subcategorias.map((sub: any) => `
+                    <tr class="subcategoria">
+                        <td style="padding-left: 20px;">└ ${sub.nome}</td>
+                        <td class="valor">R$ ${sub.total.toFixed(2).replace('.', ',')}</td>
+                    </tr>
+                    ${sub.itens.map((item: any) => `
+                        <tr class="detalhe">
+                            <td style="padding-left: 40px;">  ${item.detalhe}</td>
+                            <td class="valor">R$ ${item.valor.toFixed(2).replace('.', ',')}</td>
+                        </tr>
+                    `).join('')}
+                `).join('')}
+            `).join('');
+        };
 
         const html = `
             <html>
@@ -785,9 +840,9 @@ export function VisaoGestor() {
 
                     <h2>Entradas (Receitas)</h2>
                     <table>
-                        <thead><tr><th>Categoria / Detalhe</th><th class="valor">Valor (R$)</th></tr></thead>
+                        <thead><tr><th>Categoria / Subcategoria / Detalhe</th><th class="valor">Valor (R$)</th></tr></thead>
                         <tbody>
-                            ${receitasHtml || '<tr><td colspan="2">Nenhuma receita no período.</td></tr>'}
+                            ${renderCategorias(receitasPorCategoriaRaiz, 'receita')}
                             <tr class="total">
                                 <td><strong>Total de Entradas</strong></td>
                                 <td class="valor"><strong>R$ ${totalReceitasDRE.toFixed(2).replace('.', ',')}</strong></td>
@@ -797,9 +852,9 @@ export function VisaoGestor() {
 
                     <h2>Saídas (Despesas)</h2>
                     <table>
-                        <thead><tr><th>Categoria / Detalhe</th><th class="valor">Valor (R$)</th></tr></thead>
+                        <thead><tr><th>Categoria / Subcategoria / Detalhe</th><th class="valor">Valor (R$)</th></tr></thead>
                         <tbody>
-                            ${despesasHtml || '<tr><td colspan="2">Nenhuma despesa no período.</td></tr>'}
+                            ${renderCategorias(despesasPorCategoriaRaiz, 'despesa')}
                             <tr class="total">
                                 <td><strong>Total de Saídas</strong></td>
                                 <td class="valor"><strong>R$ ${totalDespesasDRE.toFixed(2).replace('.', ',')}</strong></td>
@@ -925,7 +980,7 @@ export function VisaoGestor() {
                         <div className="flex gap-3 items-center flex-wrap">
                             <button className="btn btn-sm btn-ghost text-muted hover:text-white" onClick={handleRefresh} disabled={loading}><RefreshCcw size={16} className={loading ? 'animate-spin' : ''} /></button>
                             
-                            <div className="flex items-center gap-2 px-1 py-1.5 rounded-lg bg-white/5 border border-white/10">
+                            <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-white/5 border border-white/10">
                                 <span className="text-xs font-semibold text-muted">Ano Completo:</span>
                                 <div className={`relative w-10 h-5 rounded-full cursor-pointer transition-all ${visualizacaoAnual ? 'bg-blue-500' : 'bg-white/20'}`} onClick={() => setVisualizacaoAnual(!visualizacaoAnual)} role="switch">
                                     <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${visualizacaoAnual ? 'left-5' : 'left-0.5'}`} />
@@ -947,17 +1002,15 @@ export function VisaoGestor() {
                                 <option value="VARIAVEL">⚡ Variável ({modalidadeCounts.VARIAVEL})</option>
                             </select>
 
-                            {abaAtiva === 'despesas' && categorias.filter(c => c.tipo === 'despesa').length > 0 && (
+                            {abaAtiva === 'despesas' && categoriasPai.length > 0 && (
                                 <select
                                     className="input input-sm font-medium text-xs px-2 py-1 bg-purple/5 border border-white/10 rounded-md min-w-[180px]"
-                                    value={categoriaFilter === 'all' ? 'all' : String(categoriaFilter)}
-                                    onChange={(e) => setCategoriaFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                                    value={categoriaPaiFilter === 'all' ? 'all' : String(categoriaPaiFilter)}
+                                    onChange={(e) => setCategoriaPaiFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))}
                                 >
                                     <option value="all">Categoria: Todas</option>
-                                    {categorias.filter(c => c.tipo === 'despesa').map(cat => (
-                                        <option key={cat.id} value={cat.id}>
-                                            {cat.item} ({categoriaCounts.get(cat.id) || 0})
-                                        </option>
+                                    {categoriasPai.map(cat => (
+                                        <option key={cat.id} value={cat.id}>{cat.item}</option>
                                     ))}
                                 </select>
                             )}
@@ -1006,9 +1059,9 @@ export function VisaoGestor() {
                 {loading ? (
                     <LoadingState type="list" />
                 ) : abaAtiva === 'fechamento' ? (
-                    // DRE com Resultado Líquido acima de Receitas e Despesas
+                    // DRE com resultado líquido acima e grid de receitas/despesas
                     <div className="flex flex-col gap-6">
-                        {/* Resultado Líquido (acima) */}
+                        {/* Resultado Líquido */}
                         <div className="flex flex-col bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
                             <div className="p-4 bg-slate-800 border-b border-slate-700 flex items-center gap-2 text-slate-200"><Scale size={20} /><h3 className="font-bold uppercase tracking-wider text-sm">Resultado Líquido</h3></div>
                             <div className="flex-1 flex flex-col items-center justify-center p-8 gap-6">
@@ -1031,7 +1084,7 @@ export function VisaoGestor() {
                             </div>
                         </div>
 
-                        {/* Grid de Receitas e Despesas (abaixo) */}
+                        {/* Grid de Receitas e Despesas */}
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                             {/* Receitas */}
                             <div className="flex flex-col bg-emerald-500/5 rounded-xl border border-emerald-500/10 overflow-hidden">
@@ -1040,31 +1093,41 @@ export function VisaoGestor() {
                                     <span className="font-black text-lg text-emerald-400">R$ {totalReceitasDRE.toLocaleString('pt-BR')}</span>
                                 </div>
                                 <div className="p-4 space-y-2 overflow-y-auto max-h-[500px]">
-                                    {receitasPorCategoria.length === 0 ? (
+                                    {receitasPorCategoriaRaiz.length === 0 ? (
                                         <p className="text-center text-muted text-sm py-10">Nenhuma receita no período.</p>
                                     ) : (
-                                        receitasPorCategoria.map(cat => {
-                                            const key = `receita_${cat.nome}`;
+                                        receitasPorCategoriaRaiz.map(raiz => {
+                                            const key = `receita_${raiz.nome}`;
                                             const isExpanded = categoriasExpandidas.has(key);
                                             return (
-                                                <div key={cat.id} className="border border-white/10 rounded-lg overflow-hidden">
+                                                <div key={raiz.id} className="border border-white/10 rounded-lg overflow-hidden">
                                                     <div 
                                                         className="flex justify-between items-center p-3 bg-emerald-500/5 cursor-pointer hover:bg-emerald-500/10 transition-colors"
-                                                        onClick={() => toggleCategoriaExpandida('receita', cat.nome)}
+                                                        onClick={() => toggleCategoriaExpandida('receita', raiz.nome)}
                                                     >
                                                         <div className="flex items-center gap-2">
                                                             {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                                                            <span className="font-bold text-emerald-100">{cat.nome}</span>
-                                                            <span className="text-xs text-muted">({cat.itens.length} item{cat.itens.length !== 1 ? 's' : ''})</span>
+                                                            <span className="font-bold text-emerald-100">{raiz.nome}</span>
+                                                            <span className="text-xs text-muted">({raiz.subcategorias.reduce((acc, sub) => acc + sub.itens.length, 0)} item(s))</span>
                                                         </div>
-                                                        <span className="font-bold text-emerald-400">R$ {cat.total.toLocaleString('pt-BR')}</span>
+                                                        <span className="font-bold text-emerald-400">R$ {raiz.total.toLocaleString('pt-BR')}</span>
                                                     </div>
                                                     {isExpanded && (
                                                         <div className="p-3 space-y-2 border-t border-white/5">
-                                                            {cat.itens.map(item => (
-                                                                <div key={item.id} className="flex justify-between items-center text-sm pl-4">
-                                                                    <span className="text-muted">{item.detalhe}</span>
-                                                                    <span className="font-mono text-emerald-300">R$ {item.valor.toLocaleString('pt-BR')}</span>
+                                                            {raiz.subcategorias.map(sub => (
+                                                                <div key={sub.id} className="ml-4">
+                                                                    <div className="flex justify-between items-center text-sm font-semibold text-emerald-200/80">
+                                                                        <span>└ {sub.nome}</span>
+                                                                        <span>R$ {sub.total.toLocaleString('pt-BR')}</span>
+                                                                    </div>
+                                                                    <div className="ml-4 space-y-1 mt-1">
+                                                                        {sub.itens.map(item => (
+                                                                            <div key={item.id} className="flex justify-between items-center text-xs pl-2 text-muted">
+                                                                                <span>{item.detalhe}</span>
+                                                                                <span className="font-mono text-emerald-300">R$ {item.valor.toLocaleString('pt-BR')}</span>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
                                                                 </div>
                                                             ))}
                                                         </div>
@@ -1083,31 +1146,41 @@ export function VisaoGestor() {
                                     <span className="font-black text-lg text-red-400">R$ {totalDespesasDRE.toLocaleString('pt-BR')}</span>
                                 </div>
                                 <div className="p-4 space-y-2 overflow-y-auto max-h-[500px]">
-                                    {despesasPorCategoria.length === 0 ? (
+                                    {despesasPorCategoriaRaiz.length === 0 ? (
                                         <p className="text-center text-muted text-sm py-10">Nenhuma despesa no período.</p>
                                     ) : (
-                                        despesasPorCategoria.map(cat => {
-                                            const key = `despesa_${cat.nome}`;
+                                        despesasPorCategoriaRaiz.map(raiz => {
+                                            const key = `despesa_${raiz.nome}`;
                                             const isExpanded = categoriasExpandidas.has(key);
                                             return (
-                                                <div key={cat.id} className="border border-white/10 rounded-lg overflow-hidden">
+                                                <div key={raiz.id} className="border border-white/10 rounded-lg overflow-hidden">
                                                     <div 
                                                         className="flex justify-between items-center p-3 bg-red-500/5 cursor-pointer hover:bg-red-500/10 transition-colors"
-                                                        onClick={() => toggleCategoriaExpandida('despesa', cat.nome)}
+                                                        onClick={() => toggleCategoriaExpandida('despesa', raiz.nome)}
                                                     >
                                                         <div className="flex items-center gap-2">
                                                             {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                                                            <span className="font-bold text-red-100">{cat.nome}</span>
-                                                            <span className="text-xs text-muted">({cat.itens.length} item{cat.itens.length !== 1 ? 's' : ''})</span>
+                                                            <span className="font-bold text-red-100">{raiz.nome}</span>
+                                                            <span className="text-xs text-muted">({raiz.subcategorias.reduce((acc, sub) => acc + sub.itens.length, 0)} item(s))</span>
                                                         </div>
-                                                        <span className="font-bold text-red-400">R$ {cat.total.toLocaleString('pt-BR')}</span>
+                                                        <span className="font-bold text-red-400">R$ {raiz.total.toLocaleString('pt-BR')}</span>
                                                     </div>
                                                     {isExpanded && (
                                                         <div className="p-3 space-y-2 border-t border-white/5">
-                                                            {cat.itens.map(item => (
-                                                                <div key={item.id} className="flex justify-between items-center text-sm pl-4">
-                                                                    <span className="text-muted">{item.detalhe}</span>
-                                                                    <span className="font-mono text-red-300">R$ {item.valor.toLocaleString('pt-BR')}</span>
+                                                            {raiz.subcategorias.map(sub => (
+                                                                <div key={sub.id} className="ml-4">
+                                                                    <div className="flex justify-between items-center text-sm font-semibold text-red-200/80">
+                                                                        <span>└ {sub.nome}</span>
+                                                                        <span>R$ {sub.total.toLocaleString('pt-BR')}</span>
+                                                                    </div>
+                                                                    <div className="ml-4 space-y-1 mt-1">
+                                                                        {sub.itens.map(item => (
+                                                                            <div key={item.id} className="flex justify-between items-center text-xs pl-2 text-muted">
+                                                                                <span>{item.detalhe}</span>
+                                                                                <span className="font-mono text-red-300">R$ {item.valor.toLocaleString('pt-BR')}</span>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
                                                                 </div>
                                                             ))}
                                                         </div>
@@ -1165,12 +1238,21 @@ export function VisaoGestor() {
                                     ) : (
                                         filteredList.map(t => {
                                             const deletando = isBeingDeleted(t.id);
-                                            const categoria = categorias.find(c => c.id === t.item_financeiro_id);
+                                            const cat = categorias.find(c => c.id === t.item_financeiro_id);
+                                            let nomeExibicao = 'Sem categoria';
+                                            if (cat) {
+                                                if (cat.parent_id) {
+                                                    const pai = categorias.find(p => p.id === cat.parent_id);
+                                                    nomeExibicao = pai ? `${pai.item} › ${cat.item}` : cat.item;
+                                                } else {
+                                                    nomeExibicao = cat.item;
+                                                }
+                                            }
                                             return (
                                                 <tr key={t.id} className={`group hover:bg-white/5 transition-colors ${deletando?'opacity-50 pointer-events-none':''}`}>
                                                     <td className="text-xs font-mono text-muted">{t.data_vencimento?t.data_vencimento.split('-').reverse().join('/'):'-'}</td>
                                                     <td className="text-[10px] font-bold text-text-secondary">{lojasDisponiveis.find(l=>l.id===t.loja_id)?.nome_fantasia||'N/A'}</td>
-                                                    <td className="text-xs font-semibold">{categoria?.item || 'Sem categoria'}</td>
+                                                    <td className="text-xs font-semibold">{nomeExibicao}</td>
                                                     <td className="text-sm">{t.item || '-'}</td>
                                                     <td className="text-[10px] font-bold uppercase">
                                                         {(()=>{
@@ -1209,7 +1291,7 @@ export function VisaoGestor() {
             <ReplicarUltimoMesModal isOpen={showReplicarModal} onClose={()=>setShowReplicarModal(false)} lojaId={lojaAtual?.id||null} anoAtual={ano} mesAtual={mesSelecionado} onSuccess={()=>buscarTransacoesSeguro(ano,visualizacaoAnual?0:mesSelecionado,lojaAtual?.id||null)} />
             <ModalBaixaFinanceira isOpen={modalBaixaOpen} onClose={()=>{setModalBaixaOpen(false);setTransacaoParaBaixa(null);}} transaction={transacaoParaBaixa} onConfirm={handleConfirmBaixa} />
 
-            {/* Modal de lançamento (com categoria e detalhe) */}
+            {/* Modal de lançamento (com categoria pai e subcategoria) */}
             {showModal && (
                 <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:9998,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={(e)=>{if(e.target===e.currentTarget&&!processing) setShowModal(false);}}>
                     <div className="card" style={{width:'100%',maxWidth:'550px',padding:'1.5rem'}}>
@@ -1228,26 +1310,66 @@ export function VisaoGestor() {
                                 </div>
                             )}
                             
-                            {/* Categoria (obrigatória para despesas) */}
+                            {/* Categoria Pai */}
                             <div className="form-group">
-                                <label>Categoria {modalType === 'despesa' && '*'}</label>
+                                <label>Categoria Principal {modalType === 'despesa' && '*'}</label>
                                 <select
                                     className="input"
-                                    value={formData.categoriaId || ''}
+                                    value={formData.categoriaPaiId || ''}
                                     onChange={(e) => {
-                                        const val = e.target.value;
-                                        if (val) handleCategoriaChange(Number(val));
-                                        else setFormData({...formData, categoriaId: null});
+                                        const paiId = e.target.value ? Number(e.target.value) : null;
+                                        setFormData({
+                                            ...formData,
+                                            categoriaPaiId: paiId,
+                                            subcategoriaId: null,
+                                            modalidade: 'VARIAVEL',
+                                            detalhe: '',
+                                            valor: 0
+                                        });
+                                        if (paiId) {
+                                            const pai = categoriasPai.find(c => c.id === paiId);
+                                            if (pai) {
+                                                setFormData(prev => ({
+                                                    ...prev,
+                                                    modalidade: pai.tipo_recorrencia || 'VARIAVEL'
+                                                }));
+                                            }
+                                        }
                                     }}
                                     disabled={processing}
                                 >
-                                    <option value="">Selecione uma categoria</option>
-                                    {categorias.filter(c => c.tipo === modalType).map(cat => (
+                                    <option value="">Selecione uma categoria principal</option>
+                                    {categoriasPai.map(cat => (
                                         <option key={cat.id} value={cat.id}>{cat.item}</option>
                                     ))}
                                 </select>
-                                {modalType === 'despesa' && !formData.categoriaId && <p className="text-[9px] text-danger mt-1">⚠️ Obrigatório para despesas</p>}
+                                {modalType === 'despesa' && !formData.categoriaPaiId && !formData.subcategoriaId && (
+                                    <p className="text-[9px] text-danger mt-1">⚠️ Obrigatório para despesas</p>
+                                )}
                             </div>
+
+                            {/* Subcategoria (opcional) */}
+                            {formData.categoriaPaiId && subcategoriasDisponiveis.length > 0 && (
+                                <div className="form-group">
+                                    <label>Subcategoria (opcional)</label>
+                                    <select
+                                        className="input"
+                                        value={formData.subcategoriaId || ''}
+                                        onChange={(e) => {
+                                            const subId = e.target.value ? Number(e.target.value) : null;
+                                            setFormData({ ...formData, subcategoriaId: subId });
+                                            if (subId) handleCategoriaChange(subId);
+                                        }}
+                                        disabled={processing}
+                                    >
+                                        <option value="">Selecione uma subcategoria</option>
+                                        {subcategoriasDisponiveis.map(sub => (
+                                            <option key={sub.id} value={sub.id}>{sub.item}</option>
+                                        ))}
+                                    </select>
+                                    <p className="text-[10px] text-muted mt-1">Use para detalhar ainda mais (ex: Salário, INSS, etc.)</p>
+                                </div>
+                            )}
 
                             {/* Detalhamento (texto livre) */}
                             <div className="form-group">
@@ -1256,10 +1378,10 @@ export function VisaoGestor() {
                                     className="input"
                                     value={formData.detalhe}
                                     onChange={e => setFormData({...formData, detalhe: e.target.value})}
-                                    placeholder="Ex: Salário - João Silva, INSS, Vale Transporte..."
+                                    placeholder="Ex: João Silva, competência Maio/2025"
                                     disabled={processing}
                                 />
-                                <p className="text-[10px] text-muted mt-1">Use para especificar funcionário, tipo de encargo, etc.</p>
+                                <p className="text-[10px] text-muted mt-1">Especificação adicional (funcionário, tipo de encargo, etc.)</p>
                             </div>
 
                             <div className="grid grid-cols-2 gap-4">
@@ -1299,7 +1421,7 @@ export function VisaoGestor() {
                         </div>
                         <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-white/10">
                             <button className="btn btn-ghost" onClick={()=>setShowModal(false)} disabled={processing}>Cancelar</button>
-                            <button className={`btn ${modalType==='receita'?'btn-primary':'btn-danger'}`} onClick={handleSave} disabled={processing||!formData.loja_id||(modalType==='despesa'&&!formData.categoriaId)||formData.valor<=0}>
+                            <button className={`btn ${modalType==='receita'?'btn-primary':'btn-danger'}`} onClick={handleSave} disabled={processing||!formData.loja_id||(modalType==='despesa'&&!formData.categoriaPaiId&&!formData.subcategoriaId)||formData.valor<=0}>
                                 {processing?<><Loader2 size={14} className="animate-spin mr-1"/> Salvando...</>:'Salvar'}
                             </button>
                         </div>
