@@ -1007,6 +1007,32 @@ export function VisaoGestor() {
                 ) : abaAtiva === 'fechamento' ? (
                     // DRE com categorias expansíveis para receitas e despesas
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+ {/* Resultado (linha inteira) */}
+                        <div className="lg:col-span-2 flex flex-col bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
+                            <div className="p-4 bg-slate-800 border-b border-slate-700 flex items-center gap-2 text-slate-200"><Scale size={20} /><h3 className="font-bold uppercase tracking-wider text-sm">Resultado Líquido</h3></div>
+                            <div className="flex-1 flex flex-col items-center justify-center p-8 gap-6">
+                                <div className={`flex items-center justify-center w-24 h-24 rounded-full ${lucroLiquidoDRE>=0?'bg-emerald-500/20 text-emerald-400':'bg-red-500/20 text-red-400'}`}>
+                                    {lucroLiquidoDRE>=0?<TrendingUp size={48}/>:<TrendingDown size={48}/>}
+                                </div>
+                                <div className="text-center">
+                                    <p className="text-sm text-muted uppercase font-bold mb-2">Saldo do Período</p>
+                                    <h2 className={`text-4xl font-black ${lucroLiquidoDRE>=0?'text-emerald-400':'text-red-400'}`}>
+                                        R$ {Math.abs(lucroLiquidoDRE).toLocaleString('pt-BR')}
+                                    </h2>
+                                    <p className={`text-sm font-bold mt-2 ${lucroLiquidoDRE>=0?'text-emerald-500':'text-red-500'}`}>
+                                        {lucroLiquidoDRE>=0?'LUCRO OPERACIONAL':'PREJUÍZO OPERACIONAL'}
+                                    </p>
+                                </div>
+                                <div className="w-full grid grid-cols-2 gap-4 mt-4 pt-6 border-t border-white/5">
+                                    <div className="text-center"><p className="text-[10px] text-muted uppercase">Margem</p><p className="font-bold text-white">{totalReceitasDRE>0?((lucroLiquidoDRE/totalReceitasDRE)*100).toFixed(1):'0'}%</p></div>
+                                    <div className="text-center"><p className="text-[10px] text-muted uppercase">Balanço</p><p className={`font-bold ${lucroLiquidoDRE>=0?'text-emerald-400':'text-red-400'}`}>{lucroLiquidoDRE>=0?'Positivo':'Negativo'}</p></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                        
                         {/* Receitas */}
                         <div className="flex flex-col bg-emerald-500/5 rounded-xl border border-emerald-500/10 overflow-hidden">
                             <div className="p-4 bg-emerald-500/10 border-b border-emerald-500/10 flex justify-between items-center">
@@ -1093,30 +1119,7 @@ export function VisaoGestor() {
                             </div>
                         </div>
 
-                        {/* Resultado (linha inteira) */}
-                        <div className="lg:col-span-2 flex flex-col bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
-                            <div className="p-4 bg-slate-800 border-b border-slate-700 flex items-center gap-2 text-slate-200"><Scale size={20} /><h3 className="font-bold uppercase tracking-wider text-sm">Resultado Líquido</h3></div>
-                            <div className="flex-1 flex flex-col items-center justify-center p-8 gap-6">
-                                <div className={`flex items-center justify-center w-24 h-24 rounded-full ${lucroLiquidoDRE>=0?'bg-emerald-500/20 text-emerald-400':'bg-red-500/20 text-red-400'}`}>
-                                    {lucroLiquidoDRE>=0?<TrendingUp size={48}/>:<TrendingDown size={48}/>}
-                                </div>
-                                <div className="text-center">
-                                    <p className="text-sm text-muted uppercase font-bold mb-2">Saldo do Período</p>
-                                    <h2 className={`text-4xl font-black ${lucroLiquidoDRE>=0?'text-emerald-400':'text-red-400'}`}>
-                                        R$ {Math.abs(lucroLiquidoDRE).toLocaleString('pt-BR')}
-                                    </h2>
-                                    <p className={`text-sm font-bold mt-2 ${lucroLiquidoDRE>=0?'text-emerald-500':'text-red-500'}`}>
-                                        {lucroLiquidoDRE>=0?'LUCRO OPERACIONAL':'PREJUÍZO OPERACIONAL'}
-                                    </p>
-                                </div>
-                                <div className="w-full grid grid-cols-2 gap-4 mt-4 pt-6 border-t border-white/5">
-                                    <div className="text-center"><p className="text-[10px] text-muted uppercase">Margem</p><p className="font-bold text-white">{totalReceitasDRE>0?((lucroLiquidoDRE/totalReceitasDRE)*100).toFixed(1):'0'}%</p></div>
-                                    <div className="text-center"><p className="text-[10px] text-muted uppercase">Balanço</p><p className={`font-bold ${lucroLiquidoDRE>=0?'text-emerald-400':'text-red-400'}`}>{lucroLiquidoDRE>=0?'Positivo':'Negativo'}</p></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                ) : (
+                       
                     // Tabela de receitas/despesas (gráfico + lista)
                     <div className="flex flex-col">
                         <div className="mb-6 px-2">
