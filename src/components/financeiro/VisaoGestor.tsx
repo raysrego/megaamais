@@ -1006,9 +1006,7 @@ export function VisaoGestor() {
                     <LoadingState type="list" />
                 ) : abaAtiva === 'fechamento' ? (
                     // DRE com categorias expansíveis para receitas e despesas
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
- {/* Resultado (linha inteira) */}
+  {/* Resultado (linha inteira) */}
                         <div className="lg:col-span-2 flex flex-col bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
                             <div className="p-4 bg-slate-800 border-b border-slate-700 flex items-center gap-2 text-slate-200"><Scale size={20} /><h3 className="font-bold uppercase tracking-wider text-sm">Resultado Líquido</h3></div>
                             <div className="flex-1 flex flex-col items-center justify-center p-8 gap-6">
@@ -1031,8 +1029,8 @@ export function VisaoGestor() {
                             </div>
                         </div>
                     </div>
-                ) : (
-                        
+            
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         {/* Receitas */}
                         <div className="flex flex-col bg-emerald-500/5 rounded-xl border border-emerald-500/10 overflow-hidden">
                             <div className="p-4 bg-emerald-500/10 border-b border-emerald-500/10 flex justify-between items-center">
@@ -1119,7 +1117,8 @@ export function VisaoGestor() {
                             </div>
                         </div>
 
-                       
+                      
+                ) : (
                     // Tabela de receitas/despesas (gráfico + lista)
                     <div className="flex flex-col">
                         <div className="mb-6 px-2">
