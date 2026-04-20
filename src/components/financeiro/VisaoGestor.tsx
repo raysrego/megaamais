@@ -32,7 +32,6 @@ import { usePerfil } from '@/hooks/usePerfil';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { KPICard } from '@/components/ui/KPICard';
 import { LoadingState } from '@/components/ui/LoadingState';
-import { useParametros } from '@/hooks/useParametros';
 import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmContext';
 
@@ -51,10 +50,19 @@ function getErrorMessage(error: unknown): string {
     return 'Erro desconhecido';
 }
 
+// Função para escapar campos CSV
+function escapeCSV(str: string): string {
+    if (str === undefined || str === null) return '';
+    const stringValue = String(str);
+    if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
+        return `"${stringValue.replace(/"/g, '""')}"`;
+    }
+    return stringValue;
+}
+
 export function VisaoGestor() {
     const { transacoes, loading, fetchTransacoes, fetchAnosDisponiveis, salvarTransacao, darBaixa, atualizarTransacao, excluirTransacao } = useFinanceiro();
     const { itens: categorias, fetchItens } = useItensFinanceiros();
-    const { getParametro } = useParametros();
 
     const { lojaAtual, lojasDisponiveis, setLojaAtual } = useLoja();
     const { isAdmin } = usePerfil();
@@ -115,6 +123,13 @@ export function VisaoGestor() {
         loja_id: lojaAtual?.id || '',
         modalidade: 'VARIAVEL' as 'FIXO_MENSAL' | 'FIXO_VARIAVEL' | 'VARIAVEL'
     });
+
+    // Sincronizar loja_id no modal quando lojaAtual mudar (se o modal estiver fechado, isso não afeta; se aberto, atualiza)
+    useEffect(() => {
+        if (!showModal && lojaAtual) {
+            setFormData(prev => ({ ...prev, loja_id: lojaAtual?.id || '' }));
+        }
+    }, [lojaAtual, showModal]);
 
     // Função segura para buscar transações (com verificação de componente montado)
     const buscarTransacoesSeguro = useCallback(async (
@@ -204,17 +219,28 @@ export function VisaoGestor() {
         }
     };
 
-    // Função para extrair modalidade de uma transação
+    // Função para extrair modalidade de uma transação (com memoização por id)
+    const modalidadeCache = useRef<Map<number, string>>(new Map());
     const getModalidadeFromTransacao = useCallback((t: TransacaoFinanceira): string => {
-        if (t.recorrente && t.frequencia === 'mensal') return 'FIXO_MENSAL';
-        if (t.recorrente && t.frequencia === 'mensal_variavel') return 'FIXO_VARIAVEL';
-        if (t.recorrente) {
-            // fallback para buscar no catálogo
-            const cat = categorias.find(c => c.id === t.item_financeiro_id) || categorias.find(c => c.item === t.item);
-            if (cat?.tipo_recorrencia === 'FIXO_VARIAVEL') return 'FIXO_VARIAVEL';
-            return 'FIXO_MENSAL';
+        if (modalidadeCache.current.has(t.id)) {
+            return modalidadeCache.current.get(t.id)!;
         }
-        return 'VARIAVEL';
+        let modalidade: string;
+        if (t.recorrente && t.frequencia === 'mensal') modalidade = 'FIXO_MENSAL';
+        else if (t.recorrente && t.frequencia === 'mensal_variavel') modalidade = 'FIXO_VARIAVEL';
+        else if (t.recorrente) {
+            const cat = categorias.find(c => c.id === t.item_financeiro_id) || categorias.find(c => c.item === t.item);
+            modalidade = cat?.tipo_recorrencia === 'FIXO_VARIAVEL' ? 'FIXO_VARIAVEL' : 'FIXO_MENSAL';
+        } else {
+            modalidade = 'VARIAVEL';
+        }
+        modalidadeCache.current.set(t.id, modalidade);
+        return modalidade;
+    }, [categorias]);
+
+    // Limpar cache quando as categorias mudarem
+    useEffect(() => {
+        modalidadeCache.current.clear();
     }, [categorias]);
 
     // Filtragem para abas de receitas/despesas (baseada em ano/mês)
@@ -244,13 +270,18 @@ export function VisaoGestor() {
             return true;
         });
 
-        // Aplica filtro de modalidade, se necessário
         if (modalidadeFilter !== 'all') {
             lista = lista.filter(t => getModalidadeFromTransacao(t) === modalidadeFilter);
         }
 
         return lista;
     }, [transacoesDoPeriodo, abaAtiva, modalidadeFilter, getModalidadeFromTransacao]);
+
+    // Total e contagem da lista filtrada (para exibir no cabeçalho da tabela)
+    const totalFiltrado = useMemo(() => {
+        const soma = filteredList.reduce((acc, t) => acc + (t.valor || 0), 0);
+        return { soma, quantidade: filteredList.length };
+    }, [filteredList]);
 
     // Contagem de itens por modalidade (para exibir no select)
     const modalidadeCounts = useMemo(() => {
@@ -267,7 +298,7 @@ export function VisaoGestor() {
         };
     }, [transacoesDoPeriodo, abaAtiva, getModalidadeFromTransacao]);
 
-    // Reset filtro de modalidade ao trocar de aba (opcional, mas desejável)
+    // Reset filtro de modalidade ao trocar de aba
     useEffect(() => {
         setModalidadeFilter('all');
     }, [abaAtiva]);
@@ -295,7 +326,7 @@ export function VisaoGestor() {
         };
     }, [transacoesDoPeriodo]);
 
-    // Gráfico para abas de receitas/despesas (otimizado)
+    // Gráfico para abas de receitas/despesas
     const chartData = useMemo(() => {
         const monthsData = Array.from({ length: 12 }, (_, i) => {
             const monthNum = i + 1;
@@ -523,27 +554,29 @@ export function VisaoGestor() {
         }
     };
 
-    // Handlers de exportação e impressão
+    // Handlers de exportação e impressão (CSV seguro)
     const handleExport = () => {
         try {
             const headers = ["Data", "Descrição", "Categoria", "Tipo", "Valor", "Status"];
             const rows = filteredList.map(t => [
-                t.data_vencimento || '',
-                t.descricao || t.item || '',
-                t.item || '',
-                t.tipo || '',
-                (t.valor || 0).toFixed(2),
-                t.status || ''
+                escapeCSV(t.data_vencimento || ''),
+                escapeCSV(t.descricao || t.item || ''),
+                escapeCSV(t.item || ''),
+                escapeCSV(t.tipo || ''),
+                escapeCSV((t.valor || 0).toFixed(2)),
+                escapeCSV(t.status || '')
             ]);
 
-            const csvContent = "data:text/csv;charset=utf-8," + headers.join(",") + "\n" + rows.map(e => e.join(",")).join("\n");
-            const encodedUri = encodeURI(csvContent);
+            const csvContent = headers.join(",") + "\n" + rows.map(row => row.join(",")).join("\n");
+            const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
             const link = document.createElement("a");
-            link.setAttribute("href", encodedUri);
+            const url = URL.createObjectURL(blob);
+            link.setAttribute("href", url);
             link.setAttribute("download", `financeiro_${ano}_${visualizacaoAnual ? 'anual' : mesSelecionado}.csv`);
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
+            URL.revokeObjectURL(url);
             toast({ message: 'Arquivo exportado!', type: 'success' });
         } catch (error) {
             toast({ message: 'Erro ao exportar', type: 'error' });
@@ -610,7 +643,7 @@ export function VisaoGestor() {
                             `).join('')}
                             <tr class="total">
                                 <td colspan="4">Total</td>
-                                <td class="valor">R$ ${filteredList.reduce((acc, t) => acc + (t.valor || 0), 0).toFixed(2).replace('.', ',')}</td>
+                                <td class="valor">R$ ${totalFiltrado.soma.toFixed(2).replace('.', ',')}</td>
                                 <td></td>
                             </tr>
                         </tbody>
@@ -622,9 +655,11 @@ export function VisaoGestor() {
         printWindow.document.write(html);
         printWindow.document.close();
         printWindow.print();
+        // Fechar automaticamente após impressão (ou após o usuário fechar o diálogo)
+        printWindow.onafterprint = () => printWindow.close();
     };
 
-    // Impressão do DRE (usando resumoDRE)
+    // Impressão do DRE
     const handlePrintDRE = () => {
         if (transacoesDoPeriodoDRE.length === 0) {
             toast({ message: 'Nenhum dado no período selecionado.', type: 'warning' });
@@ -697,6 +732,7 @@ export function VisaoGestor() {
         printWindow.document.write(html);
         printWindow.document.close();
         printWindow.print();
+        printWindow.onafterprint = () => printWindow.close();
     };
 
     const handleChartClick = (monthNumber: number) => {
@@ -738,7 +774,7 @@ export function VisaoGestor() {
                 )}
             </PageHeader>
 
-            {/* KPIs superiores (sempre baseados no filtro mensal/anual) */}
+            {/* KPIs superiores */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                 <KPICard
                     label="Receitas"
@@ -813,7 +849,7 @@ export function VisaoGestor() {
                             <div className="w-px h-6 bg-white/10" />
                             <button className="btn btn-sm btn-ghost text-blue-300 hover:text-white border border-blue-500/20" onClick={() => setShowReplicarModal(true)} disabled={loading} aria-label="Replicar mês anterior"><Copy size={14} /> Replicar Mês</button>
                             
-                            {/* NOVO: filtro de modalidade */}
+                            {/* Filtro de modalidade */}
                             <div className="relative">
                                 <select
                                     className="input input-sm font-medium text-xs px-3 py-1 bg-blue/5 border border-white/10 rounded-md"
@@ -831,7 +867,6 @@ export function VisaoGestor() {
                             <button className="btn btn-sm btn-accent" onClick={() => handleOpenModalNew(abaAtiva === 'receitas' ? 'receita' : 'despesa')} disabled={loading} aria-label="Novo lançamento"><Plus size={14} /> Novo Lançamento</button>
                         </div>
                     ) : (
-                        // Controles do DRE: seletor de modo e filtros correspondentes
                         <div className="flex gap-3 items-center flex-wrap">
                             <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-lg">
                                 <span className="text-xs text-muted">Filtro:</span>
@@ -908,7 +943,7 @@ export function VisaoGestor() {
                 {loading ? (
                     <LoadingState type="list" />
                 ) : abaAtiva === 'fechamento' ? (
-                    // Conteúdo do DRE usando resumoDRE e lucroLiquidoDRE
+                    // Conteúdo do DRE
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         {/* Coluna Entradas */}
                         <div className="flex flex-col bg-emerald-500/5 rounded-xl border border-emerald-500/10 overflow-hidden">
@@ -920,8 +955,8 @@ export function VisaoGestor() {
                                 {resumoDRE.detalheReceitas.length === 0 ? (
                                     <p className="text-center text-muted text-xs py-10">Nenhuma entrada no período.</p>
                                 ) : (
-                                    resumoDRE.detalheReceitas.sort((a,b)=>b.total-a.total).map((c,i)=>(
-                                        <div key={i} className="flex justify-between items-center p-3 rounded-lg bg-emerald-500/5 hover:bg-emerald-500/10 transition-colors border border-emerald-500/5">
+                                    resumoDRE.detalheReceitas.sort((a,b)=>b.total-a.total).map((c, i) => (
+                                        <div key={c.item + i} className="flex justify-between items-center p-3 rounded-lg bg-emerald-500/5 hover:bg-emerald-500/10 transition-colors border border-emerald-500/5">
                                             <span className="text-sm font-medium text-emerald-100">{c.item}</span>
                                             <span className="font-bold text-emerald-400">R$ {c.total.toLocaleString('pt-BR')}</span>
                                         </div>
@@ -939,10 +974,10 @@ export function VisaoGestor() {
                                 {resumoDRE.detalheDespesas.length === 0 ? (
                                     <p className="text-center text-muted text-xs py-10">Nenhuma saída no período.</p>
                                 ) : (
-                                    resumoDRE.detalheDespesas.sort((a,b)=>b.total-a.total).map((c,i)=>{
+                                    resumoDRE.detalheDespesas.sort((a,b)=>b.total-a.total).map((c, i) => {
                                         const catInfo = categorias.find(cat=>cat.item===c.item);
                                         return (
-                                            <div key={i} className="flex flex-col p-3 rounded-lg bg-red-500/5 hover:bg-red-500/10 transition-colors border border-red-500/5">
+                                            <div key={c.item + i} className="flex flex-col p-3 rounded-lg bg-red-500/5 hover:bg-red-500/10 transition-colors border border-red-500/5">
                                                 <div className="flex justify-between items-center mb-1">
                                                     <span className="text-sm font-medium text-red-100">{c.item}</span>
                                                     <span className="font-bold text-red-400">R$ {c.total.toLocaleString('pt-BR')}</span>
@@ -1000,7 +1035,13 @@ export function VisaoGestor() {
                                 <h4 className="text-xs font-black uppercase text-muted tracking-widest">
                                     {visualizacaoAnual ? `Movimentações de ${ano} (Ano Completo)` : `Movimentações de ${new Date(ano, mesSelecionado-1, 1).toLocaleString('pt-BR', { month: 'long' })}`}
                                 </h4>
-                                <span className="text-xs font-bold text-muted">{filteredList.length} registros</span>
+                                {/* Exibe total filtrado ao lado do título */}
+                                <div className="flex items-center gap-4 text-sm">
+                                    <span className="text-muted">{totalFiltrado.quantidade} registro{totalFiltrado.quantidade !== 1 ? 's' : ''}</span>
+                                    <span className={`font-bold ${abaAtiva === 'receitas' ? 'text-success' : 'text-danger'}`}>
+                                        Total: R$ {totalFiltrado.soma.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    </span>
+                                </div>
                             </div>
                             <table className="w-full">
                                 <thead>
@@ -1015,33 +1056,35 @@ export function VisaoGestor() {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {filteredList.length===0 ? (
+                                    {filteredList.length === 0 ? (
                                         <tr><td colSpan={7} className="text-center py-8 text-muted italic">Nenhum lançamento encontrado.</td></tr>
-                                    ) : filteredList.map(t => {
-                                        const deletando = isBeingDeleted(t.id);
-                                        return (
-                                            <tr key={t.id} className={`group hover:bg-white/5 transition-colors ${deletando?'opacity-50 pointer-events-none':''}`}>
-                                                <td className="text-xs font-mono text-muted">{t.data_vencimento?t.data_vencimento.split('-').reverse().join('/'):'-'}</td>
-                                                <td className="text-[10px] font-bold text-text-secondary">{lojasDisponiveis.find(l=>l.id===t.loja_id)?.nome_fantasia||'N/A'}</td>
-                                                <td className="font-semibold text-sm">{t.descricao||t.item||'-'}{t.item && t.descricao!==t.item && <span className="block text-[10px] text-muted font-normal">{t.item}</span>}</td>
-                                                <td className="text-[10px] font-bold uppercase">
-                                                    {(()=>{
-                                                        const modalidade = getModalidadeFromTransacao(t);
-                                                        if(modalidade === 'FIXO_MENSAL') return <span className="bg-indigo-500/10 text-indigo-400 px-2 py-1 rounded-md">Fixo Mensal</span>;
-                                                        if(modalidade === 'FIXO_VARIAVEL') return <span className="bg-pink-500/10 text-pink-400 px-2 py-1 rounded-md">Fixo Variável</span>;
-                                                        return <span className="bg-orange-500/10 text-orange-400 px-2 py-1 rounded-md">Variável</span>;
-                                                    })()}
-                                                </td>
-                                                <td className={`text-right font-black ${t.tipo==='receita'?'text-success':'text-danger'}`}>R$ {(t.valor||0).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
-                                                <td className="text-center"><span className={`badge ${t.status==='pago'?'success':'warning'} text-[10px]`}>{(t.status||'pendente').toUpperCase()}</span></td>
-                                                <td className="text-right flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    {t.status==='pendente' && <button className="btn btn-ghost btn-xs text-success hover:bg-success/20" onClick={()=>handleBaixaClick(t)} disabled={deletando} aria-label="Dar baixa"><CheckCircle2 size={14}/></button>}
-                                                    <button className="btn btn-ghost btn-xs text-blue-400 hover:bg-blue-400/20" onClick={()=>handleEditClick(t)} disabled={deletando} aria-label="Editar"><Pencil size={14}/></button>
-                                                    <button className={`btn btn-ghost btn-xs text-danger hover:bg-danger/20 relative ${deletando?'cursor-not-allowed opacity-50':''}`} onClick={()=>handleDeleteClick(t)} disabled={deletando} aria-label="Excluir">{deletando?<Loader2 size={14} className="animate-spin"/>:<Trash2 size={14}/>}</button>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
+                                    ) : (
+                                        filteredList.map(t => {
+                                            const deletando = isBeingDeleted(t.id);
+                                            return (
+                                                <tr key={t.id} className={`group hover:bg-white/5 transition-colors ${deletando?'opacity-50 pointer-events-none':''}`}>
+                                                    <td className="text-xs font-mono text-muted">{t.data_vencimento?t.data_vencimento.split('-').reverse().join('/'):'-'}</td>
+                                                    <td className="text-[10px] font-bold text-text-secondary">{lojasDisponiveis.find(l=>l.id===t.loja_id)?.nome_fantasia||'N/A'}</td>
+                                                    <td className="font-semibold text-sm">{t.descricao||t.item||'-'}{t.item && t.descricao!==t.item && <span className="block text-[10px] text-muted font-normal">{t.item}</span>}</td>
+                                                    <td className="text-[10px] font-bold uppercase">
+                                                        {(()=>{
+                                                            const modalidade = getModalidadeFromTransacao(t);
+                                                            if(modalidade === 'FIXO_MENSAL') return <span className="bg-indigo-500/10 text-indigo-400 px-2 py-1 rounded-md">Fixo Mensal</span>;
+                                                            if(modalidade === 'FIXO_VARIAVEL') return <span className="bg-pink-500/10 text-pink-400 px-2 py-1 rounded-md">Fixo Variável</span>;
+                                                            return <span className="bg-orange-500/10 text-orange-400 px-2 py-1 rounded-md">Variável</span>;
+                                                        })()}
+                                                    </td>
+                                                    <td className={`text-right font-black ${t.tipo==='receita'?'text-success':'text-danger'}`}>R$ {(t.valor||0).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
+                                                    <td className="text-center"><span className={`badge ${t.status==='pago'?'success':'warning'} text-[10px]`}>{(t.status||'pendente').toUpperCase()}</span></td>
+                                                    <td className="text-right flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                        {t.status==='pendente' && <button className="btn btn-ghost btn-xs text-success hover:bg-success/20" onClick={()=>handleBaixaClick(t)} disabled={deletando} aria-label="Dar baixa"><CheckCircle2 size={14}/></button>}
+                                                        <button className="btn btn-ghost btn-xs text-blue-400 hover:bg-blue-400/20" onClick={()=>handleEditClick(t)} disabled={deletando} aria-label="Editar"><Pencil size={14}/></button>
+                                                        <button className={`btn btn-ghost btn-xs text-danger hover:bg-danger/20 relative ${deletando?'cursor-not-allowed opacity-50':''}`} onClick={()=>handleDeleteClick(t)} disabled={deletando} aria-label="Excluir">{deletando?<Loader2 size={14} className="animate-spin"/>:<Trash2 size={14}/>}</button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })
+                                    )}
                                 </tbody>
                             </table>
                             {exclusaoState.erro && (
