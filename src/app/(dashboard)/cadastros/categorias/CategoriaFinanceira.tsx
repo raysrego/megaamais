@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
     Plus,
     Pencil,
@@ -41,9 +41,14 @@ export function CategoriaFinanceira() {
         salvarItem: salvarCategoria,
         atualizarItem: atualizarCategoria,
         excluirItem: excluirCategoria,
-        addOptimisticItem,
-        startTransition
     } = useItensFinanceiros();
+
+    const mounted = useRef(true);
+
+    useEffect(() => {
+        mounted.current = true;
+        return () => { mounted.current = false; };
+    }, []);
 
     useEffect(() => {
         if (lojaAtual) {
@@ -119,14 +124,16 @@ export function CategoriaFinanceira() {
             return;
         }
 
+        // Timeout de segurança (10 segundos)
+        const timeoutId = setTimeout(() => {
+            if (mounted.current && processing) {
+                setProcessing(false);
+                toast({ message: 'Tempo limite excedido. Tente novamente.', type: 'error' });
+            }
+        }, 10000);
+
         try {
             setProcessing(true);
-
-            if (editando) {
-                addOptimisticItem({ type: 'update', payload: { id: editando.id, updates: formData } });
-            } else {
-                addOptimisticItem({ type: 'add', payload: formData });
-            }
 
             if (editando) {
                 await atualizarCategoria(editando.id, formData);
@@ -134,14 +141,21 @@ export function CategoriaFinanceira() {
                 await salvarCategoria(formData);
             }
 
-            toast({ message: `Item financeiro ${editando ? 'atualizado' : 'salvo'} com sucesso!`, type: 'success' });
-            await fetchItens(filialFiltro);
-            setShowModal(false);
+            if (mounted.current) {
+                toast({ message: `Item financeiro ${editando ? 'atualizado' : 'salvo'} com sucesso!`, type: 'success' });
+                await fetchItens(filialFiltro);
+                setShowModal(false);
+            }
         } catch (error: any) {
-            toast({ message: 'Erro ao salvar: ' + error.message, type: 'error' });
-            await fetchItens(filialFiltro);
+            if (mounted.current) {
+                toast({ message: 'Erro ao salvar: ' + error.message, type: 'error' });
+                await fetchItens(filialFiltro);
+            }
         } finally {
-            setProcessing(false);
+            clearTimeout(timeoutId);
+            if (mounted.current) {
+                setProcessing(false);
+            }
         }
     };
 
@@ -163,19 +177,22 @@ export function CategoriaFinanceira() {
         if (deletingId === cat.id) return;
         setDeletingId(cat.id);
 
-        startTransition(async () => {
-            addOptimisticItem({ type: 'delete', payload: cat.id });
-            try {
-                await excluirCategoria(cat.id);
+        try {
+            await excluirCategoria(cat.id);
+            if (mounted.current) {
                 toast({ message: 'Item excluído com sucesso!', type: 'success' });
                 await fetchItens(filialFiltro);
-            } catch (error: any) {
+            }
+        } catch (error: any) {
+            if (mounted.current) {
                 toast({ message: 'Erro ao excluir: ' + error.message, type: 'error' });
                 await fetchItens(filialFiltro);
-            } finally {
+            }
+        } finally {
+            if (mounted.current) {
                 setDeletingId(null);
             }
-        });
+        }
     };
 
     const filtradas = categorias.filter(c =>
@@ -241,7 +258,7 @@ export function CategoriaFinanceira() {
                 </button>
             </div>
 
-            <div className="table-container" style={{ opacity: isPending ? 0.7 : 1, transition: 'opacity 0.2s' }}>
+            <div className="table-container" style={{ opacity: loading ? 0.7 : 1, transition: 'opacity 0.2s' }}>
                 <table className="w-full">
                     <thead>
                         <tr>
@@ -563,16 +580,16 @@ export function CategoriaFinanceira() {
                             <button
                                 className="btn btn-ghost"
                                 onClick={() => setShowModal(false)}
-                                disabled={isPending}
+                                disabled={processing}
                             >
                                 Cancelar
                             </button>
                             <button
                                 className="btn btn-primary px-8"
                                 onClick={handleSave}
-                                disabled={isPending}
+                                disabled={processing}
                             >
-                                {isPending ? (
+                                {processing ? (
                                     <><Loader2 size={16} className="animate-spin" /> Salvando...</>
                                 ) : (
                                     <><Save size={16} /> Salvar Parâmetros</>
