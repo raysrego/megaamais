@@ -438,39 +438,35 @@ export function VisaoGestor() {
 
     // Agrupar despesas por categoria pai e subcategoria
     const despesasPorCategoriaRaiz = useMemo(() => {
-        const grupos = new Map<number, {
-            id: number;
-            nome: string;
-            total: number;
-            subcategorias: Map<number, { id: number; nome: string; total: number; itens: any[] }>;
-        }>();
+    const grupos = new Map();
+    transacoesDoPeriodoDRE.filter(t => t.tipo === 'despesa').forEach(d => {
+        const cat = categorias.find(c => c.id === d.item_financeiro_id);
+        if (!cat) return;
+        const raizId = cat.parent_id || cat.id;
+        const raizNome = cat.parent_id ? (categorias.find(c => c.id === cat.parent_id)?.item || cat.item) : cat.item;
+        if (!grupos.has(raizId)) {
+            grupos.set(raizId, {
+                id: raizId,
+                nome: raizNome,
+                total: 0,
+                subcategorias: new Map(),
+                itensDiretos: [] // itens que pertencem diretamente à raiz (quando cat.parent_id é null)
+            });
+        }
+        const grupo = grupos.get(raizId);
+        grupo.total += d.valor;
 
-        transacoesDoPeriodoDRE.filter(t => t.tipo === 'despesa').forEach(d => {
-            const cat = categorias.find(c => c.id === d.item_financeiro_id);
-            if (!cat) return;
-            const raizId = cat.parent_id || cat.id;
-            const raizNome = cat.parent_id ? (categorias.find(c => c.id === cat.parent_id)?.item || cat.item) : cat.item;
-            if (!grupos.has(raizId)) {
-                grupos.set(raizId, {
-                    id: raizId,
-                    nome: raizNome,
-                    total: 0,
-                    subcategorias: new Map()
-                });
-            }
-            const grupo = grupos.get(raizId)!;
-            grupo.total += d.valor;
-
-            const subId = cat.id;
-            if (!grupo.subcategorias.has(subId)) {
-                grupo.subcategorias.set(subId, {
-                    id: subId,
+        if (cat.parent_id) {
+            // É subcategoria: adiciona na subcategoria
+            if (!grupo.subcategorias.has(cat.id)) {
+                grupo.subcategorias.set(cat.id, {
+                    id: cat.id,
                     nome: cat.item,
                     total: 0,
                     itens: []
                 });
             }
-            const sub = grupo.subcategorias.get(subId)!;
+            const sub = grupo.subcategorias.get(cat.id);
             sub.total += d.valor;
             sub.itens.push({
                 id: d.id,
@@ -478,13 +474,23 @@ export function VisaoGestor() {
                 valor: d.valor,
                 data: d.data_vencimento || ''
             });
-        });
-
-        return Array.from(grupos.values()).map(g => ({
-            ...g,
-            subcategorias: Array.from(g.subcategorias.values()).sort((a, b) => b.total - a.total)
-        })).sort((a, b) => b.total - a.total);
-    }, [transacoesDoPeriodoDRE, categorias]);
+        } else {
+            // É categoria raiz: adiciona diretamente nos itensDiretos
+            grupo.itensDiretos.push({
+                id: d.id,
+                detalhe: d.item || d.descricao || 'Sem detalhe',
+                valor: d.valor,
+                data: d.data_vencimento || ''
+            });
+        }
+    });
+    // Transformar Map em array
+    return Array.from(grupos.values()).map(g => ({
+        ...g,
+        subcategorias: Array.from(g.subcategorias.values()).sort((a,b) => b.total - a.total),
+        itensDiretos: g.itensDiretos.sort((a,b) => b.valor - a.valor)
+    })).sort((a,b) => b.total - a.total);
+}, [transacoesDoPeriodoDRE, categorias]);
 
     const totalReceitasDRE = receitasPorCategoriaRaiz.reduce((acc, cat) => acc + cat.total, 0);
     const totalDespesasDRE = despesasPorCategoriaRaiz.reduce((acc, cat) => acc + cat.total, 0);
@@ -1120,12 +1126,11 @@ export function VisaoGestor() {
                                                                         <span>R$ {sub.total.toLocaleString('pt-BR')}</span>
                                                                     </div>
                                                                     <div className="ml-4 space-y-1 mt-1">
-                                                                        {sub.itens.map(item => (
-                                                                            <div key={item.id} className="flex justify-between items-center text-xs pl-2 text-muted">
-                                                                                <span>{item.detalhe}</span>
-                                                                                <span className="font-mono text-emerald-300">R$ {item.valor.toLocaleString('pt-BR')}</span>
-                                                                            </div>
-                                                                        ))}
+                                                                     {raiz.itensDiretos.map(item => (
+    <div key={item.id} className="ml-4">
+        <div>{item.detalhe} - R$ {item.valor}</div>
+    </div>
+))}
                                                                     </div>
                                                                 </div>
                                                             ))}
