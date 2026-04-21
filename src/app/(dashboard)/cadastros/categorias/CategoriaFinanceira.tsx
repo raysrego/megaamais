@@ -210,7 +210,7 @@ export function CategoriaFinanceira() {
                         <div className="flex items-center gap-2 mr-4">
                             <Filter size={14} className="text-muted" />
                             <select
-                                className="input input-sm py-1 font-bold border-blue-500/20 bg-blue-500/5"
+                                className="input input-sm py-1 font-bold text-blue-700 border-blue-500/20 bg-blue-500/5"
                                 value={filialFiltro}
                                 onChange={(e) => {
                                     setFilialFiltro(e.target.value);
