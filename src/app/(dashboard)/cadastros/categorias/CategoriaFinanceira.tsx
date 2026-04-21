@@ -30,7 +30,6 @@ export function CategoriaFinanceira() {
     const { lojaAtual, lojasDisponiveis } = useLoja();
     const { isAdmin } = usePerfil();
 
-    // Loja de contexto para filtro/criação
     const [filialFiltro, setFilialFiltro] = useState<string>(lojaAtual?.id || '');
 
     const {
@@ -45,7 +44,6 @@ export function CategoriaFinanceira() {
         startTransition
     } = useItensFinanceiros();
 
-    // Sincronizar filtro quando loja de contexto mudar
     useEffect(() => {
         if (lojaAtual) {
             setFilialFiltro(lojaAtual.id);
@@ -57,18 +55,15 @@ export function CategoriaFinanceira() {
     const [showModal, setShowModal] = useState(false);
     const [editando, setEditando] = useState<ItemFinanceiro | null>(null);
     const [processing, setProcessing] = useState(false);
-
-    const canSeeGlobal = isAdmin;
+    const [deletingId, setDeletingId] = useState<number | null>(null); // controle visual
 
     const { toast } = useToast();
     const confirm = useConfirm();
 
-    // Lista de categorias que podem ser pai (todas que não têm parent_id, exceto a própria em edição)
     const categoriasPaiDisponiveis = useMemo(() => {
         return categorias.filter(c => !c.parent_id && (editando ? c.id !== editando.id : true));
     }, [categorias, editando]);
 
-    // Form State
     const [formData, setFormData] = useState<Omit<ItemFinanceiro, 'id'>>({
         item: '',
         tipo: 'despesa',
@@ -118,7 +113,6 @@ export function CategoriaFinanceira() {
             return;
         }
 
-        // Evitar loop: uma categoria não pode ser pai dela mesma (já filtrado no select)
         if (formData.parent_id === editando?.id) {
             toast({ message: 'Uma categoria não pode ser pai de si mesma.', type: 'error' });
             return;
@@ -127,7 +121,6 @@ export function CategoriaFinanceira() {
         try {
             setProcessing(true);
 
-            // Optimistic Update
             if (editando) {
                 addOptimisticItem({ type: 'update', payload: { id: editando.id, updates: formData } });
             } else {
@@ -158,13 +151,6 @@ export function CategoriaFinanceira() {
             return;
         }
 
-        // Verificar se a categoria possui subcategorias
-        const temSubcategorias = categorias.some(c => c.parent_id === cat.id);
-        if (temSubcategorias) {
-            toast({ message: `Não é possível excluir "${cat.item}" pois existem subcategorias vinculadas.`, type: 'error' });
-            return;
-        }
-
         const confirmed = await confirm({
             title: 'Excluir Item',
             description: `Deseja realmente excluir o item "${cat.item}"?`,
@@ -174,13 +160,23 @@ export function CategoriaFinanceira() {
 
         if (!confirmed) return;
 
+        // Evita múltiplas exclusões simultâneas
+        if (deletingId === cat.id) return;
+        setDeletingId(cat.id);
+
         startTransition(async () => {
             addOptimisticItem({ type: 'delete', payload: cat.id });
             try {
                 await excluirCategoria(cat.id);
                 toast({ message: 'Item excluído com sucesso!', type: 'success' });
+                // Força recarga para garantir consistência
+                await fetchItens(filialFiltro);
             } catch (error: any) {
                 toast({ message: 'Erro ao excluir: ' + error.message, type: 'error' });
+                // Reverte optimistic update refazendo fetch
+                await fetchItens(filialFiltro);
+            } finally {
+                setDeletingId(null);
             }
         });
     };
@@ -189,7 +185,6 @@ export function CategoriaFinanceira() {
         c.item.toLowerCase().includes(busca.toLowerCase())
     );
 
-    // Função para obter o nome da categoria pai
     const getNomePai = (parentId: number | null | undefined) => {
         if (!parentId) return null;
         const pai = categorias.find(c => c.id === parentId);
@@ -234,7 +229,6 @@ export function CategoriaFinanceira() {
                 </div>
             </div>
 
-            {/* Filtros e Busca */}
             <div className="flex gap-4 mb-6">
                 <div className="relative flex-1">
                     <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
@@ -250,7 +244,6 @@ export function CategoriaFinanceira() {
                 </button>
             </div>
 
-            {/* Listagem */}
             <div className="table-container" style={{ opacity: isPending ? 0.7 : 1, transition: 'opacity 0.2s' }}>
                 <table className="w-full">
                     <thead>
@@ -287,6 +280,7 @@ export function CategoriaFinanceira() {
                             <AnimatePresence mode="popLayout">
                                 {filtradas.map((cat, index) => {
                                     const nomePai = getNomePai(cat.parent_id);
+                                    const isDeleting = deletingId === cat.id;
                                     return (
                                         <motion.tr
                                             key={cat.id}
@@ -358,10 +352,11 @@ export function CategoriaFinanceira() {
                                                     <button
                                                         className="btn btn-ghost btn-xs p-1.5"
                                                         onClick={() => handleOpenModal(cat)}
+                                                        disabled={isDeleting}
                                                     >
                                                         <Pencil size={14} />
                                                     </button>
-                                                    {['Ágio Bolão (35%)', 'Jogos (8,61%)', 'Encalhe de Jogos'].includes(cat.item) ? (
+                                                    {itensProtegidos.includes(cat.item) ? (
                                                         <div className="p-1.5 text-muted/30" title="Item Vital (Bloqueado)">
                                                             <Lock size={14} />
                                                         </div>
@@ -369,8 +364,9 @@ export function CategoriaFinanceira() {
                                                         <button
                                                             className="btn btn-ghost btn-xs p-1.5 text-danger hover:bg-danger/10"
                                                             onClick={() => handleDelete(cat)}
+                                                            disabled={isDeleting}
                                                         >
-                                                            <Trash2 size={14} />
+                                                            {isDeleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
                                                         </button>
                                                     )}
                                                 </div>
@@ -384,7 +380,6 @@ export function CategoriaFinanceira() {
                 </table>
             </div>
 
-            {/* Alerta Informativo */}
             <div className="mt-8 p-4 rounded-xl bg-blue-500/5 border border-blue-500/20 flex gap-3 items-start">
                 <AlertTriangle size={18} className="text-blue-400 shrink-0 mt-0.5" />
                 <div className="text-xs text-blue-200/60 leading-relaxed">
@@ -392,7 +387,7 @@ export function CategoriaFinanceira() {
                 </div>
             </div>
 
-            {/* Modal CRUD COM ROLAGEM VERTICAL */}
+            {/* Modal com rolagem vertical */}
             {showModal && (
                 <div style={{
                     position: 'fixed',
@@ -417,9 +412,7 @@ export function CategoriaFinanceira() {
                             </button>
                         </div>
 
-                        {/* CONTEÚDO COM SCROLL */}
                         <div className="overflow-y-auto px-1 pr-2 space-y-4" style={{ maxHeight: 'calc(80vh - 100px)' }}>
-                            {/* Seleção de Filial (Admin-only ou Múltiplas lojas) */}
                             {(isAdmin || lojasDisponiveis.length > 1) && (
                                 <div className="form-group pb-2 border-b border-white/5">
                                     <label className="label text-blue-400">Filial de Destino</label>
@@ -427,7 +420,7 @@ export function CategoriaFinanceira() {
                                         className="input w-full border-blue-500/30 bg-blue-500/5 font-bold"
                                         value={formData.loja_id || ''}
                                         onChange={e => setFormData({ ...formData, loja_id: e.target.value || null })}
-                                        disabled={!!editando && !!formData.loja_id} // Evita mover item local -> global na edição
+                                        disabled={!!editando && !!formData.loja_id}
                                     >
                                         <option value="">🌐 GLOBAL (Todas as Filiais)</option>
                                         <option disabled>────── Filiais ──────</option>
@@ -458,7 +451,6 @@ export function CategoriaFinanceira() {
                                 />
                             </div>
 
-                            {/* Categoria Pai (opcional) - agora com texto mais claro */}
                             <div className="form-group">
                                 <label className="label">Categoria Pai (opcional)</label>
                                 <select
