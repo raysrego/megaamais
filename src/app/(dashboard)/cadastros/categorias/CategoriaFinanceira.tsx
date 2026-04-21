@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
     Plus,
     Pencil,
@@ -43,13 +43,6 @@ export function CategoriaFinanceira() {
         excluirItem: excluirCategoria,
     } = useItensFinanceiros();
 
-    const mounted = useRef(true);
-
-    useEffect(() => {
-        mounted.current = true;
-        return () => { mounted.current = false; };
-    }, []);
-
     useEffect(() => {
         if (lojaAtual) {
             setFilialFiltro(lojaAtual.id);
@@ -60,7 +53,6 @@ export function CategoriaFinanceira() {
     const [busca, setBusca] = useState('');
     const [showModal, setShowModal] = useState(false);
     const [editando, setEditando] = useState<ItemFinanceiro | null>(null);
-    const [processing, setProcessing] = useState(false);
     const [deletingId, setDeletingId] = useState<number | null>(null);
 
     const { toast } = useToast();
@@ -124,69 +116,49 @@ export function CategoriaFinanceira() {
             return;
         }
 
-        // Timeout de segurança (10 segundos)
-        const timeoutId = setTimeout(() => {
-            if (mounted.current && processing) {
-                setProcessing(false);
-                toast({ message: 'Tempo limite excedido. Tente novamente.', type: 'error' });
-            }
-        }, 10000);
-
         try {
-            setProcessing(true);
-
             if (editando) {
                 await atualizarCategoria(editando.id, formData);
             } else {
                 await salvarCategoria(formData);
             }
-
-            if (mounted.current) {
-                toast({ message: `Item financeiro ${editando ? 'atualizado' : 'salvo'} com sucesso!`, type: 'success' });
-                await fetchItens(filialFiltro);
-                setShowModal(false);
-            }
+            toast({ message: `Item financeiro ${editando ? 'atualizado' : 'salvo'} com sucesso!`, type: 'success' });
+            await fetchItens(filialFiltro);
+            setShowModal(false);
         } catch (error: any) {
-            if (mounted.current) {
-                toast({ message: 'Erro ao salvar: ' + error.message, type: 'error' });
-                await fetchItens(filialFiltro);
-            }
-        } finally {
-            clearTimeout(timeoutId);
-            if (mounted.current) {
-                setProcessing(false);
-            }
+            toast({ message: 'Erro ao salvar: ' + error.message, type: 'error' });
+            await fetchItens(filialFiltro);
         }
     };
 
     const handleDelete = async (cat: ItemFinanceiro) => {
-    if (ITENS_PROTEGIDOS.includes(cat.item)) {
-        toast({ message: 'Este item é vital para o sistema e não pode ser excluído.', type: 'error' });
-        return;
-    }
+        if (ITENS_PROTEGIDOS.includes(cat.item)) {
+            toast({ message: 'Este item é vital para o sistema e não pode ser excluído.', type: 'error' });
+            return;
+        }
 
-    const confirmed = await confirm({
-        title: 'Excluir Item',
-        description: `Deseja realmente excluir o item "${cat.item}"?`,
-        variant: 'danger',
-        confirmLabel: 'Excluir'
-    });
-    if (!confirmed) return;
+        const confirmed = await confirm({
+            title: 'Excluir Item',
+            description: `Deseja realmente excluir o item "${cat.item}"?`,
+            variant: 'danger',
+            confirmLabel: 'Excluir'
+        });
+        if (!confirmed) return;
 
-    if (deletingId === cat.id) return;
-    setDeletingId(cat.id);
+        if (deletingId === cat.id) return;
+        setDeletingId(cat.id);
 
-    try {
-        await excluirCategoria(cat.id);
-        toast({ message: 'Item excluído com sucesso!', type: 'success' });
-        await fetchItens(filialFiltro); // recarregar para garantir
-    } catch (error: any) {
-        toast({ message: error.message || 'Erro ao excluir item.', type: 'error' });
-        await fetchItens(filialFiltro); // recarregar para desfazer qualquer optimistic residual
-    } finally {
-        setDeletingId(null);
-    }
-};
+        try {
+            await excluirCategoria(cat.id);
+            toast({ message: 'Item excluído com sucesso!', type: 'success' });
+            await fetchItens(filialFiltro);
+        } catch (error: any) {
+            toast({ message: error.message || 'Erro ao excluir item.', type: 'error' });
+            await fetchItens(filialFiltro);
+        } finally {
+            setDeletingId(null);
+        }
+    };
 
     const filtradas = categorias.filter(c =>
         c.item.toLowerCase().includes(busca.toLowerCase())
@@ -573,16 +545,16 @@ export function CategoriaFinanceira() {
                             <button
                                 className="btn btn-ghost"
                                 onClick={() => setShowModal(false)}
-                                disabled={processing}
+                                disabled={isPending}
                             >
                                 Cancelar
                             </button>
                             <button
                                 className="btn btn-primary px-8"
                                 onClick={handleSave}
-                                disabled={processing}
+                                disabled={isPending}
                             >
-                                {processing ? (
+                                {isPending ? (
                                     <><Loader2 size={16} className="animate-spin" /> Salvando...</>
                                 ) : (
                                     <><Save size={16} /> Salvar Parâmetros</>
