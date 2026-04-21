@@ -392,7 +392,7 @@ export function CategoriaFinanceira() {
                 </div>
             </div>
 
-            {/* Modal CRUD */}
+            {/* Modal CRUD COM ROLAGEM VERTICAL */}
             {showModal && (
                 <div style={{
                     position: 'fixed',
@@ -404,8 +404,8 @@ export function CategoriaFinanceira() {
                     justifyContent: 'center',
                     padding: '1rem'
                 }}>
-                    <div className="card w-full max-w-md animate-in zoom-in-95 duration-200 shadow-2xl">
-                        <div className="flex justify-between items-center mb-6 border-b border-white/5 pb-4">
+                    <div className="card w-full max-w-md animate-in zoom-in-95 duration-200 shadow-2xl flex flex-col max-h-[90vh]">
+                        <div className="flex justify-between items-center mb-6 border-b border-white/5 pb-4 shrink-0">
                             <div>
                                 <h3 className="text-lg font-black text-white">
                                     {editando ? 'Editar Item' : 'Novo Item'}
@@ -417,7 +417,8 @@ export function CategoriaFinanceira() {
                             </button>
                         </div>
 
-                        <div className="space-y-4">
+                        {/* CONTEÚDO COM SCROLL */}
+                        <div className="overflow-y-auto px-1 pr-2 space-y-4" style={{ maxHeight: 'calc(80vh - 100px)' }}>
                             {/* Seleção de Filial (Admin-only ou Múltiplas lojas) */}
                             {(isAdmin || lojasDisponiveis.length > 1) && (
                                 <div className="form-group pb-2 border-b border-white/5">
@@ -457,7 +458,7 @@ export function CategoriaFinanceira() {
                                 />
                             </div>
 
-                            {/* Categoria Pai (opcional) */}
+                            {/* Categoria Pai (opcional) - agora com texto mais claro */}
                             <div className="form-group">
                                 <label className="label">Categoria Pai (opcional)</label>
                                 <select
@@ -471,7 +472,8 @@ export function CategoriaFinanceira() {
                                     ))}
                                 </select>
                                 <p className="text-[10px] text-muted mt-1">
-                                    Selecione se este item for uma subcategoria (ex: "Salário" é filho de "Folha de Pagamento")
+                                    Selecione se este item for uma subcategoria (ex: "Salário" é filho de "Folha de Pagamento"). 
+                                    Você pode <strong>editar qualquer categoria existente</strong> (clique no lápis) e alterar sua categoria pai a qualquer momento.
                                 </p>
                             </div>
 
@@ -568,7 +570,7 @@ export function CategoriaFinanceira() {
                             )}
                         </div>
 
-                        <div className="flex justify-end gap-3 mt-8 pt-6 border-t border-white/5">
+                        <div className="flex justify-end gap-3 mt-6 pt-6 border-t border-white/5 shrink-0">
                             <button
                                 className="btn btn-ghost"
                                 onClick={() => setShowModal(false)}
