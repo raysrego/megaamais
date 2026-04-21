@@ -127,12 +127,18 @@ export function VisaoGestor() {
         modalidade: 'VARIAVEL' as 'FIXO_MENSAL' | 'FIXO_VARIAVEL' | 'VARIAVEL'
     });
 
-    // Derivar listas de categorias pai (apenas as que não têm parent_id)
-    const categoriasPai = useMemo(() => {
+    // 🔧 CORREÇÃO: Categorias pai para o FILTRO (baseado na aba atual)
+    const categoriasPaiFiltro = useMemo(() => {
+        const tipo = abaAtiva === 'receitas' ? 'receita' : 'despesa';
+        return categorias.filter(c => !c.parent_id && c.tipo === tipo);
+    }, [categorias, abaAtiva]);
+
+    // Categorias pai para o FORMULÁRIO (baseado no modalType)
+    const categoriasPaiForm = useMemo(() => {
         return categorias.filter(c => !c.parent_id && c.tipo === modalType);
     }, [categorias, modalType]);
 
-    // Subcategorias baseadas na categoria pai selecionada
+    // Subcategorias baseadas na categoria pai selecionada no formulário
     const subcategoriasDisponiveis = useMemo(() => {
         if (!formData.categoriaPaiId) return [];
         return categorias.filter(c => c.parent_id === formData.categoriaPaiId);
@@ -204,7 +210,7 @@ export function VisaoGestor() {
         }
     }, [ano, mesSelecionado, visualizacaoAnual, lojaAtual?.id, buscarTransacoesSeguro, toast]);
 
-    // Auto-preenchimento ao selecionar uma subcategoria (ou categoria pai)
+    // Auto-preenchimento ao selecionar uma subcategoria (ou categoria pai) no formulário
     const handleCategoriaChange = (categoriaId: number) => {
         const cat = categorias.find(c => c.id === categoriaId);
         if (cat) {
@@ -265,16 +271,6 @@ export function VisaoGestor() {
             return [];
         }
     }, [transacoes, ano, mesSelecionado, visualizacaoAnual]);
-
-    // Função para obter a categoria raiz (pai) de uma transação
-    const getCategoriaRaiz = useCallback((t: TransacaoFinanceira): ItemFinanceiro | null => {
-        const cat = categorias.find(c => c.id === t.item_financeiro_id);
-        if (!cat) return null;
-        if (cat.parent_id) {
-            return categorias.find(c => c.id === cat.parent_id) || null;
-        }
-        return cat;
-    }, [categorias]);
 
     // Lista filtrada por aba, modalidade e categoria pai (inclui subcategorias)
     const filteredList = useMemo(() => {
@@ -829,13 +825,15 @@ export function VisaoGestor() {
                     
                     <h2>Resultado Líquido</h2>
                     <table>
-                        <tr><th>Descrição</th><th class="valor">Valor (R$)</th></tr>
-                        <tr><td>Total de Entradas</td><td class="valor">R$ ${totalReceitasDRE.toFixed(2).replace('.', ',')}</td></tr>
-                        <tr><td>Total de Saídas</td><td class="valor">R$ ${totalDespesasDRE.toFixed(2).replace('.', ',')}</td></tr>
-                        <tr class="total ${lucroLiquidoDRE >= 0 ? 'lucro' : 'prejuizo'}">
-                            <td><strong>Resultado</strong></td>
-                            <td class="valor"><strong>R$ ${lucroLiquidoDRE.toFixed(2).replace('.', ',')}</strong></td>
-                        </tr>
+                        <thead><tr><th>Descrição</th><th class="valor">Valor (R$)</th></tr></thead>
+                        <tbody>
+                            <tr><td>Total de Entradas</td><td class="valor">R$ ${totalReceitasDRE.toFixed(2).replace('.', ',')}</td></tr>
+                            <tr><td>Total de Saídas</td><td class="valor">R$ ${totalDespesasDRE.toFixed(2).replace('.', ',')}</td></tr>
+                            <tr class="total ${lucroLiquidoDRE >= 0 ? 'lucro' : 'prejuizo'}">
+                                <td><strong>Resultado</strong></td>
+                                <td class="valor"><strong>R$ ${lucroLiquidoDRE.toFixed(2).replace('.', ',')}</strong></td>
+                            </tr>
+                        </tbody>
                     </table>
 
                     <h2>Entradas (Receitas)</h2>
@@ -1002,14 +1000,15 @@ export function VisaoGestor() {
                                 <option value="VARIAVEL">⚡ Variável ({modalidadeCounts.VARIAVEL})</option>
                             </select>
 
-                            {abaAtiva === 'despesas' && categoriasPai.length > 0 && (
+                            {/* 🔧 CORREÇÃO: Filtro de categoria usando categoriasPaiFiltro (baseado na aba) */}
+                            {abaAtiva === 'despesas' && categoriasPaiFiltro.length > 0 && (
                                 <select
                                     className="input input-sm font-medium text-xs px-2 py-1 bg-purple/5 border border-white/10 rounded-md min-w-[180px]"
                                     value={categoriaPaiFilter === 'all' ? 'all' : String(categoriaPaiFilter)}
                                     onChange={(e) => setCategoriaPaiFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))}
                                 >
                                     <option value="all">Categoria: Todas</option>
-                                    {categoriasPai.map(cat => (
+                                    {categoriasPaiFiltro.map(cat => (
                                         <option key={cat.id} value={cat.id}>{cat.item}</option>
                                     ))}
                                 </select>
@@ -1310,7 +1309,7 @@ export function VisaoGestor() {
                                 </div>
                             )}
                             
-                            {/* Categoria Pai */}
+                            {/* Categoria Pai (usa categoriasPaiForm, baseado no modalType) */}
                             <div className="form-group">
                                 <label>Categoria Principal {modalType === 'despesa' && '*'}</label>
                                 <select
@@ -1327,7 +1326,7 @@ export function VisaoGestor() {
                                             valor: 0
                                         });
                                         if (paiId) {
-                                            const pai = categoriasPai.find(c => c.id === paiId);
+                                            const pai = categoriasPaiForm.find(c => c.id === paiId);
                                             if (pai) {
                                                 setFormData(prev => ({
                                                     ...prev,
@@ -1339,7 +1338,7 @@ export function VisaoGestor() {
                                     disabled={processing}
                                 >
                                     <option value="">Selecione uma categoria principal</option>
-                                    {categoriasPai.map(cat => (
+                                    {categoriasPaiForm.map(cat => (
                                         <option key={cat.id} value={cat.id}>{cat.item}</option>
                                     ))}
                                 </select>
