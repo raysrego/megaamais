@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
     Plus,
     Pencil,
@@ -54,6 +54,7 @@ export function CategoriaFinanceira() {
     const [showModal, setShowModal] = useState(false);
     const [editando, setEditando] = useState<ItemFinanceiro | null>(null);
     const [deletingId, setDeletingId] = useState<number | null>(null);
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
     const { toast } = useToast();
     const confirm = useConfirm();
@@ -106,16 +107,17 @@ export function CategoriaFinanceira() {
     };
 
     const handleSave = async () => {
+        if (isSubmitting) return;
         if (!formData.item) {
             toast({ message: 'O item é obrigatório', type: 'warning' });
             return;
         }
-
         if (formData.parent_id === editando?.id) {
             toast({ message: 'Uma categoria não pode ser pai de si mesma.', type: 'error' });
             return;
         }
 
+        setIsSubmitting(true);
         try {
             if (editando) {
                 await atualizarCategoria(editando.id, formData);
@@ -126,8 +128,11 @@ export function CategoriaFinanceira() {
             await fetchItens(filialFiltro);
             setShowModal(false);
         } catch (error: any) {
+            console.error('[handleSave] erro:', error);
             toast({ message: 'Erro ao salvar: ' + error.message, type: 'error' });
             await fetchItens(filialFiltro);
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
@@ -149,10 +154,13 @@ export function CategoriaFinanceira() {
         setDeletingId(cat.id);
 
         try {
+            console.log(`[handleDelete] Tentando excluir ID ${cat.id} - ${cat.item}`);
             await excluirCategoria(cat.id);
+            console.log(`[handleDelete] Exclusão bem-sucedida no hook.`);
             toast({ message: 'Item excluído com sucesso!', type: 'success' });
             await fetchItens(filialFiltro);
         } catch (error: any) {
+            console.error('[handleDelete] Erro na exclusão:', error);
             toast({ message: error.message || 'Erro ao excluir item.', type: 'error' });
             await fetchItens(filialFiltro);
         } finally {
@@ -545,16 +553,16 @@ export function CategoriaFinanceira() {
                             <button
                                 className="btn btn-ghost"
                                 onClick={() => setShowModal(false)}
-                                disabled={isPending}
+                                disabled={isSubmitting || isPending}
                             >
                                 Cancelar
                             </button>
                             <button
                                 className="btn btn-primary px-8"
                                 onClick={handleSave}
-                                disabled={isPending}
+                                disabled={isSubmitting || isPending}
                             >
-                                {isPending ? (
+                                {isSubmitting || isPending ? (
                                     <><Loader2 size={16} className="animate-spin" /> Salvando...</>
                                 ) : (
                                     <><Save size={16} /> Salvar Parâmetros</>
