@@ -160,40 +160,33 @@ export function CategoriaFinanceira() {
     };
 
     const handleDelete = async (cat: ItemFinanceiro) => {
-        if (ITENS_PROTEGIDOS.includes(cat.item)) {
-            toast({ message: 'Este item é vital para o sistema e não pode ser excluído.', type: 'error' });
-            return;
-        }
+    if (ITENS_PROTEGIDOS.includes(cat.item)) {
+        toast({ message: 'Este item é vital para o sistema e não pode ser excluído.', type: 'error' });
+        return;
+    }
 
-        const confirmed = await confirm({
-            title: 'Excluir Item',
-            description: `Deseja realmente excluir o item "${cat.item}"?`,
-            variant: 'danger',
-            confirmLabel: 'Excluir'
-        });
+    const confirmed = await confirm({
+        title: 'Excluir Item',
+        description: `Deseja realmente excluir o item "${cat.item}"?`,
+        variant: 'danger',
+        confirmLabel: 'Excluir'
+    });
+    if (!confirmed) return;
 
-        if (!confirmed) return;
+    if (deletingId === cat.id) return;
+    setDeletingId(cat.id);
 
-        if (deletingId === cat.id) return;
-        setDeletingId(cat.id);
-
-        try {
-            await excluirCategoria(cat.id);
-            if (mounted.current) {
-                toast({ message: 'Item excluído com sucesso!', type: 'success' });
-                await fetchItens(filialFiltro);
-            }
-        } catch (error: any) {
-            if (mounted.current) {
-                toast({ message: 'Erro ao excluir: ' + error.message, type: 'error' });
-                await fetchItens(filialFiltro);
-            }
-        } finally {
-            if (mounted.current) {
-                setDeletingId(null);
-            }
-        }
-    };
+    try {
+        await excluirCategoria(cat.id);
+        toast({ message: 'Item excluído com sucesso!', type: 'success' });
+        await fetchItens(filialFiltro); // recarregar para garantir
+    } catch (error: any) {
+        toast({ message: error.message || 'Erro ao excluir item.', type: 'error' });
+        await fetchItens(filialFiltro); // recarregar para desfazer qualquer optimistic residual
+    } finally {
+        setDeletingId(null);
+    }
+};
 
     const filtradas = categorias.filter(c =>
         c.item.toLowerCase().includes(busca.toLowerCase())
