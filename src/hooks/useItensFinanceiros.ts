@@ -13,11 +13,10 @@ export interface ItemFinanceiro {
     valor_padrao?: number;
     dia_vencimento?: number;
     loja_id?: string | null;
-    parent_id?: number | null;   // 👈 Suporte a hierarquia (categoria pai)
+    parent_id?: number | null;
     created_at?: string;
 }
 
-// Funções utilitárias (podem ser usadas nos componentes)
 export const getCategoriasPai = (itens: ItemFinanceiro[]): ItemFinanceiro[] => 
     itens.filter(item => !item.parent_id);
 
@@ -67,21 +66,18 @@ export function useItensFinanceiros() {
                 .order('ordem', { ascending: true });
 
             if (lojaId && lojaId.trim() !== '') {
-                // Retorna itens da loja específica OU globais (loja_id IS NULL)
                 query = query.or(`loja_id.eq.${lojaId},loja_id.is.null`);
             } else {
-                // Sem loja específica: apenas globais
                 query = query.is('loja_id', null);
             }
 
             const { data, error } = await query.abortSignal(signal);
 
             if (error) {
-                if (error.code === '20') return; // AbortError
+                if (error.code === '20') return;
                 throw error;
             }
 
-            // Remove duplicatas (garantia extra)
             const uniqueItens = data ? Array.from(new Map(data.map(item => [item.id, item])).values()) : [];
             setItens(uniqueItens as ItemFinanceiro[]);
         } catch (error: any) {
@@ -132,19 +128,40 @@ export function useItensFinanceiros() {
 
     const excluirItem = async (id: number) => {
         try {
-            // Desvincula transações que usam este item (evita FK)
-            await supabase
+            // 1. Verificar se existem transações vinculadas
+            const { count: transacoesCount, error: countError } = await supabase
                 .from('financeiro_contas')
-                .update({ item_financeiro_id: null })
+                .select('*', { count: 'exact', head: true })
                 .eq('item_financeiro_id', id);
 
-            const { error } = await supabase
+            if (countError) throw countError;
+
+            if (transacoesCount && transacoesCount > 0) {
+                throw new Error(`Existem ${transacoesCount} transações vinculadas a este item. Remova ou reatribua as transações antes de excluir.`);
+            }
+
+            // 2. Verificar se existem subcategorias
+            const { count: subCount, error: subError } = await supabase
+                .from('financeiro_itens_plano')
+                .select('*', { count: 'exact', head: true })
+                .eq('parent_id', id);
+
+            if (subError) throw subError;
+
+            if (subCount && subCount > 0) {
+                throw new Error(`Este item possui ${subCount} subcategoria(s). Remova ou reassocie as subcategorias antes de excluir.`);
+            }
+
+            // 3. Realizar a exclusão
+            const { error: deleteError } = await supabase
                 .from('financeiro_itens_plano')
                 .delete()
                 .eq('id', id);
 
-            if (error) throw error;
-            setItens(prev => prev.filter(c => c.id !== id));
+            if (deleteError) throw deleteError;
+
+            // 4. Atualizar estado local
+            setItens(prev => prev.filter(item => item.id !== id));
         } catch (error) {
             console.error('Erro ao excluir item:', error);
             throw error;
@@ -162,7 +179,6 @@ export function useItensFinanceiros() {
         excluirItem,
         addOptimisticItem,
         startTransition,
-        // Utilitários expostos para conveniência
         getCategoriasPai: () => getCategoriasPai(itens),
         getSubcategorias: (parentId: number) => getSubcategorias(itens, parentId),
     };
