@@ -14,17 +14,18 @@ import {
     AlertTriangle,
     Loader2,
     Archive,
-    Zap,
     Lock,
     Shield
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useItensFinanceiros, ItemFinanceiro, getCategoriasPai, getSubcategorias } from '@/hooks/useItensFinanceiros';
+import { useItensFinanceiros, ItemFinanceiro } from '@/hooks/useItensFinanceiros';
 import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmContext';
 import { useLoja } from '@/contexts/LojaContext';
 import { usePerfil } from '@/hooks/usePerfil';
 import { EmptyState } from '@/components/ui/EmptyState';
+
+const ITENS_PROTEGIDOS = ['Ágio Bolão (35%)', 'Jogos (8,61%)', 'Encalhe de Jogos'];
 
 export function CategoriaFinanceira() {
     const { lojaAtual, lojasDisponiveis } = useLoja();
@@ -55,7 +56,7 @@ export function CategoriaFinanceira() {
     const [showModal, setShowModal] = useState(false);
     const [editando, setEditando] = useState<ItemFinanceiro | null>(null);
     const [processing, setProcessing] = useState(false);
-    const [deletingId, setDeletingId] = useState<number | null>(null); // controle visual
+    const [deletingId, setDeletingId] = useState<number | null>(null);
 
     const { toast } = useToast();
     const confirm = useConfirm();
@@ -145,8 +146,7 @@ export function CategoriaFinanceira() {
     };
 
     const handleDelete = async (cat: ItemFinanceiro) => {
-        const itensProtegidos = ['Ágio Bolão (35%)', 'Jogos (8,61%)', 'Encalhe de Jogos'];
-        if (itensProtegidos.includes(cat.item)) {
+        if (ITENS_PROTEGIDOS.includes(cat.item)) {
             toast({ message: 'Este item é vital para o sistema e não pode ser excluído.', type: 'error' });
             return;
         }
@@ -160,7 +160,6 @@ export function CategoriaFinanceira() {
 
         if (!confirmed) return;
 
-        // Evita múltiplas exclusões simultâneas
         if (deletingId === cat.id) return;
         setDeletingId(cat.id);
 
@@ -169,11 +168,9 @@ export function CategoriaFinanceira() {
             try {
                 await excluirCategoria(cat.id);
                 toast({ message: 'Item excluído com sucesso!', type: 'success' });
-                // Força recarga para garantir consistência
                 await fetchItens(filialFiltro);
             } catch (error: any) {
                 toast({ message: 'Erro ao excluir: ' + error.message, type: 'error' });
-                // Reverte optimistic update refazendo fetch
                 await fetchItens(filialFiltro);
             } finally {
                 setDeletingId(null);
@@ -356,7 +353,7 @@ export function CategoriaFinanceira() {
                                                     >
                                                         <Pencil size={14} />
                                                     </button>
-                                                    {itensProtegidos.includes(cat.item) ? (
+                                                    {ITENS_PROTEGIDOS.includes(cat.item) ? (
                                                         <div className="p-1.5 text-muted/30" title="Item Vital (Bloqueado)">
                                                             <Lock size={14} />
                                                         </div>
