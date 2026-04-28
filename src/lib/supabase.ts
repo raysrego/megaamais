@@ -1,3 +1,5 @@
+'use server';
+
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 
@@ -15,18 +17,14 @@ export async function createClient() {
                 setAll(cookiesToSet) {
                     try {
                         cookiesToSet.forEach(({ name, value, options }) => {
-                            // Se for cookie de autenticação do Supabase, removemos a expiração
-                            // Transformando-a em cookie de sessão (expira ao fechar navegador)
                             const isAuthCookie = name.includes('auth-token') || name.startsWith('sb-');
-
                             const cookieOptions = isAuthCookie
                                 ? { ...options, maxAge: undefined, expires: undefined }
                                 : options;
-
                             cookieStore.set(name, value, cookieOptions);
                         });
                     } catch {
-                        // The `setAll` method was called from a Server Component.
+                        // called from Server Component, safe to ignore
                     }
                 },
             },
