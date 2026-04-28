@@ -44,7 +44,7 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
     const [isLoadingCotas, setIsLoadingCotas] = useState(false);
     const [cotasError, setCotasError] = useState<string | null>(null);
 
-    const { podeGerenciarCaixaBolao: canManageBoloes } = usePerfil();
+    const { podeGerenciarCaixaBolao: canManageBoloes, lojaAtual, isAdmin } = usePerfil();
     const { toast } = useToast();
     const confirm = useConfirm();
 
@@ -70,10 +70,13 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
     }, []);
     const selectedProduct = produtos.find(p => p.nome === jogo);
 
+    // Carregar bolões filtrando por loja (operadores só veem sua própria filial)
     useEffect(() => {
         const load = async () => {
             try {
-                const data = await getBoloes();
+                // Define o filtro de loja: se for admin, passa undefined (vê todas); caso contrário, usa lojaAtual.id
+                const lojaId = isAdmin ? undefined : lojaAtual?.id;
+                const data = await getBoloes({ lojaId });
                 setBoloes(data.filter(b => b.jogo === jogo));
             } catch (error) {
                 console.error('Falha ao carregar bolões para o modal', error);
@@ -81,8 +84,14 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                 setIsLoading(false);
             }
         };
-        load();
-    }, [jogo]);
+        // Aguarda ter a informação da loja (para operadores)
+        if (isAdmin || lojaAtual?.id) {
+            load();
+        } else if (!isAdmin && !lojaAtual?.id) {
+            // Caso operador sem loja definida (não deveria acontecer)
+            setIsLoading(false);
+        }
+    }, [jogo, isAdmin, lojaAtual]);
 
     const handleDeleteBolao = async (e: React.MouseEvent, id: number) => {
         e.stopPropagation();
@@ -169,13 +178,12 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
         }
     };
 
-    // Venda unitária usando a action oficial
+    // Venda unitária usando a action oficial (parâmetro sessaoBolaoId é opcional)
     const sellCota = async (cota: any, bolao: any) => {
         setSellingId(cota.id);
         try {
             const result = await registrarVendaBolao({
                 bolaoId: bolao.id,
-                sessaoBolaoId: null, // ou passe um ID de sessão se disponível
                 quantidadeCotas: 1,
                 valorTotal: bolao.precoVendaCota,
                 metodoPagamento: 'dinheiro',
@@ -209,7 +217,8 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
         setBolaoForBulkSale(null);
 
         try {
-            const updatedBoloes = await getBoloes();
+            const lojaId = isAdmin ? undefined : lojaAtual?.id;
+            const updatedBoloes = await getBoloes({ lojaId });
             setBoloes(updatedBoloes.filter(b => b.jogo === jogo));
             if (viewMode === 'cotas' && selectedBolao?.id === bolaoId) {
                 const cotasResult = await getCotasBolao(bolaoId);
