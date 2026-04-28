@@ -91,6 +91,8 @@ export async function getProdutos(lojaId?: string) {
 // BOLÕES
 // ============================================================
 
+// app/actions/boloes.ts (parte da função getBoloes)
+
 export async function getBoloes(options?: { produtoId?: number; lojaId?: string | null; limit?: number; includeFinalizados?: boolean }) {
     const supabase = await createClient();
     let query = supabase
@@ -131,7 +133,7 @@ export async function getBoloes(options?: { produtoId?: number; lojaId?: string 
         concurso: item.concurso,
         dataSorteio: item.data_sorteio,
         qtdJogos: item.qtd_jogos,
-        dezenas: item.dezenas,
+        dezenas: item.dezenas,               // ← ESSENCIAL
         valorCotaBase: Number(item.valor_cota_base),
         taxaAdministrativa: Number(item.taxa_administrativa),
         qtdCotas: item.qtd_cotas,
