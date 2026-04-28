@@ -5,7 +5,6 @@ import {
     X,
     Search,
     ChevronRight,
-    Calendar,
     ArrowUpRight,
     Loader2,
     ShoppingCart,
@@ -13,14 +12,12 @@ import {
     Check,
     Pencil,
     Trash2,
-    Shield,
     AlertCircle
 } from 'lucide-react';
 import { MoneyInput } from '../ui/MoneyInput';
 import { LogoLoteria } from '@/components/ui/LogoLoteria';
 import { LOTERIAS_OFFICIAL } from '@/data/loterias-config';
-import { getBoloes, getCotasBolao, updateBolao, deleteBolao } from '@/actions/boloes';
-import { useVendasBolao } from '@/hooks/useVendasBolao';
+import { getBoloes, getCotasBolao, updateBolao, deleteBolao, registrarVendaBolao } from '@/actions/boloes';
 import { usePerfil } from '@/hooks/usePerfil';
 import { ArrowLeft } from 'lucide-react';
 import { ModalVendaBolao } from './ModalVendaBolao';
@@ -36,7 +33,7 @@ interface ModalListaBoloesProps {
 }
 
 export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) {
-    const [filter, setFilter] = useState('todos'); // todos, disponiveis, finalizados
+    const [filter, setFilter] = useState('todos');
     const [boloes, setBoloes] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -47,9 +44,7 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
     const [isLoadingCotas, setIsLoadingCotas] = useState(false);
     const [cotasError, setCotasError] = useState<string | null>(null);
 
-    const { venderCota, loading: selling } = useVendasBolao();
     const { podeGerenciarCaixaBolao: canManageBoloes } = usePerfil();
-
     const { toast } = useToast();
     const confirm = useConfirm();
 
@@ -59,7 +54,7 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
     const [cotaToSell, setCotaToSell] = useState<any | null>(null);
     const [bolaoForBulkSale, setBolaoForBulkSale] = useState<any | null>(null);
 
-    // Para obter o produto selecionado (necessário para o select de dezenas na edição)
+    // Carregar produtos para o select de dezenas na edição
     const [produtos, setProdutos] = useState<any[]>([]);
     useEffect(() => {
         const loadProdutos = async () => {
@@ -73,7 +68,6 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
         };
         loadProdutos();
     }, []);
-
     const selectedProduct = produtos.find(p => p.nome === jogo);
 
     useEffect(() => {
@@ -82,7 +76,7 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                 const data = await getBoloes();
                 setBoloes(data.filter(b => b.jogo === jogo));
             } catch (error) {
-                console.error('Falha ao carregar bolões para o modal');
+                console.error('Falha ao carregar bolões para o modal', error);
             } finally {
                 setIsLoading(false);
             }
@@ -92,14 +86,12 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
 
     const handleDeleteBolao = async (e: React.MouseEvent, id: number) => {
         e.stopPropagation();
-
         const confirmed = await confirm({
             title: 'Excluir Concurso',
             description: 'Deseja realmente excluir este concurso e todas as suas cotas? Esta ação não pode ser desfeita.',
             variant: 'danger',
             confirmLabel: 'Sim, Excluir'
         });
-
         if (!confirmed) return;
 
         setIsDeleting(id);
@@ -122,18 +114,14 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
     const handleSaveEdit = async () => {
         if (!editingBolao) return;
 
-        const original = boloes.find(b => b.id === editingBolao.id);
-        
-        // Validações básicas
         if (editingBolao.qtdCotas < editingBolao.cotasVendidas) {
             toast({ message: `Total de cotas não pode ser menor que ${editingBolao.cotasVendidas} (já vendidas).`, type: 'error' });
             return;
         }
 
-        // Recalcular valorCotaBase a partir do preço de venda e taxa
         const taxa = editingBolao.taxaAdministrativa || FINANCIAL_RULES.AGIO_BOLOES;
         const valorBaseRecalculado = editingBolao.precoVendaCota / (1 + taxa / 100);
-        
+
         const dadosAtualizados = {
             concurso: editingBolao.concurso,
             dataSorteio: editingBolao.dataSorteio,
@@ -146,16 +134,8 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
             status: editingBolao.status
         };
 
-        // Verificar se houve mudança real (opcional)
-        const hasChanges = JSON.stringify(original) !== JSON.stringify({...original, ...dadosAtualizados});
-        if (!hasChanges) {
-            setEditingBolao(null);
-            return;
-        }
-
         try {
             await updateBolao(editingBolao.id, dadosAtualizados);
-            // Atualizar estado local
             setBoloes(prev => prev.map(b => b.id === editingBolao.id ? { ...b, ...dadosAtualizados } : b));
             setEditingBolao(null);
             toast({ message: 'Alterações salvas com sucesso!', type: 'success' });
@@ -172,12 +152,12 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
         try {
             const result = await getCotasBolao(bolao.id);
             if (result.error) {
-                setCotasError(`Erro Supabase: ${result.error}`);
+                setCotasError(`Erro: ${result.error}`);
                 setCotas([]);
             } else {
                 setCotas(result.data);
                 if (result.data.length === 0) {
-                    setCotasError(`Nenhuma cota encontrada para bolão ID ${bolao.id}. As cotas podem não ter sido criadas.`);
+                    setCotasError(`Nenhuma cota encontrada para bolão ID ${bolao.id}.`);
                 }
             }
         } catch (error: any) {
@@ -189,29 +169,37 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
         }
     };
 
-    const handleSellSuccess = async () => {
-        if (!cotaToSell || !selectedBolao) return;
-
-        const cotaId = cotaToSell.id;
-        setSellingId(cotaId);
-        setCotaToSell(null);
-
+    // Venda unitária usando a action oficial
+    const sellCota = async (cota: any, bolao: any) => {
+        setSellingId(cota.id);
         try {
-            await venderCota({
-                bolaoId: selectedBolao.id,
-                quantidade: 1,
-                valorTotal: selectedBolao.precoVendaCota,
-                metodo: 'dinheiro',
-                cotaId: cotaId
+            const result = await registrarVendaBolao({
+                bolaoId: bolao.id,
+                sessaoBolaoId: null, // ou passe um ID de sessão se disponível
+                quantidadeCotas: 1,
+                valorTotal: bolao.precoVendaCota,
+                metodoPagamento: 'dinheiro',
+                comprovanteUrl: null,
+                cotaId: cota.id
             });
 
-            setCotas(prev => prev.map(c => c.id === cotaId ? { ...c, status: 'vendida' } : c));
-            setBoloes(prev => prev.map(b => b.id === selectedBolao.id ? { ...b, cotasVendidas: b.cotasVendidas + 1 } : b));
+            if (!result.success) throw new Error(result.error);
+
+            // Atualiza UI local
+            setCotas(prev => prev.map(c => c.id === cota.id ? { ...c, status: 'vendida' } : c));
+            setBoloes(prev => prev.map(b => b.id === bolao.id ? { ...b, cotasVendidas: b.cotasVendidas + 1 } : b));
             toast({ message: 'Cota vendida com sucesso!', type: 'success' });
         } catch (error: any) {
             toast({ message: error.message, type: 'error' });
         } finally {
             setSellingId(null);
+            setCotaToSell(null);
+        }
+    };
+
+    const handleSellSuccess = () => {
+        if (cotaToSell && selectedBolao) {
+            sellCota(cotaToSell, selectedBolao);
         }
     };
 
@@ -221,8 +209,8 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
         setBolaoForBulkSale(null);
 
         try {
-            const updatedData = await getBoloes();
-            setBoloes(updatedData.filter(b => b.jogo === jogo));
+            const updatedBoloes = await getBoloes();
+            setBoloes(updatedBoloes.filter(b => b.jogo === jogo));
             if (viewMode === 'cotas' && selectedBolao?.id === bolaoId) {
                 const cotasResult = await getCotasBolao(bolaoId);
                 setCotas(cotasResult.data);
@@ -265,45 +253,16 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                 overflow: 'hidden'
             }}>
                 {/* Header */}
-                <div style={{
-                    background: cor,
-                    padding: '1.5rem',
-                    color: '#fff',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'flex-start'
-                }}>
+                <div style={{ background: cor, padding: '1.5rem', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div>
-                        <div style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.6rem',
-                            background: 'rgba(255,255,255,0.15)',
-                            padding: '0.35rem 1rem',
-                            borderRadius: '24px',
-                            fontSize: '0.75rem',
-                            fontWeight: 800,
-                            marginBottom: '0.75rem',
-                            textTransform: 'uppercase'
-                        }}>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.6rem', background: 'rgba(255,255,255,0.15)', padding: '0.35rem 1rem', borderRadius: '24px', fontSize: '0.75rem', fontWeight: 800, marginBottom: '0.75rem' }}>
                             <LogoLoteria cor="#FFF" tamanho={16} temPlus={config?.temPlus} />
                             Loterias CAIXA
                         </div>
                         <h2 style={{ fontSize: '1.75rem', fontWeight: 800, margin: 0 }}>{jogo}</h2>
                         <p style={{ opacity: 0.9, fontSize: '0.9rem', marginTop: '0.25rem' }}>Confira todas as cotas e concursos ativos para esta modalidade</p>
                     </div>
-                    <button onClick={onClose} style={{
-                        background: 'rgba(0,0,0,0.2)',
-                        border: 'none',
-                        color: '#fff',
-                        borderRadius: '50%',
-                        width: 36,
-                        height: 36,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        cursor: 'pointer'
-                    }}>
+                    <button onClick={onClose} style={{ background: 'rgba(0,0,0,0.2)', border: 'none', color: '#fff', borderRadius: '50%', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
                         <X size={20} />
                     </button>
                 </div>
@@ -311,30 +270,19 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                 {/* Filters */}
                 <div className="p-4 px-6 border-b border-border bg-bg-card flex items-center gap-4 overflow-x-auto">
                     {['todos', 'disponiveis', 'finalizados'].map(f => (
-                        <button
-                            key={f}
-                            onClick={() => setFilter(f)}
-                            className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${filter === f ? 'bg-surface-subtle text-text-primary' : 'text-text-muted hover:text-text-primary'}`}
-                        >
+                        <button key={f} onClick={() => setFilter(f)} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${filter === f ? 'bg-surface-subtle text-text-primary' : 'text-text-muted hover:text-text-primary'}`}>
                             {f === 'todos' ? 'Todos os Jogos' : f === 'disponiveis' ? 'Próximos Concursos' : 'Histórico'}
                         </button>
                     ))}
                     <div className="flex-1" />
                     <div className="relative">
                         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
-                        <input
-                            type="text"
-                            placeholder="Buscar concurso..."
-                            value={searchTerm}
-                            onChange={e => setSearchTerm(e.target.value)}
-                            className="pl-10 pr-4 py-2 rounded-lg border border-border bg-bg-dark text-text-primary text-sm w-48 focus:w-64 focus:border-primary-blue-light transition-all outline-none"
-                        />
+                        <input type="text" placeholder="Buscar concurso..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="pl-10 pr-4 py-2 rounded-lg border border-border bg-bg-dark text-text-primary text-sm w-48 focus:w-64 focus:border-primary-blue-light transition-all outline-none" />
                     </div>
                 </div>
 
                 {/* Content Area */}
                 <div style={{ flex: 1, overflowY: 'auto', background: 'var(--bg-dark)', position: 'relative' }}>
-                    {/* VIEW: LISTA DE BOLÕES AGRUPADOS */}
                     {viewMode === 'list' && (
                         isLoading ? (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)' }}>
@@ -345,58 +293,21 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                             <div style={{ display: 'flex', flexDirection: 'column' }}>
                                 {Object.keys(groupedFilteredBoloes).sort((a, b) => b.localeCompare(a)).map(concurso => (
                                     <div key={concurso}>
-                                        <div style={{
-                                            background: 'rgba(255,255,255,0.03)',
-                                            padding: '0.75rem 2rem',
-                                            borderBottom: '1px solid var(--border)',
-                                            fontSize: '0.7rem',
-                                            fontWeight: 900,
-                                            color: cor,
-                                            display: 'flex',
-                                            justifyContent: 'space-between',
-                                            alignItems: 'center',
-                                            textTransform: 'uppercase'
-                                        }}>
+                                        <div style={{ background: 'rgba(255,255,255,0.03)', padding: '0.75rem 2rem', borderBottom: '1px solid var(--border)', fontSize: '0.7rem', fontWeight: 900, color: cor, display: 'flex', justifyContent: 'space-between', alignItems: 'center', textTransform: 'uppercase' }}>
                                             <span>CONCURSO {concurso}</span>
                                             <span style={{ opacity: 0.5 }}>{groupedFilteredBoloes[concurso].length} BOLÕES ATIVOS</span>
                                         </div>
                                         {groupedFilteredBoloes[concurso].map((bolao: any) => (
-                                            <div
-                                                key={bolao.id}
-                                                style={{
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    padding: '1.25rem 2rem',
-                                                    borderBottom: '1px solid rgba(255,255,255,0.05)',
-                                                    cursor: 'pointer',
-                                                    transition: 'all 0.2s'
-                                                }}
-                                                onClick={() => handleOpenCotas(bolao)}
-                                            >
+                                            <div key={bolao.id} style={{ display: 'flex', alignItems: 'center', padding: '1.25rem 2rem', borderBottom: '1px solid rgba(255,255,255,0.05)', cursor: 'pointer', transition: 'all 0.2s' }} onClick={() => handleOpenCotas(bolao)}>
                                                 <div style={{ flex: 1 }}>
                                                     <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                                                        <div style={{
-                                                            width: 44,
-                                                            height: 44,
-                                                            borderRadius: '12px',
-                                                            background: `${cor}15`,
-                                                            display: 'flex',
-                                                            alignItems: 'center',
-                                                            justifyContent: 'center'
-                                                        }}>
+                                                        <div style={{ width: 44, height: 44, borderRadius: '12px', background: `${cor}15`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                                             <LogoLoteria cor={cor} tamanho={28} temPlus={config?.temPlus} />
                                                         </div>
                                                         <div>
                                                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
                                                                 <span style={{ fontWeight: 800, fontSize: '1rem' }}>Bolão ID #{bolao.id.toString().padStart(4, '0')}</span>
-                                                                <span style={{
-                                                                    fontSize: '0.65rem',
-                                                                    background: bolao.status === 'disponivel' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(255,255,255,0.05)',
-                                                                    color: bolao.status === 'disponivel' ? '#4ade80' : 'var(--text-muted)',
-                                                                    padding: '2px 8px',
-                                                                    borderRadius: '4px',
-                                                                    fontWeight: 700
-                                                                }}>
+                                                                <span style={{ fontSize: '0.65rem', background: bolao.status === 'disponivel' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(255,255,255,0.05)', color: bolao.status === 'disponivel' ? '#4ade80' : 'var(--text-muted)', padding: '2px 8px', borderRadius: '4px', fontWeight: 700 }}>
                                                                     {bolao.status.toUpperCase()}
                                                                 </span>
                                                             </div>
@@ -408,84 +319,25 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                                                 </div>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
                                                     <div style={{ textAlign: 'right', minWidth: '90px' }}>
-                                                        <div style={{ fontSize: '0.85rem', fontWeight: 900, marginBottom: '0.25rem' }}>
-                                                            {bolao.cotasVendidas} / {bolao.qtdCotas}
-                                                        </div>
+                                                        <div style={{ fontSize: '0.85rem', fontWeight: 900, marginBottom: '0.25rem' }}>{bolao.cotasVendidas} / {bolao.qtdCotas}</div>
                                                         <div style={{ height: '3px', width: '100%', background: 'rgba(255,255,255,0.05)', borderRadius: '2px', overflow: 'hidden' }}>
                                                             <div style={{ height: '100%', width: `${(bolao.cotasVendidas / bolao.qtdCotas) * 100}%`, background: cor, borderRadius: '2px' }} />
                                                         </div>
                                                     </div>
                                                     {canManageBoloes && (
                                                         <div style={{ display: 'flex', gap: '0.4rem' }}>
-                                                            <button
-                                                                onClick={(e) => { e.stopPropagation(); setBolaoForBulkSale(bolao); }}
-                                                                title="Venda em Lote"
-                                                                style={{
-                                                                    width: 32,
-                                                                    height: 32,
-                                                                    borderRadius: '8px',
-                                                                    background: 'rgba(34, 197, 94, 0.1)',
-                                                                    color: '#22c55e',
-                                                                    border: 'none',
-                                                                    display: 'flex',
-                                                                    alignItems: 'center',
-                                                                    justifyContent: 'center',
-                                                                    cursor: 'pointer'
-                                                                }}
-                                                            >
+                                                            <button onClick={(e) => { e.stopPropagation(); setBolaoForBulkSale(bolao); }} title="Venda em Lote" style={{ width: 32, height: 32, borderRadius: '8px', background: 'rgba(34, 197, 94, 0.1)', color: '#22c55e', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
                                                                 <ShoppingBag size={14} />
                                                             </button>
-                                                            <button
-                                                                onClick={(e) => handleEditBolao(e, bolao)}
-                                                                title="Editar Concurso"
-                                                                style={{
-                                                                    width: 32,
-                                                                    height: 32,
-                                                                    borderRadius: '8px',
-                                                                    background: 'rgba(255,153,0,0.1)',
-                                                                    color: '#f97316',
-                                                                    border: 'none',
-                                                                    display: 'flex',
-                                                                    alignItems: 'center',
-                                                                    justifyContent: 'center',
-                                                                    cursor: 'pointer'
-                                                                }}
-                                                            >
+                                                            <button onClick={(e) => handleEditBolao(e, bolao)} title="Editar Concurso" style={{ width: 32, height: 32, borderRadius: '8px', background: 'rgba(255,153,0,0.1)', color: '#f97316', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
                                                                 <Pencil size={14} />
                                                             </button>
-                                                            <button
-                                                                onClick={(e) => handleDeleteBolao(e, bolao.id)}
-                                                                disabled={isDeleting === bolao.id}
-                                                                title="Excluir Concurso"
-                                                                style={{
-                                                                    width: 32,
-                                                                    height: 32,
-                                                                    borderRadius: '8px',
-                                                                    background: 'rgba(239,68,68,0.1)',
-                                                                    color: '#ef4444',
-                                                                    border: 'none',
-                                                                    display: 'flex',
-                                                                    alignItems: 'center',
-                                                                    justifyContent: 'center',
-                                                                    cursor: 'pointer',
-                                                                    opacity: isDeleting === bolao.id ? 0.5 : 1
-                                                                }}
-                                                            >
+                                                            <button onClick={(e) => handleDeleteBolao(e, bolao.id)} disabled={isDeleting === bolao.id} title="Excluir Concurso" style={{ width: 32, height: 32, borderRadius: '8px', background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', opacity: isDeleting === bolao.id ? 0.5 : 1 }}>
                                                                 {isDeleting === bolao.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
                                                             </button>
                                                         </div>
                                                     )}
-                                                    <div style={{
-                                                        width: 36,
-                                                        height: 36,
-                                                        borderRadius: '10px',
-                                                        background: 'var(--surface-subtle)',
-                                                        display: 'flex',
-                                                        alignItems: 'center',
-                                                        justifyContent: 'center',
-                                                        color: cor,
-                                                        border: '1px solid var(--border)'
-                                                    }}>
+                                                    <div style={{ width: 36, height: 36, borderRadius: '10px', background: 'var(--surface-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: cor, border: '1px solid var(--border)' }}>
                                                         <ChevronRight size={20} />
                                                     </div>
                                                 </div>
@@ -502,36 +354,15 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                         )
                     )}
 
-                    {/* VIEW: MICRO-GESTÃO DE COTAS */}
                     {viewMode === 'cotas' && selectedBolao && (
                         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }} className="animate-in slide-in-from-right duration-300">
-                            <div style={{
-                                padding: '1.25rem 2rem',
-                                borderBottom: '1px solid var(--border)',
-                                background: 'var(--bg-card)',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '1rem'
-                            }}>
-                                <button onClick={() => setViewMode('list')} style={{
-                                    background: 'var(--surface-subtle)',
-                                    border: 'none',
-                                    color: 'var(--text-primary)',
-                                    width: 32,
-                                    height: 32,
-                                    borderRadius: '8px',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    cursor: 'pointer'
-                                }}>
+                            <div style={{ padding: '1.25rem 2rem', borderBottom: '1px solid var(--border)', background: 'var(--bg-card)', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                                <button onClick={() => setViewMode('list')} style={{ background: 'var(--surface-subtle)', border: 'none', color: 'var(--text-primary)', width: 32, height: 32, borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
                                     <ArrowLeft size={18} />
                                 </button>
                                 <div>
                                     <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 900 }}>Gerenciamento de Cotas Individual</h4>
-                                    <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                        Bolão ID #{selectedBolao.id} • Concurso {selectedBolao.concurso} • {selectedBolao.qtdCotas} cotas totais
-                                    </p>
+                                    <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>Bolão ID #{selectedBolao.id} • Concurso {selectedBolao.concurso} • {selectedBolao.qtdCotas} cotas totais</p>
                                 </div>
                             </div>
 
@@ -542,26 +373,8 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                                         <p>Carregando cotas...</p>
                                     </div>
                                 ) : (
-                                    <div style={{
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        background: 'var(--bg-card)',
-                                        borderRadius: '12px',
-                                        border: '1px solid var(--border)',
-                                        overflow: 'hidden',
-                                        flex: 1
-                                    }}>
-                                        <div style={{
-                                            display: 'grid',
-                                            gridTemplateColumns: '80px 1fr 120px 100px 120px',
-                                            padding: '0.75rem 1.5rem',
-                                            background: 'var(--surface-subtle)',
-                                            borderBottom: '1px solid var(--border)',
-                                            fontSize: '0.65rem',
-                                            fontWeight: 800,
-                                            color: 'var(--text-muted)',
-                                            textTransform: 'uppercase'
-                                        }}>
+                                    <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--bg-card)', borderRadius: '12px', border: '1px solid var(--border)', overflow: 'hidden', flex: 1 }}>
+                                        <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 120px 100px 120px', padding: '0.75rem 1.5rem', background: 'var(--surface-subtle)', borderBottom: '1px solid var(--border)', fontSize: '0.65rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
                                             <span>Cota</span>
                                             <span>Identificador</span>
                                             <span>Valor</span>
@@ -577,28 +390,11 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                                                 </div>
                                             )}
                                             {cotas.map((cota, index) => (
-                                                <div key={cota.id} style={{
-                                                    display: 'grid',
-                                                    gridTemplateColumns: '80px 1fr 120px 100px 120px',
-                                                    padding: '1rem 1.5rem',
-                                                    borderBottom: '1px solid rgba(255,255,255,0.03)',
-                                                    alignItems: 'center',
-                                                    background: cota.status === 'vendida' ? 'rgba(255,255,255,0.01)' : 'transparent',
-                                                    opacity: cota.status === 'vendida' ? 0.7 : 1
-                                                }}>
+                                                <div key={cota.id} style={{ display: 'grid', gridTemplateColumns: '80px 1fr 120px 100px 120px', padding: '1rem 1.5rem', borderBottom: '1px solid rgba(255,255,255,0.03)', alignItems: 'center', background: cota.status === 'vendida' ? 'rgba(255,255,255,0.01)' : 'transparent', opacity: cota.status === 'vendida' ? 0.7 : 1 }}>
                                                     <span style={{ fontWeight: 800, color: 'var(--text-muted)', fontSize: '0.8rem' }}>#{index+1}</span>
                                                     <span style={{ fontWeight: 900, color: cota.status === 'vendida' ? 'var(--text-muted)' : cor }}>{cota.uid}</span>
                                                     <span>R$ {selectedBolao.precoVendaCota.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                                                    <div style={{
-                                                        fontSize: '0.65rem',
-                                                        background: cota.status === 'vendida' ? 'rgba(34,197,94,0.1)' : 'rgba(255,153,0,0.1)',
-                                                        color: cota.status === 'vendida' ? '#4ade80' : '#ff9900',
-                                                        padding: '2px 8px',
-                                                        borderRadius: '4px',
-                                                        fontWeight: 800,
-                                                        width: 'fit-content',
-                                                        textTransform: 'uppercase'
-                                                    }}>
+                                                    <div style={{ fontSize: '0.65rem', background: cota.status === 'vendida' ? 'rgba(34,197,94,0.1)' : 'rgba(255,153,0,0.1)', color: cota.status === 'vendida' ? '#4ade80' : '#ff9900', padding: '2px 8px', borderRadius: '4px', fontWeight: 800, width: 'fit-content', textTransform: 'uppercase' }}>
                                                         {cota.status === 'vendida' ? 'VENDIDA' : 'DISPONÍVEL'}
                                                     </div>
                                                     <div style={{ textAlign: 'right' }}>
@@ -607,24 +403,7 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                                                                 <Check size={14} /> PAGO
                                                             </div>
                                                         ) : (
-                                                            <button
-                                                                onClick={() => setCotaToSell(cota)}
-                                                                disabled={selling || sellingId === cota.id}
-                                                                style={{
-                                                                    background: cor,
-                                                                    color: '#fff',
-                                                                    border: 'none',
-                                                                    padding: '6px 12px',
-                                                                    borderRadius: '8px',
-                                                                    fontSize: '0.7rem',
-                                                                    fontWeight: 900,
-                                                                    cursor: 'pointer',
-                                                                    display: 'inline-flex',
-                                                                    alignItems: 'center',
-                                                                    gap: '0.4rem',
-                                                                    opacity: selling ? 0.5 : 1
-                                                                }}
-                                                            >
+                                                            <button onClick={() => setCotaToSell(cota)} disabled={sellingId === cota.id} style={{ background: cor, color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '8px', fontSize: '0.7rem', fontWeight: 900, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.4rem', opacity: sellingId === cota.id ? 0.5 : 1 }}>
                                                                 {sellingId === cota.id ? <Loader2 size={12} className="animate-spin" /> : <ShoppingCart size={12} />}
                                                                 VENDER
                                                             </button>
@@ -641,242 +420,88 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                 </div>
 
                 {/* Footer */}
-                <div style={{
-                    padding: '1rem 1.5rem',
-                    borderTop: '1px solid var(--border)',
-                    background: 'var(--bg-card)',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    fontSize: '0.8rem',
-                    color: 'var(--text-muted)'
-                }}>
+                <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid var(--border)', background: 'var(--bg-card)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                     <span>Exibindo {filteredBoloes.length} itens</span>
                     <button style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: cor, background: 'transparent', border: 'none', fontWeight: 600, cursor: 'pointer' }}>
                         Visualizar Histórico Completo <ArrowUpRight size={16} />
                     </button>
                 </div>
 
-                {/* NOVO MODAL DE EDIÇÃO COMPLETO */}
+                {/* Modal de Edição */}
                 {editingBolao && (
-                    <div style={{
-                        position: 'fixed',
-                        inset: 0,
-                        background: 'rgba(0,0,0,0.7)',
-                        zIndex: 10000,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        padding: '1rem'
-                    }}>
-                        <div style={{
-                            background: 'var(--bg-card)',
-                            width: '100%',
-                            maxWidth: 600,
-                            borderRadius: 24,
-                            border: '1px solid var(--border)',
-                            overflow: 'hidden',
-                            boxShadow: 'none'
-                        }}>
-                            {/* Header com cor do bolão */}
-                            <div style={{ background: cor, padding: '1rem 1.5rem', color: '#fff' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 900 }}>
-                                        Editar Bolão #{editingBolao.id}
-                                    </h3>
-                                    <button onClick={() => setEditingBolao(null)} style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer' }}>
-                                        <X size={20} />
-                                    </button>
-                                </div>
-                                <p style={{ margin: '0.25rem 0 0', fontSize: '0.75rem', opacity: 0.8 }}>
-                                    Concurso {editingBolao.concurso} • {editingBolao.jogo}
-                                </p>
+                    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+                        <div style={{ background: 'var(--bg-card)', width: '100%', maxWidth: 600, borderRadius: 24, border: '1px solid var(--border)', overflow: 'hidden' }}>
+                            <div style={{ background: cor, padding: '1rem 1.5rem', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 900 }}>Editar Bolão #{editingBolao.id}</h3>
+                                <button onClick={() => setEditingBolao(null)} style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer' }}><X size={20} /></button>
                             </div>
-
                             <form onSubmit={(e) => { e.preventDefault(); handleSaveEdit(); }} style={{ padding: '1.5rem' }}>
-                                {/* Aviso se já houver vendas */}
                                 {editingBolao.cotasVendidas > 0 && (
-                                    <div style={{
-                                        background: 'rgba(239,68,68,0.1)',
-                                        borderLeft: `4px solid #ef4444`,
-                                        padding: '0.75rem 1rem',
-                                        borderRadius: 12,
-                                        marginBottom: '1.5rem',
-                                        display: 'flex',
-                                        gap: '0.75rem',
-                                        alignItems: 'center'
-                                    }}>
+                                    <div style={{ background: 'rgba(239,68,68,0.1)', borderLeft: `4px solid #ef4444`, padding: '0.75rem 1rem', borderRadius: 12, marginBottom: '1.5rem', display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
                                         <AlertCircle size={18} color="#ef4444" />
-                                        <span style={{ fontSize: '0.75rem', color: '#ef4444', fontWeight: 500 }}>
-                                            Este bolão já possui {editingBolao.cotasVendidas} venda(s). Alterar cotas ou preço pode gerar inconsistência.
-                                            Recomenda-se alterar apenas o status.
-                                        </span>
+                                        <span style={{ fontSize: '0.75rem', color: '#ef4444', fontWeight: 500 }}>Este bolão já possui {editingBolao.cotasVendidas} venda(s). Alterar cotas ou preço pode gerar inconsistência. Recomenda-se alterar apenas o status.</span>
                                     </div>
                                 )}
-
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                                    {/* Concurso */}
                                     <div className="form-group">
                                         <label>Nº Concurso</label>
-                                        <input
-                                            type="text"
-                                            value={editingBolao.concurso}
-                                            onChange={e => setEditingBolao({ ...editingBolao, concurso: e.target.value })}
-                                            className="input-expanded"
-                                            style={{ width: '100%', padding: '0.75rem', borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--bg-dark)' }}
-                                        />
+                                        <input type="text" value={editingBolao.concurso} onChange={e => setEditingBolao({ ...editingBolao, concurso: e.target.value })} className="input-expanded" />
                                     </div>
-
-                                    {/* Data Sorteio */}
                                     <div className="form-group">
                                         <label>Data do Sorteio</label>
-                                        <input
-                                            type="date"
-                                            value={editingBolao.dataSorteio?.split('T')[0] || ''}
-                                            onChange={e => setEditingBolao({ ...editingBolao, dataSorteio: e.target.value })}
-                                            className="input-expanded"
-                                            style={{ width: '100%', padding: '0.75rem', borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--bg-dark)' }}
-                                        />
+                                        <input type="date" value={editingBolao.dataSorteio?.split('T')[0] || ''} onChange={e => setEditingBolao({ ...editingBolao, dataSorteio: e.target.value })} className="input-expanded" />
                                     </div>
-
-                                    {/* Qtd Jogos */}
                                     <div className="form-group">
                                         <label>Quantidade de Jogos</label>
-                                        <input
-                                            type="number"
-                                            min={1}
-                                            value={editingBolao.qtdJogos}
-                                            onChange={e => setEditingBolao({ ...editingBolao, qtdJogos: parseInt(e.target.value) || 1 })}
-                                            className="input-expanded"
-                                            style={{ width: '100%', padding: '0.75rem', borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--bg-dark)' }}
-                                        />
+                                        <input type="number" min={1} value={editingBolao.qtdJogos} onChange={e => setEditingBolao({ ...editingBolao, qtdJogos: parseInt(e.target.value) || 1 })} className="input-expanded" />
                                     </div>
-
-                                    {/* Dezenas */}
                                     <div className="form-group">
                                         <label>Quantidade de Dezenas</label>
-                                        <select
-                                            value={editingBolao.dezenas}
-                                            onChange={e => setEditingBolao({ ...editingBolao, dezenas: parseInt(e.target.value) })}
-                                            className="input-expanded"
-                                            style={{ width: '100%', padding: '0.75rem', borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--bg-dark)' }}
-                                        >
-                                            {selectedProduct && Array.from(
-                                                { length: selectedProduct.maxDezenas - selectedProduct.minDezenas + 1 },
-                                                (_, i) => selectedProduct.minDezenas + i
-                                            ).map(n => (
+                                        <select value={editingBolao.dezenas} onChange={e => setEditingBolao({ ...editingBolao, dezenas: parseInt(e.target.value) })} className="input-expanded">
+                                            {selectedProduct && Array.from({ length: selectedProduct.maxDezenas - selectedProduct.minDezenas + 1 }, (_, i) => selectedProduct.minDezenas + i).map(n => (
                                                 <option key={n} value={n}>{n} dezenas</option>
                                             ))}
                                         </select>
                                     </div>
-
-                                    {/* Total de Cotas - desabilitado se houver vendas */}
                                     <div className="form-group">
                                         <label>Total de Cotas</label>
-                                        <input
-                                            type="number"
-                                            min={editingBolao.cotasVendidas}
-                                            value={editingBolao.qtdCotas}
-                                            onChange={e => setEditingBolao({ ...editingBolao, qtdCotas: parseInt(e.target.value) || 0 })}
-                                            className="input-expanded"
-                                            disabled={editingBolao.cotasVendidas > 0}
-                                            style={{ width: '100%', padding: '0.75rem', borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--bg-dark)', opacity: editingBolao.cotasVendidas > 0 ? 0.6 : 1 }}
-                                        />
-                                        {editingBolao.cotasVendidas > 0 && (
-                                            <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
-                                                Mínimo permitido: {editingBolao.cotasVendidas} (já vendidas)
-                                            </span>
-                                        )}
+                                        <input type="number" min={editingBolao.cotasVendidas} value={editingBolao.qtdCotas} onChange={e => setEditingBolao({ ...editingBolao, qtdCotas: parseInt(e.target.value) || 0 })} className="input-expanded" disabled={editingBolao.cotasVendidas > 0} style={{ opacity: editingBolao.cotasVendidas > 0 ? 0.6 : 1 }} />
+                                        {editingBolao.cotasVendidas > 0 && <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Mínimo permitido: {editingBolao.cotasVendidas} (já vendidas)</span>}
                                     </div>
-
-                                    {/* Preço Venda Cota - desabilitado se houver vendas */}
                                     <div className="form-group">
                                         <label>Preço de Venda por Cota (R$)</label>
-                                        <MoneyInput
-                                            value={editingBolao.precoVendaCota}
-                                            onValueChange={v => setEditingBolao({ ...editingBolao, precoVendaCota: v })}
-                                            className="input-expanded"
-                                            disabled={editingBolao.cotasVendidas > 0}
-                                            style={{ opacity: editingBolao.cotasVendidas > 0 ? 0.6 : 1 }}
-                                        />
-                                        {editingBolao.cotasVendidas > 0 && (
-                                            <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
-                                                Preço não pode ser alterado após vendas.
-                                            </span>
-                                        )}
+                                        <MoneyInput value={editingBolao.precoVendaCota} onValueChange={v => setEditingBolao({ ...editingBolao, precoVendaCota: v })} className="input-expanded" disabled={editingBolao.cotasVendidas > 0} style={{ opacity: editingBolao.cotasVendidas > 0 ? 0.6 : 1 }} />
+                                        {editingBolao.cotasVendidas > 0 && <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Preço não pode ser alterado após vendas.</span>}
                                     </div>
-
-                                    {/* Taxa Administrativa (somente leitura) */}
                                     <div className="form-group">
                                         <label>Taxa Administrativa (%)</label>
-                                        <input
-                                            type="number"
-                                            value={editingBolao.taxaAdministrativa || FINANCIAL_RULES.AGIO_BOLOES}
-                                            readOnly
-                                            className="input-expanded"
-                                            style={{ width: '100%', padding: '0.75rem', borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--surface-subtle)', cursor: 'not-allowed' }}
-                                        />
-                                        <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
-                                            Fixa em {FINANCIAL_RULES.AGIO_BOLOES}% (regulamento)
-                                        </span>
+                                        <input type="number" value={editingBolao.taxaAdministrativa || FINANCIAL_RULES.AGIO_BOLOES} readOnly className="input-expanded" style={{ background: 'var(--surface-subtle)', cursor: 'not-allowed' }} />
+                                        <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Fixa em {FINANCIAL_RULES.AGIO_BOLOES}% (regulamento)</span>
                                     </div>
-
-                                    {/* Status */}
                                     <div className="form-group">
                                         <label>Status</label>
-                                        <select
-                                            value={editingBolao.status}
-                                            onChange={e => setEditingBolao({ ...editingBolao, status: e.target.value })}
-                                            className="input-expanded"
-                                            style={{ width: '100%', padding: '0.75rem', borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--bg-dark)' }}
-                                        >
+                                        <select value={editingBolao.status} onChange={e => setEditingBolao({ ...editingBolao, status: e.target.value })} className="input-expanded">
                                             <option value="disponivel">Disponível</option>
                                             <option value="finalizado">Finalizado</option>
                                             <option value="cancelado">Cancelado</option>
                                         </select>
                                     </div>
                                 </div>
-
-                                {/* Botões de ação */}
                                 <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
-                                    <button
-                                        type="button"
-                                        onClick={() => setEditingBolao(null)}
-                                        className="btn btn-ghost flex-1"
-                                        style={{ height: 48 }}
-                                    >
-                                        Cancelar
-                                    </button>
-                                    <button
-                                        type="submit"
-                                        className="btn btn-primary flex-1"
-                                        style={{ background: cor, color: '#fff', height: 48 }}
-                                    >
-                                        Salvar Alterações
-                                    </button>
+                                    <button type="button" onClick={() => setEditingBolao(null)} className="btn btn-ghost flex-1" style={{ height: 48 }}>Cancelar</button>
+                                    <button type="submit" className="btn btn-primary flex-1" style={{ background: cor, color: '#fff', height: 48 }}>Salvar Alterações</button>
                                 </div>
                             </form>
                         </div>
                     </div>
                 )}
 
-                {/* MODAL DE VENDA UNITÁRIA */}
+                {/* Modais de venda unitária e lote */}
                 {cotaToSell && selectedBolao && (
-                    <ModalVendaBolao
-                        cota={cotaToSell}
-                        bolao={selectedBolao}
-                        onClose={() => setCotaToSell(null)}
-                        onSuccess={handleSellSuccess}
-                    />
+                    <ModalVendaBolao cota={cotaToSell} bolao={selectedBolao} onClose={() => setCotaToSell(null)} onSuccess={handleSellSuccess} />
                 )}
-
-                {/* MODAL DE VENDA EM LOTE */}
                 {bolaoForBulkSale && (
-                    <ModalVendaLoteBolao
-                        bolao={bolaoForBulkSale}
-                        onClose={() => setBolaoForBulkSale(null)}
-                        onSuccess={handleBulkSellSuccess}
-                    />
+                    <ModalVendaLoteBolao bolao={bolaoForBulkSale} onClose={() => setBolaoForBulkSale(null)} onSuccess={handleBulkSellSuccess} />
                 )}
             </div>
         </div>
