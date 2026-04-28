@@ -348,7 +348,7 @@ export async function processarEncalheBolao(bolaoId: number) {
 
 export async function registrarVendaBolao(params: {
     bolaoId: number;
-    sessaoBolaoId: number;
+    sessaoBolaoId?: number | null;   // agora aceita null ou undefined
     quantidadeCotas: number;
     valorTotal: number;
     metodoPagamento: 'dinheiro' | 'pix' | 'cartao_debito' | 'cartao_credito';
@@ -360,9 +360,10 @@ export async function registrarVendaBolao(params: {
     if (!user) return { success: false, error: 'Usuário não autenticado' };
 
     try {
+        // Envia null se não houver sessão
         const { data, error } = await supabase.rpc('vender_cotas_bolao', {
             p_bolao_id: params.bolaoId,
-            p_sessao_bolao_id: params.sessaoBolaoId,
+            p_sessao_bolao_id: params.sessaoBolaoId ?? null,  // converte undefined/null para null
             p_usuario_id: user.id,
             p_quantidade: params.quantidadeCotas,
             p_valor_total: params.valorTotal,
