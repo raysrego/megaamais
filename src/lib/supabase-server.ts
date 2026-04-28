@@ -23,7 +23,7 @@ export async function createClient() {
                             cookieStore.set(name, value, cookieOptions);
                         });
                     } catch {
-                        // safe to ignore
+                        // The `setAll` method was called from a Server Component.
                     }
                 },
             },
