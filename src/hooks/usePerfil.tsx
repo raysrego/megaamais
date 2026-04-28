@@ -1,3 +1,4 @@
+// hooks/usePerfil.tsx (ou onde estiver definido)
 'use client';
 
 import { createContext, useContext, useEffect, useState, useRef, useMemo, useCallback } from 'react';
