@@ -1,19 +1,71 @@
-'use server';
-
+// actions/boloes.ts
 import { createClient } from '@/lib/supabase';
 import { revalidatePath } from 'next/cache';
 import { Bolao, BolaoRow } from '@/types/bolao';
 
+// ============================================================
+// UTILITÁRIOS
+// ============================================================
+
 /**
  * Gera um UID único para a cota incorporando bolaoId + índice sequencial.
  * Formato: B{bolaoId}-{índice}-{random4} (ex: B11-01-A7K2)
- * Isso garante unicidade global já que bolaoId+índice nunca repetem.
  */
 function generateCotaUid(bolaoId: number, index: number): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     const suffix = Array.from({ length: 4 }, () => chars.charAt(Math.floor(Math.random() * chars.length))).join('');
     return `B${bolaoId}-${String(index + 1).padStart(2, '0')}-${suffix}`;
 }
+
+function mapProduto(item: any) {
+    return {
+        id: item.id,
+        nome: item.nome,
+        slug: item.slug,
+        cor: item.cor,
+        corDestaque: item.cor_destaque,
+        icone: item.icone,
+        diasSorteio: item.dias_sorteio,
+        minDezenas: item.min_dezenas,
+        maxDezenas: item.max_dezenas,
+        horarioFechamento: item.horario_fechamento,
+        ativo: item.ativo,
+        categoriaId: item.categoria_id,
+        gerenciaEstoque: item.gerencia_estoque,
+        precoPadrao: Number(item.preco_padrao || 0)
+    };
+}
+
+// ============================================================
+// PERMISSÕES
+// ============================================================
+
+/**
+ * Verifica se o usuário autenticado possui uma das roles permitidas.
+ * Retorna o objeto user e perfil em caso de sucesso, ou lança erro.
+ */
+async function verificarPerfilPermitido(rolesPermitidas: string[]): Promise<{ user: any; perfil: any }> {
+    const supabase = await createClient();
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) throw new Error('Não autenticado');
+
+    const { data: perfil, error: perfilError } = await supabase
+        .from('perfis')
+        .select('role, loja_id')
+        .eq('id', user.id)
+        .single();
+
+    if (perfilError || !perfil) throw new Error('Perfil não encontrado');
+
+    if (!rolesPermitidas.includes(perfil.role)) {
+        throw new Error('Permissão negada');
+    }
+    return { user, perfil };
+}
+
+// ============================================================
+// PRODUTOS
+// ============================================================
 
 export async function getProdutos(lojaId?: string) {
     const supabase = await createClient();
@@ -37,10 +89,9 @@ export async function getProdutos(lojaId?: string) {
 
     const { data: dataComJoin, error: errorJoin } = await query;
 
-    // Fallback: Se não tiver lojaId ou a query com join falhar (tabela não existe ainda em prod?), tenta query simples
-    // Isso evita quebrar o app enquanto a migration não roda
+    // Fallback: se a tabela loja_produtos não existir ou join falhar
     if (errorJoin) {
-        console.warn('Erro ao buscar produtos com filtro de loja (tabela nova?), tentando fallback global:', errorJoin.message);
+        console.warn('Erro ao buscar produtos com filtro de loja (fallback global):', errorJoin.message);
         const { data, error } = await supabase
             .from('produtos')
             .select('*')
@@ -51,32 +102,15 @@ export async function getProdutos(lojaId?: string) {
             console.error('Error fetching produtos (fallback):', error);
             return [];
         }
-
         return (data || []).map(item => mapProduto(item));
     }
 
     return (dataComJoin || []).map(item => mapProduto(item));
 }
 
-function mapProduto(item: any) {
-    return {
-        id: item.id,
-        nome: item.nome,
-        slug: item.slug,
-        cor: item.cor,
-        corDestaque: item.cor_destaque,
-        icone: item.icone,
-        diasSorteio: item.dias_sorteio,
-        minDezenas: item.min_dezenas,
-        maxDezenas: item.max_dezenas,
-        horarioFechamento: item.horario_fechamento,
-        ativo: item.ativo,
-        // Novos campos 2.0
-        categoriaId: item.categoria_id,
-        gerenciaEstoque: item.gerencia_estoque,
-        precoPadrao: Number(item.preco_padrao || 0)
-    };
-}
+// ============================================================
+// BOLÕES
+// ============================================================
 
 export async function getBoloes(options?: { produtoId?: number, lojaId?: string | null, limit?: number, includeFinalizados?: boolean }) {
     const supabase = await createClient();
@@ -105,26 +139,13 @@ export async function getBoloes(options?: { produtoId?: number, lojaId?: string 
         `)
         .order('created_at', { ascending: false });
 
-    if (options?.produtoId) {
-        query = query.eq('produto_id', options.produtoId);
-    }
-
-    if (options?.lojaId) {
-        query = query.eq('loja_id', options.lojaId);
-    }
-
-    if (options?.includeFinalizados === false) {
-        query = query.eq('status', 'disponivel');
-    }
-
-    if (options?.limit) {
-        query = query.limit(options.limit);
-    } else {
-        query = query.limit(50); // Limite padrão saudável para performance
-    }
+    if (options?.produtoId) query = query.eq('produto_id', options.produtoId);
+    if (options?.lojaId) query = query.eq('loja_id', options.lojaId);
+    if (options?.includeFinalizados === false) query = query.eq('status', 'disponivel');
+    if (options?.limit) query = query.limit(options.limit);
+    else query = query.limit(50);
 
     const { data, error } = await query;
-
     if (error) {
         console.error('Error fetching boloes:', error);
         return [];
@@ -144,7 +165,6 @@ export async function getBoloes(options?: { produtoId?: number, lojaId?: string 
         cotasVendidas: item.cotas_vendidas,
         status: item.status,
         createdAt: item.created_at,
-        // Dados estendidos do join
         jogo: item.produtos?.nome,
         cor: item.produtos?.cor,
         slug: item.produtos?.slug
@@ -153,6 +173,25 @@ export async function getBoloes(options?: { produtoId?: number, lojaId?: string 
 
 export async function createBolao(bolao: Bolao & { lojaId: string }) {
     const supabase = await createClient();
+
+    // Validação: já existe bolão com mesmo concurso e produto (ativo)?
+    const { data: existing, error: checkError } = await supabase
+        .from('boloes')
+        .select('id')
+        .eq('produto_id', bolao.produtoId)
+        .eq('concurso', bolao.concurso)
+        .eq('loja_id', bolao.lojaId)
+        .neq('status', 'cancelado')
+        .maybeSingle();
+
+    if (checkError) {
+        console.error('Erro ao verificar duplicidade:', checkError);
+        return { success: false, error: `Erro ao verificar duplicidade: ${checkError.message}` };
+    }
+    if (existing) {
+        return { success: false, error: 'Já existe um bolão ativo para este concurso e produto.' };
+    }
+
     const { data, error } = await supabase
         .from('boloes')
         .insert([{
@@ -179,7 +218,7 @@ export async function createBolao(bolao: Bolao & { lojaId: string }) {
 
     const newBolao = data;
 
-    // GERAR COTAS INDIVIDUAIS (UID agora inclui bolaoId para unicidade garantida)
+    // Gerar cotas individuais
     const cotasToInsert = Array.from({ length: bolao.qtdCotas }, (_, i) => ({
         bolao_id: newBolao.id,
         uid: generateCotaUid(newBolao.id, i),
@@ -192,18 +231,14 @@ export async function createBolao(bolao: Bolao & { lojaId: string }) {
 
     if (errCotas) {
         console.error('Error creating individual cotas:', errCotas);
-        // ROLLBACK: Deletar o bolão órfão para não deixar registro sem cotas
+        // Rollback: deletar bolão órfão
         await supabase.from('boloes').delete().eq('id', newBolao.id);
-        return { success: false, error: `Falha ao criar cotas individuais: ${errCotas.message} (Code: ${errCotas.code})` };
+        return { success: false, error: `Falha ao criar cotas: ${errCotas.message}` };
     }
 
     return { success: true, data: newBolao };
 }
 
-/**
- * Busca um bolão específico com todos os detalhes necessários para venda
- * Otimizado para evitar N+1 queries no frontend
- */
 export async function getBolaoById(id: number) {
     const supabase = await createClient();
     const { data, error } = await supabase
@@ -258,14 +293,10 @@ export async function getCotasBolao(bolaoId: number) {
             .order('id', { ascending: true });
 
         if (error) {
-            return { data: [] as any[], error: `Supabase: ${error.message} (Code: ${error.code})` };
+            return { data: [] as any[], error: `Supabase: ${error.message}` };
         }
 
-        if (!data || data.length === 0) {
-            return { data: [] as any[], error: null };
-        }
-
-        const mapped = data.map(item => ({
+        const mapped = (data || []).map(item => ({
             id: item.id,
             uid: item.uid || '',
             bolaoId: item.bolao_id,
@@ -273,13 +304,11 @@ export async function getCotasBolao(bolaoId: number) {
             dataVenda: item.data_venda,
             valorVenda: 0
         }));
-
         return { data: mapped, error: null };
     } catch (e: any) {
         return { data: [] as any[], error: `Exception: ${String(e?.message || e)}` };
     }
 }
-
 
 export async function updateBolaoCotas(id: number, cotasVendidas: number) {
     const supabase = await createClient();
@@ -294,11 +323,34 @@ export async function updateBolaoCotas(id: number, cotasVendidas: number) {
         console.error('Error updating bolao cotas:', error);
         throw error;
     }
-
     return data;
 }
+
 export async function updateBolao(id: number, data: any) {
     const supabase = await createClient();
+
+    // Impedir alterações sensíveis se já houver vendas
+    const { data: bolaoAtual, error: fetchError } = await supabase
+        .from('boloes')
+        .select('cotas_vendidas')
+        .eq('id', id)
+        .single();
+
+    if (fetchError) throw fetchError;
+
+    if (bolaoAtual.cotas_vendidas > 0) {
+        // Permite apenas alterar status
+        const { data: updated, error } = await supabase
+            .from('boloes')
+            .update({ status: data.status })
+            .eq('id', id)
+            .select()
+            .single();
+        if (error) throw error;
+        return updated;
+    }
+
+    // Sem vendas, pode alterar todos os campos
     const { data: updated, error } = await supabase
         .from('boloes')
         .update({
@@ -316,28 +368,37 @@ export async function updateBolao(id: number, data: any) {
         .select()
         .single();
 
-    if (error) {
-        console.error('Error updating bolao:', error);
-        throw error;
-    }
-
+    if (error) throw error;
     return updated;
 }
 
 export async function deleteBolao(id: number) {
     const supabase = await createClient();
+
+    // Verificar se há vendas antes de deletar
+    const { data: bolao, error: fetchError } = await supabase
+        .from('boloes')
+        .select('cotas_vendidas')
+        .eq('id', id)
+        .single();
+
+    if (fetchError) throw fetchError;
+    if (bolao.cotas_vendidas > 0) {
+        throw new Error('Não é possível excluir um bolão que já possui vendas.');
+    }
+
     const { error } = await supabase
         .from('boloes')
         .delete()
         .eq('id', id);
 
-    if (error) {
-        console.error('Error deleting bolao:', error);
-        throw error;
-    }
-
+    if (error) throw error;
     return true;
 }
+
+// ============================================================
+// ENCALHE
+// ============================================================
 
 export async function getBoloesVencidos() {
     const supabase = await createClient();
@@ -373,105 +434,83 @@ export async function getBoloesVencidos() {
     }));
 }
 
-/**
- * ATUALIZADA - Processa encalhe usando RPC atômica
- * Garante consistência transacional completa
- */
 export async function processarEncalheBolao(bolaoId: number) {
     const supabase = await createClient();
 
     try {
-        // Chamar a função RPC atômica
         const { data, error } = await supabase.rpc('processar_encalhe_bolao', {
             p_bolao_id: bolaoId
         });
-
-        if (error) {
-            console.error('Erro ao processar encalhe:', error);
-            throw new Error(error.message);
-        }
-
+        if (error) throw new Error(error.message);
         return {
             success: data.success,
             already_processed: data.already_processed || false,
             encalhe: data.encalhe || 0,
             valorDespesa: data.valor_despesa || 0
         };
-
     } catch (err: any) {
-        console.error('Erro inesperado ao processar encalhe:', err);
-        return {
-            success: false,
-            error: err.message || 'Erro ao processar encalhe'
-        };
+        console.error('Erro ao processar encalhe:', err);
+        return { success: false, error: err.message };
     }
 }
 
-/**
- * NOVA FUNÇÃO - Registrar venda de bolão usando RPC atômica
- * Esta função substitui o fluxo anterior que não era transacional
- */
+// ============================================================
+// VENDAS DE BOLÃO (com sessão de caixa bolão)
+// ============================================================
+
 export async function registrarVendaBolao(params: {
     bolaoId: number;
-    sessaoCaixaId: number;
+    sessaoBolaoId: number;   // ID da sessão em caixa_bolao_sessoes
     quantidadeCotas: number;
     valorTotal: number;
     metodoPagamento: 'dinheiro' | 'pix' | 'cartao_debito' | 'cartao_credito';
+    comprovanteUrl?: string | null;
+    cotaId?: number | null;   // se veio de venda individual
 }) {
     const supabase = await createClient();
 
-    // Obter o usuário atual (vendedor)
+    // Verificar autenticação
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-        return { success: false, error: 'Usuário não autenticado' };
-    }
+    if (!user) return { success: false, error: 'Usuário não autenticado' };
 
+    // Verificar permissão (qualquer usuário autenticado pode vender, desde que tenha sessão ativa)
+    // A validação de sessão e disponibilidade será feita na RPC
     try {
-        // Chamar a função RPC atômica
-        const { data, error } = await supabase.rpc('registrar_venda_bolao', {
+        const { data, error } = await supabase.rpc('vender_cotas_bolao', {
             p_bolao_id: params.bolaoId,
-            p_sessao_caixa_id: params.sessaoCaixaId,
+            p_sessao_bolao_id: params.sessaoBolaoId,
             p_usuario_id: user.id,
-            p_quantidade_cotas: params.quantidadeCotas,
+            p_quantidade: params.quantidadeCotas,
             p_valor_total: params.valorTotal,
-            p_metodo_pagamento: params.metodoPagamento
+            p_metodo_pagamento: params.metodoPagamento,
+            p_comprovante_url: params.comprovanteUrl || null,
+            p_cota_id: params.cotaId || null
         });
 
-        if (error) {
-            console.error('Erro ao registrar venda de bolão:', error);
-            return { success: false, error: error.message };
-        }
-
+        if (error) throw new Error(error.message);
         revalidatePath('/(dashboard)/boloes');
-        return { success: true, vendaId: data };
-
+        return { success: true, vendaId: data.venda_id };
     } catch (err: any) {
-        console.error('Erro inesperado ao registrar venda:', err);
-        return { success: false, error: err.message || 'Erro inesperado' };
+        console.error('Erro ao registrar venda de bolão:', err);
+        return { success: false, error: err.message };
     }
 }
 
-/**
- * ATUALIZADA - Busca auditoria completa (vendas + encalhes)
- * Usa a view unificada vw_auditoria_completa
- */
+// ============================================================
+// AUDITORIA E RELATÓRIOS
+// ============================================================
+
 export async function getAuditoriaCompleta(lojaId?: string) {
     const supabase = await createClient();
     let query = supabase
         .from('vw_auditoria_completa')
         .select('*');
-
-    if (lojaId) {
-        query = query.eq('loja_id', lojaId);
-    }
-
+    if (lojaId) query = query.eq('loja_id', lojaId);
     const { data, error } = await query.order('data_registro', { ascending: false });
-
     if (error) {
         console.error('Error fetching complete audit:', error);
         return [];
     }
-
     return (data || []).map(item => ({
         tipo: item.tipo_registro as 'venda' | 'encalhe',
         id: item.registro_id,
@@ -490,10 +529,9 @@ export async function getAuditoriaCompleta(lojaId?: string) {
     }));
 }
 
-// Manter compatibilidade com código existente
+// Mantido para compatibilidade com código legado
 export async function getVendasAuditoria() {
     const todas = await getAuditoriaCompleta();
-    // Retornar apenas vendas para não quebrar código legado
     return todas.filter(item => item.tipo === 'venda').map(item => ({
         id: item.id,
         dataVenda: item.dataRegistro,
@@ -507,23 +545,29 @@ export async function getVendasAuditoria() {
     }));
 }
 
+// ============================================================
+// PRESTAÇÃO DE CONTAS E LIQUIDAÇÃO
+// ============================================================
+
 export async function getPrestacaoContasOperadores(lojaId?: string) {
     const supabase = await createClient();
+
+    // Apenas gerente e admin podem acessar
+    try {
+        await verificarPerfilPermitido(['gerente', 'admin']);
+    } catch {
+        return [];
+    }
+
     let query = supabase
         .from('vw_prestacao_contas_operadores')
         .select('*');
-
-    if (lojaId) {
-        query = query.eq('loja_id', lojaId);
-    }
-
+    if (lojaId) query = query.eq('loja_id', lojaId);
     const { data, error } = await query.order('operador_nome', { ascending: true });
-
     if (error) {
         console.error('Error fetching operator settlement:', error);
         return [];
     }
-
     return (data || []).map(item => ({
         operadorId: item.operador_id,
         operadorNome: item.operador_nome,
@@ -540,22 +584,20 @@ export async function getPrestacaoContasOperadores(lojaId?: string) {
 export async function liquidarOperador(operadorId: string, valorEspecie: number, valorPix: number) {
     const supabase = await createClient();
 
-    // 1. Obter o usuário atual (Master/Gerente que está liquidando)
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error('Não autorizado');
+    // Apenas gerente e admin podem liquidar
+    let user, perfil;
+    try {
+        const result = await verificarPerfilPermitido(['gerente', 'admin']);
+        user = result.user;
+        perfil = result.perfil;
+    } catch (err: any) {
+        return { success: false, error: err.message };
+    }
 
-    // 2. Obter o perfil do Master para saber a loja
-    const { data: perfilMaster } = await supabase
-        .from('perfis')
-        .select('loja_id')
-        .eq('id', user.id)
-        .single();
-
-    // 3. Chamar a função RPC transacional que criamos na migration
     const { error } = await supabase.rpc('confirmar_liquidacao_operador', {
         p_operador_id: operadorId,
         p_master_id: user.id,
-        p_loja_id: perfilMaster?.loja_id,
+        p_loja_id: perfil.loja_id,
         p_valor_especie: valorEspecie,
         p_valor_pix: valorPix
     });
@@ -565,25 +607,23 @@ export async function liquidarOperador(operadorId: string, valorEspecie: number,
         return { success: false, error: error.message };
     }
 
-    revalidatePath('/(dashboard)/boloes');
+    revalidatePath('/(dashboard)/financeiro');
     return { success: true };
 }
 
-/**
- * NOVA - Busca resumo do caixa do Master (dinheiro coletado hoje)
- * Consulta cofre_movimentacoes para saber quanto o usuário atual recebeu dos operadores
- */
 export async function getResumoCaixaMaster() {
     const supabase = await createClient();
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
+    // Apenas gerente e admin podem acessar
+    let user;
+    try {
+        const result = await verificarPerfilPermitido(['gerente', 'admin']);
+        user = result.user;
+    } catch {
         return { totalColetado: 0, qtdLiquidacoes: 0 };
     }
 
-    // Buscar movimentações de hoje onde o usuário atual foi o operador (quem fez a sangria)
     const today = new Date().toISOString().split('T')[0];
-
     const { data, error } = await supabase
         .from('cofre_movimentacoes')
         .select('valor')
@@ -599,6 +639,5 @@ export async function getResumoCaixaMaster() {
 
     const totalColetado = (data || []).reduce((acc, curr) => acc + Number(curr.valor), 0);
     const qtdLiquidacoes = (data || []).length;
-
     return { totalColetado, qtdLiquidacoes };
 }
