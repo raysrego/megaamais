@@ -1,5 +1,5 @@
 // actions/boloes.ts
-import { createClient } from '@/lib/supabase';
+import { createClient } from '@/lib/supabase-server';
 import { revalidatePath } from 'next/cache';
 import { Bolao, BolaoRow } from '@/types/bolao';
 
