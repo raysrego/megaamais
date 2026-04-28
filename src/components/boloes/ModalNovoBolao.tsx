@@ -515,7 +515,7 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
                                         padding: '1.25rem',
                                         borderRadius: 16,
                                         background: corSelecionada,
-                                        color: '#ffffff',
+                                        color: '#8bb4d9',
                                         fontSize: '1.125rem',
                                         fontWeight: 900,
                                         border: '1px solid rgba(255,255,255,0.1)',
