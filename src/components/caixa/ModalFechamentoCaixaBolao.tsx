@@ -83,10 +83,10 @@ export function ModalFechamentoCaixaBolao({ sessao, onClose, onSuccess }: Props)
     // Agrupar vendas por operador
     const vendasPorOperador = vendas.reduce((acc: any, venda) => {
         if (!acc[venda.usuario_nome]) {
-            acc[venda.vendedor_nome] = { qtd: 0, total: 0 };
+            acc[venda.usuario_nome] = { qtd: 0, total: 0 };
         }
-        acc[venda.vendedor_nome].qtd += 1;
-        acc[venda.vendedor_nome].total += venda.valor_total;
+        acc[venda.usuario_nome].qtd += 1;
+        acc[venda.usuario_nome].total += venda.valor_total;
         return acc;
     }, {});
 
