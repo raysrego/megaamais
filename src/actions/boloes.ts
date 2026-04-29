@@ -246,18 +246,6 @@ export async function getCotasBolao(bolaoId: number) {
     }
 }
 
-export async function updateBolaoCotas(id: number, cotasVendidas: number) {
-    const supabase = await createClient();
-    const { data, error } = await supabase
-        .from('boloes')
-        .update({ cotas_vendidas: cotasVendidas })
-        .eq('id', id)
-        .select()
-        .single();
-    if (error) throw error;
-    return data;
-}
-
 export async function updateBolao(id: number, data: any) {
     const supabase = await createClient();
     const { data: bolaoAtual, error: fetchError } = await supabase
@@ -267,7 +255,7 @@ export async function updateBolao(id: number, data: any) {
         .single();
     if (fetchError) throw fetchError;
 
-    if (bolaoAtual.cotasVendidas > 0) {
+    if (bolaoAtual.cotas_vendidas > 0) {
         const { data: updated, error } = await supabase
             .from('boloes')
             .update({ status: data.status })
@@ -306,7 +294,7 @@ export async function deleteBolao(id: number) {
         .eq('id', id)
         .single();
     if (fetchError) throw fetchError;
-    if (bolao.cotasVendidas > 0) throw new Error('Não é possível excluir um bolão com vendas.');
+    if (bolao.cotas_vendidas > 0) throw new Error('Não é possível excluir um bolão com vendas.');
     const { error } = await supabase.from('boloes').delete().eq('id', id);
     if (error) throw error;
     return true;
