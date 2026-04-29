@@ -34,18 +34,19 @@ interface ModalNovoBolaoProps {
  */
 function getNextDrawDates(produto: Jogo, quantity: number = 30): Date[] {
     const dates: Date[] = [];
-    const diasSorteio = produto.diasSorteio; // array de números (0=domingo, 1=segunda, ...)
-    const horarioFechamento = produto.horarioFechamento; // "HH:MM"
+    // Garantir que diasSorteio existe e é array; caso contrário, usar dias padrão (segunda a sábado)
+    const diasSorteio = produto.diasSorteio && Array.isArray(produto.diasSorteio) && produto.diasSorteio.length > 0
+        ? produto.diasSorteio
+        : [1, 2, 3, 4, 5, 6]; // padrão: segunda a sábado
+    const horarioFechamento = produto.horarioFechamento || '19:00'; // padrão 19:00
 
-    // Função que verifica se uma data é um dia de sorteio válido (considerando horário)
     const isValidDrawDate = (date: Date): boolean => {
         const diaSemana = date.getDay();
         if (!diasSorteio.includes(diaSemana)) return false;
 
-        const agora = new Date();
         const [horaClose, minutoClose] = horarioFechamento.split(':').map(Number);
+        const agora = new Date();
 
-        // Se for hoje, verificar se já passou do horário de fechamento
         if (date.toDateString() === agora.toDateString()) {
             const horaAtual = agora.getHours();
             const minutoAtual = agora.getMinutes();
@@ -59,7 +60,7 @@ function getNextDrawDates(produto: Jogo, quantity: number = 30): Date[] {
     let currentDate = new Date();
     currentDate.setHours(0, 0, 0, 0);
 
-    // Se já passou do horário de fechamento hoje, começar a busca amanhã
+    // Se já passou do horário de fechamento hoje, começar busca amanhã
     const [horaClose, minutoClose] = horarioFechamento.split(':').map(Number);
     const agora = new Date();
     const jaPassouHorario = agora.getHours() > horaClose || (agora.getHours() === horaClose && agora.getMinutes() >= minutoClose);
@@ -100,7 +101,6 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const { toast } = useToast();
 
-    // Opções de datas disponíveis (próximas 30)
     const [opcoesDatas, setOpcoesDatas] = useState<Date[]>([]);
 
     useEffect(() => {
@@ -121,7 +121,7 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
                     setProdutos([]);
                 }
             } catch (err: any) {
-                console.error('Falha ao carregar produtos para o bolão:', err);
+                console.error('Falha ao carregar produtos:', err);
                 setProdutos([]);
             } finally {
                 setIsLoading(false);
@@ -139,11 +139,8 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
                 setFormData(prev => ({ ...prev, dezenas: selectedProduct.minDezenas }));
             }
 
-            // Gerar próximas 30 datas disponíveis
             const proximasDatas = getNextDrawDates(selectedProduct, 30);
             setOpcoesDatas(proximasDatas);
-
-            // Selecionar a primeira data como padrão
             if (proximasDatas.length > 0) {
                 setFormData(prev => ({ ...prev, dataSorteio: formatToInputDate(proximasDatas[0]) }));
             } else {
@@ -152,7 +149,6 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
         }
     }, [formData.jogo, selectedProduct]);
 
-    // Lógica de desbloqueio automático
     useEffect(() => {
         if (formData.jogo && formData.concurso && formData.dataSorteio) {
             if (unlockedStep < 2) setUnlockedStep(2);
@@ -162,7 +158,6 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
         }
     }, [formData, unlockedStep]);
 
-    // Cálculos financeiros
     const valorTotalBase = formData.valorPorJogo * formData.qtdJogos;
     const valorCotaBase = formData.qtdCotas > 0 ? valorTotalBase / formData.qtdCotas : 0;
     const precoVendaCota = valorCotaBase * (1 + formData.taxaAdministrativa / 100);
@@ -196,12 +191,10 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
                 cotasVendidas: 0,
                 status: 'disponivel' as const
             };
-
             const result = await createBolao(bolaoData);
             if (!result.success) throw new Error(result.error);
-
             const created = result.data;
-            const uiBolao = {
+            onAdd({
                 ...created,
                 id: created.id,
                 jogo: selectedProduct.nome,
@@ -211,11 +204,9 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
                 totalCotas: created.qtd_cotas,
                 cotasVendidas: created.cotas_vendidas,
                 dataSorteio: created.data_sorteio
-            };
-            onAdd(uiBolao);
+            });
             onClose();
         } catch (error: any) {
-            console.error('Erro ao lançar bolão:', error);
             toast({ message: error.message || 'Falha ao salvar o bolão.', type: 'error' });
         }
     };
@@ -235,7 +226,6 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
                 flexDirection: 'column',
                 overflow: 'hidden'
             }}>
-                {/* Header */}
                 <div className="flex justify-between items-center p-4 px-8 border-b border-border bg-bg-card z-10">
                     <h2 className="text-xl font-black text-text-primary">Novo Bolão</h2>
                     <button onClick={onClose} className="p-2 rounded-full hover:bg-surface-subtle text-text-muted transition-colors">
@@ -243,9 +233,7 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
                     </button>
                 </div>
 
-                {/* Body com scroll */}
                 <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-8 flex flex-col gap-12 scroll-smooth">
-                    {/* ETAPA 1 */}
                     <Section
                         number={1}
                         title="Configuração do Concurso"
@@ -342,7 +330,6 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
                         </div>
                     </Section>
 
-                    {/* ETAPA 2 */}
                     <Section
                         number={2}
                         title="Simulação do Bolão"
@@ -399,7 +386,6 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
                         </div>
                     </Section>
 
-                    {/* ETAPA 3 */}
                     <Section
                         number={3}
                         title="Revisão Final"
@@ -509,7 +495,6 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
     );
 }
 
-// Subcomponentes auxiliares
 function Section({ number, title, isLocked, isDone, children, cor }: any) {
     return (
         <div className={`relative pl-12 transition-all ${isLocked ? 'opacity-40 pointer-events-none' : ''}`}>
