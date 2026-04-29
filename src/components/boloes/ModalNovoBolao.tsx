@@ -34,11 +34,8 @@ interface ModalNovoBolaoProps {
  */
 function getNextDrawDates(produto: Jogo, quantity: number = 30): Date[] {
     const dates: Date[] = [];
-    // Garantir que diasSorteio existe e é array; caso contrário, usar dias padrão (segunda a sábado)
-    const diasSorteio = produto.diasSorteio && Array.isArray(produto.diasSorteio) && produto.diasSorteio.length > 0
-        ? produto.diasSorteio
-        : [1, 2, 3, 4, 5, 6]; // padrão: segunda a sábado
-    const horarioFechamento = produto.horarioFechamento || '19:00'; // padrão 19:00
+    const diasSorteio = produto.diasSorteio;
+    const horarioFechamento = produto.horarioFechamento || '20:00';
 
     const isValidDrawDate = (date: Date): boolean => {
         const diaSemana = date.getDay();
@@ -46,7 +43,6 @@ function getNextDrawDates(produto: Jogo, quantity: number = 30): Date[] {
 
         const [horaClose, minutoClose] = horarioFechamento.split(':').map(Number);
         const agora = new Date();
-
         if (date.toDateString() === agora.toDateString()) {
             const horaAtual = agora.getHours();
             const minutoAtual = agora.getMinutes();
@@ -60,7 +56,6 @@ function getNextDrawDates(produto: Jogo, quantity: number = 30): Date[] {
     let currentDate = new Date();
     currentDate.setHours(0, 0, 0, 0);
 
-    // Se já passou do horário de fechamento hoje, começar busca amanhã
     const [horaClose, minutoClose] = horarioFechamento.split(':').map(Number);
     const agora = new Date();
     const jaPassouHorario = agora.getHours() > horaClose || (agora.getHours() === horaClose && agora.getMinutes() >= minutoClose);
@@ -89,7 +84,7 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
         dataSorteio: '',
         qtdJogos: 1,
         dezenas: 6,
-        valorPorJogo: 0,
+        valorBaseCota: 0,              // <-- agora é valor base por cota (sem comissão)
         taxaAdministrativa: FINANCIAL_RULES.AGIO_BOLOES,
         qtdCotas: 10,
         loja_id: lojaAtual?.id || ''
@@ -100,7 +95,6 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
     const [corSelecionada, setCorSelecionada] = useState('#209869');
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const { toast } = useToast();
-
     const [opcoesDatas, setOpcoesDatas] = useState<Date[]>([]);
 
     useEffect(() => {
@@ -138,30 +132,28 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
             if (formData.dezenas < selectedProduct.minDezenas) {
                 setFormData(prev => ({ ...prev, dezenas: selectedProduct.minDezenas }));
             }
-
             const proximasDatas = getNextDrawDates(selectedProduct, 30);
             setOpcoesDatas(proximasDatas);
             if (proximasDatas.length > 0) {
                 setFormData(prev => ({ ...prev, dataSorteio: formatToInputDate(proximasDatas[0]) }));
-            } else {
-                setFormData(prev => ({ ...prev, dataSorteio: '' }));
             }
         }
     }, [formData.jogo, selectedProduct]);
 
+    // Desbloqueio de etapas
     useEffect(() => {
         if (formData.jogo && formData.concurso && formData.dataSorteio) {
             if (unlockedStep < 2) setUnlockedStep(2);
         }
-        if (unlockedStep >= 2 && formData.qtdJogos > 0 && formData.dezenas > 0 && formData.qtdCotas > 0 && formData.valorPorJogo > 0) {
+        if (unlockedStep >= 2 && formData.qtdJogos > 0 && formData.dezenas > 0 && formData.qtdCotas > 0 && formData.valorBaseCota > 0) {
             if (unlockedStep < 3) setUnlockedStep(3);
         }
     }, [formData, unlockedStep]);
 
-    const valorTotalBase = formData.valorPorJogo * formData.qtdJogos;
-    const valorCotaBase = formData.qtdCotas > 0 ? valorTotalBase / formData.qtdCotas : 0;
-    const precoVendaCota = valorCotaBase * (1 + formData.taxaAdministrativa / 100);
-    const comissaoUnit = precoVendaCota - valorCotaBase;
+    // CÁLCULOS FINANCEIROS (baseado no valor por cota)
+    const valorTotalBase = formData.valorBaseCota * formData.qtdCotas;               // valor total sem comissão
+    const precoVendaCota = formData.valorBaseCota * (1 + formData.taxaAdministrativa / 100);
+    const comissaoUnit = precoVendaCota - formData.valorBaseCota;
     const arrecadacaoTotal = precoVendaCota * formData.qtdCotas;
     const lucroTotalCasa = comissaoUnit * formData.qtdCotas;
 
@@ -184,17 +176,19 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
                 dataSorteio: formData.dataSorteio,
                 qtdJogos: formData.qtdJogos,
                 dezenas: formData.dezenas,
-                valorCotaBase: valorCotaBase,
+                valorCotaBase: formData.valorBaseCota,   // valor base por cota
                 taxaAdministrativa: formData.taxaAdministrativa,
                 qtdCotas: formData.qtdCotas,
                 precoVendaCota: precoVendaCota,
                 cotasVendidas: 0,
                 status: 'disponivel' as const
             };
+
             const result = await createBolao(bolaoData);
             if (!result.success) throw new Error(result.error);
+
             const created = result.data;
-            onAdd({
+            const uiBolao = {
                 ...created,
                 id: created.id,
                 jogo: selectedProduct.nome,
@@ -204,9 +198,11 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
                 totalCotas: created.qtd_cotas,
                 cotasVendidas: created.cotas_vendidas,
                 dataSorteio: created.data_sorteio
-            });
+            };
+            onAdd(uiBolao);
             onClose();
         } catch (error: any) {
+            console.error('Erro ao lançar bolão:', error);
             toast({ message: error.message || 'Falha ao salvar o bolão.', type: 'error' });
         }
     };
@@ -226,6 +222,7 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
                 flexDirection: 'column',
                 overflow: 'hidden'
             }}>
+                {/* Header */}
                 <div className="flex justify-between items-center p-4 px-8 border-b border-border bg-bg-card z-10">
                     <h2 className="text-xl font-black text-text-primary">Novo Bolão</h2>
                     <button onClick={onClose} className="p-2 rounded-full hover:bg-surface-subtle text-text-muted transition-colors">
@@ -234,6 +231,7 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
                 </div>
 
                 <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-8 flex flex-col gap-12 scroll-smooth">
+                    {/* ETAPA 1 */}
                     <Section
                         number={1}
                         title="Configuração do Concurso"
@@ -310,26 +308,18 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
                                     {opcoesDatas.length === 0 ? (
                                         <option>Carregando datas...</option>
                                     ) : (
-                                        opcoesDatas.map((date, idx) => {
-                                            const value = formatToInputDate(date);
-                                            const label = formatDrawDateLabel(date);
-                                            return (
-                                                <option key={idx} value={value}>
-                                                    {label}
-                                                </option>
-                                            );
-                                        })
+                                        opcoesDatas.map((date, idx) => (
+                                            <option key={idx} value={formatToInputDate(date)}>
+                                                {formatDrawDateLabel(date)}
+                                            </option>
+                                        ))
                                     )}
                                 </select>
-                                {opcoesDatas.length === 0 && selectedProduct && (
-                                    <p className="text-xs text-warning mt-1">
-                                        Nenhuma data disponível para esta loteria. Verifique os dias de sorteio.
-                                    </p>
-                                )}
                             </div>
                         </div>
                     </Section>
 
+                    {/* ETAPA 2 - Simulação */}
                     <Section
                         number={2}
                         title="Simulação do Bolão"
@@ -341,7 +331,7 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
                             <div className="flex-1 p-6 rounded-3xl text-white" style={{ background: corSelecionada }}>
                                 <h4 className="text-xl font-black text-center mb-6">Parâmetros da Simulação</h4>
                                 <div className="space-y-4">
-                                    <SimulacaoGroup label="Quantidade de Jogos:">
+                                    <SimulacaoGroup label="Quantidade de Jogos (volantes):">
                                         <input type="number" className="input-simulation" value={formData.qtdJogos} onChange={e => setFormData({ ...formData, qtdJogos: parseInt(e.target.value) || 0 })} />
                                     </SimulacaoGroup>
                                     <SimulacaoGroup label="Quantidade de Dezenas:">
@@ -372,10 +362,16 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
                             <div className="flex-1 p-6 rounded-3xl text-white" style={{ background: corSelecionada }}>
                                 <h4 className="text-xl font-black text-center mb-6">Resultado da Simulação</h4>
                                 <div className="space-y-4">
-                                    <SimulacaoGroup label="Valor por Jogo (R$):">
-                                        <MoneyInput value={formData.valorPorJogo} onValueChange={v => setFormData({ ...formData, valorPorJogo: v })} className="input-simulation-money" autoFocus />
+                                    <SimulacaoGroup label="Valor base por cota (R$):">
+                                        <MoneyInput value={formData.valorBaseCota} onValueChange={v => setFormData({ ...formData, valorBaseCota: v })} className="input-simulation-money" autoFocus />
                                     </SimulacaoGroup>
-                                    <SimulacaoGroup label="Venda Total:">
+                                    <SimulacaoGroup label="Preço final por cota (R$):">
+                                        <SimulacaoDisplay value={precoVendaCota} />
+                                    </SimulacaoGroup>
+                                    <SimulacaoGroup label="Comissão por cota (R$):">
+                                        <SimulacaoDisplay value={comissaoUnit} />
+                                    </SimulacaoGroup>
+                                    <SimulacaoGroup label="Arrecadação Total:">
                                         <SimulacaoDisplay value={arrecadacaoTotal} />
                                     </SimulacaoGroup>
                                     <SimulacaoGroup label="Lucro Total (Casa):">
@@ -386,6 +382,7 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
                         </div>
                     </Section>
 
+                    {/* ETAPA 3 - Revisão Final */}
                     <Section
                         number={3}
                         title="Revisão Final"
@@ -403,16 +400,16 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
                                     <ReviewItem label="CONCURSO" value={`#${formData.concurso}`} />
                                     <ReviewItem label="SORTEIO" value={formData.dataSorteio ? new Date(formData.dataSorteio).toLocaleDateString('pt-BR') : '-'} />
                                     <ReviewItem label="ESTRUTURA" value={`${formData.qtdJogos} JOGOS | ${formData.dezenas} DEZENAS`} />
-                                    <ReviewItem label="VENDAS" value={`${formData.qtdCotas} COTAS`} />
+                                    <ReviewItem label="COTAS" value={`${formData.qtdCotas} COTAS`} />
                                 </div>
                                 <div className="mt-6 pt-4 border-t border-border flex justify-between">
                                     <div>
-                                        <p className="text-xs text-muted">VALOR TOTAL (SEM COMISSÃO)</p>
-                                        <p className="text-2xl font-black" style={{ color: corSelecionada }}>R$ {valorTotalBase.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                                        <p className="text-xs text-muted">PREÇO POR COTA (COMISSÃO INCLUÍDA)</p>
+                                        <p className="text-2xl font-black" style={{ color: corSelecionada }}>R$ {precoVendaCota.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
                                     </div>
                                     <div className="text-right">
-                                        <p className="text-xs text-muted">COMISSÃO TOTAL</p>
-                                        <p className="text-xl font-bold" style={{ color: corSelecionada }}>R$ {lucroTotalCasa.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                                        <p className="text-xs text-muted">VALOR TOTAL (ARRECADAÇÃO)</p>
+                                        <p className="text-xl font-bold" style={{ color: corSelecionada }}>R$ {arrecadacaoTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
                                     </div>
                                 </div>
                             </div>
@@ -420,8 +417,8 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
                             <div className="flex flex-col gap-4">
                                 <div className="p-4 rounded-xl bg-surface-subtle border border-border">
                                     <div className="flex justify-between">
-                                        <span className="text-xs font-bold text-muted">ARRECADAÇÃO TOTAL</span>
-                                        <span className="font-black">R$ {arrecadacaoTotal.toLocaleString('pt-BR')}</span>
+                                        <span className="text-xs font-bold text-muted">BASE TOTAL (SEM COMISSÃO)</span>
+                                        <span className="font-black">R$ {valorTotalBase.toLocaleString('pt-BR')}</span>
                                     </div>
                                     <div className="flex justify-between mt-2">
                                         <span className="text-xs font-bold text-muted">COMISSÃO TOTAL</span>
@@ -430,7 +427,7 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
                                 </div>
                                 <div className="p-4 rounded-xl bg-success/5 border border-success/20 flex gap-3">
                                     <ShieldCheck size={20} className="text-success shrink-0" />
-                                    <p className="text-xs font-semibold">Bolão configurado com taxa administrativa fixa de 35%. Pronto para lançamento.</p>
+                                    <p className="text-xs font-semibold">Bolão configurado com taxa administrativa fixa de 35%.</p>
                                 </div>
                                 <button onClick={handleLancar} className="btn w-full py-4 text-white font-black text-lg flex items-center justify-center gap-2 mt-auto transition-transform hover:scale-[1.02]" style={{ background: corSelecionada }}>
                                     <Check size={24} /> LANÇAR
@@ -495,6 +492,7 @@ export function ModalNovoBolao({ onClose, onAdd }: ModalNovoBolaoProps) {
     );
 }
 
+// Subcomponentes auxiliares
 function Section({ number, title, isLocked, isDone, children, cor }: any) {
     return (
         <div className={`relative pl-12 transition-all ${isLocked ? 'opacity-40 pointer-events-none' : ''}`}>
