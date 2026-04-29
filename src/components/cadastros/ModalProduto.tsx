@@ -4,24 +4,23 @@ import { useState, useEffect } from 'react';
 import {
     X,
     Check,
-    Clover,
-    DollarSign,
-    Star,
-    Trophy,
-    Zap,
-    Target,
-    Award,
-    Crown,
-    AlertCircle,
     Box,
-    LayoutGrid,
-    Calendar,
-    Settings
 } from 'lucide-react';
-import { Jogo, JogoSchema, DIAS_SEMANA, CategoriaProduto } from '@/types/produto';
+import { Jogo, JogoSchema, CategoriaProduto } from '@/types/produto';
 import { LOTERIAS_OFFICIAL } from '@/data/loterias-config';
 import { LogoLoteria } from '@/components/ui/LogoLoteria';
 import { z } from 'zod';
+
+// Array completo de dias da semana (incluindo domingo)
+const DIAS_SEMANA_COMPLETO = [
+    { id: 0, label: 'Dom' },
+    { id: 1, label: 'Seg' },
+    { id: 2, label: 'Ter' },
+    { id: 3, label: 'Qua' },
+    { id: 4, label: 'Qui' },
+    { id: 5, label: 'Sex' },
+    { id: 6, label: 'Sáb' }
+];
 
 interface ModalProdutoProps {
     onClose: () => void;
@@ -33,7 +32,6 @@ interface ModalProdutoProps {
 export function ModalProduto({ onClose, onSave, produtoEditar, categorias }: ModalProdutoProps) {
     const defaultCor = '#64748b'; // Slate 500
 
-    // Encontrar categoria inicial (Loterias por padrão)
     const catLoterias = categorias.find(c => c.nome === 'Loterias');
     const defaultCatId = catLoterias?.id;
 
@@ -55,7 +53,6 @@ export function ModalProduto({ onClose, onSave, produtoEditar, categorias }: Mod
 
     const [errors, setErrors] = useState<Record<string, string>>({});
 
-    // Helper para saber se é loteria
     const isLoteria = (() => {
         const cat = categorias.find(c => c.id === formData.categoriaId);
         return cat?.nome === 'Loterias';
@@ -65,33 +62,21 @@ export function ModalProduto({ onClose, onSave, produtoEditar, categorias }: Mod
         if (produtoEditar) {
             setFormData(produtoEditar);
         } else if (defaultCatId && !formData.categoriaId) {
-            // Se for novo, garante categoria setada
             setFormData(prev => ({ ...prev, categoriaId: defaultCatId }));
         }
     }, [produtoEditar, defaultCatId]);
 
     const handleSave = () => {
         try {
-            // Validação customizada baseada na categoria
-            // Se não for loteria, limpar campos de loteria para não falhar validação ou salvar lixo
             const dataToSave = { ...formData };
-
             if (!isLoteria) {
-                // Preencher defaults para passar no Schema (que exige minDezenas >= 1)
-                // O ideal seria refatorar o Schema para usar discriminate union, mas por agora vamos ajustar os dados
                 dataToSave.minDezenas = 1;
                 dataToSave.maxDezenas = 1;
-                dataToSave.diasSorteio = [1]; // Fake
+                dataToSave.diasSorteio = [1]; // valor fictício
                 dataToSave.horarioFechamento = '23:59';
             }
-
             const data = JogoSchema.parse(dataToSave);
-
-            // Restaurar dados reais se o schema for muito rígido
-            // Mas no nosso caso, queremos salvar isso mesmo.
-
             onSave(data);
-            // Close é chamado pelo pai após sucesso
         } catch (error: any) {
             if (error instanceof z.ZodError) {
                 const newErrors: Record<string, string> = {};
@@ -159,8 +144,7 @@ export function ModalProduto({ onClose, onSave, produtoEditar, categorias }: Mod
                 </div>
 
                 <div style={{ padding: '2rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-
-                    {/* 1. Seleção de Categoria */}
+                    {/* Categoria */}
                     <div className="form-group">
                         <label className="text-xs font-bold uppercase text-text-muted mb-2 block">Categoria do Produto</label>
                         <div className="flex gap-2 overflow-x-auto pb-2">
@@ -176,7 +160,6 @@ export function ModalProduto({ onClose, onSave, produtoEditar, categorias }: Mod
                         </div>
                     </div>
 
-                    {/* 2. Campos Específicos de LOTERIA */}
                     {isLoteria ? (
                         <>
                             <div className="section-group">
@@ -233,7 +216,7 @@ export function ModalProduto({ onClose, onSave, produtoEditar, categorias }: Mod
                                 <div className="form-group mb-4">
                                     <label>Dias de Sorteio</label>
                                     <div className="flex gap-2 flex-wrap">
-                                        {DIAS_SEMANA.map(dia => {
+                                        {DIAS_SEMANA_COMPLETO.map(dia => {
                                             const isSelected = formData.diasSorteio?.includes(dia.id);
                                             return (
                                                 <button
@@ -268,7 +251,6 @@ export function ModalProduto({ onClose, onSave, produtoEditar, categorias }: Mod
                             </div>
                         </>
                     ) : (
-                        /* 3. Campos para OUTROS (Raspadinhas, Físicos) */
                         <>
                             <div className="section-group">
                                 <label className="section-label">Detalhes do Produto</label>
@@ -332,7 +314,6 @@ export function ModalProduto({ onClose, onSave, produtoEditar, categorias }: Mod
                             </div>
                         </>
                     )}
-
                 </div>
 
                 <div style={{
@@ -381,6 +362,3 @@ export function ModalProduto({ onClose, onSave, produtoEditar, categorias }: Mod
         </div>
     );
 }
-
-
-
