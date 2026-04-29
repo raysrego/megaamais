@@ -24,11 +24,11 @@ export interface CaixaBolaoSessao {
 
 export interface VendaBolao {
     id: number;
-    vendedor_id: string;
-    vendedor_nome: string;
+    usuario_id: string;
+    usuario_nome: string;
     valor_total: number;
     metodo_pagamento: 'dinheiro' | 'pix';
-    data_venda: string;
+    created_at: string;
 }
 
 export function useCaixaBolao() {
@@ -97,24 +97,24 @@ export function useCaixaBolao() {
             .from('vendas_boloes')
             .select(`
                 id,
-                vendedor_id,
-                vendedor:usuarios(nome_completo),
+                usuario_id,
+                usuario:usuarios(nome),
                 valor_total,
                 metodo_pagamento,
-                data_venda
+                created_at
             `)
             .eq('caixa_bolao_sessao_id', sessaoId)
-            .order('data_venda', { ascending: false });
+            .order('created_at', { ascending: false });
 
         if (error) throw error;
 
         return data.map((v: any) => ({
             id: v.id,
-            vendedor_id: v.vendedor_id,
-            vendedor_nome: v.vendedor?.nome_completo || 'Desconhecido',
+            usuario_id: v.usuario_id,
+            usuario_nome: v.usuario?.nome || 'Desconhecido',
             valor_total: v.valor_total,
             metodo_pagamento: v.metodo_pagamento,
-            data_venda: v.data_venda
+            created_at: v.created_at
         }));
     };
 
@@ -146,7 +146,6 @@ export function useCaixaBolao() {
         pixInformado: number;
         observacoes?: string;
     }) => {
-        // Calcular totais
         const totais = await calcularTotaisSessao(params.sessaoId);
 
         const { data, error } = await supabase
@@ -174,15 +173,23 @@ export function useCaixaBolao() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return [];
 
+        // Obtém a data atual no formato YYYY-MM-DD (para comparar com created_at)
+        const hoje = new Date().toISOString().split('T')[0];
+
         const { data, error } = await supabase
             .from('vendas_boloes')
             .select('*')
-            .eq('vendedor_id', user.id)
-            .gte('data_venda', new Date().toISOString().split('T')[0]) // Vendas de hoje
-            .order('data_venda', { ascending: false });
+            .eq('usuario_id', user.id)                          // ✅ campo correto
+            .gte('created_at', `${hoje}T00:00:00Z`)             // ✅ vendas a partir de hoje
+            .order('created_at', { ascending: false });         // ✅ ordenação correta
 
         if (error) throw error;
         return data;
+    };
+
+    // Função de atualização manual
+    const refresh = async () => {
+        await buscarSessaoAtiva();
     };
 
     return {
@@ -193,6 +200,6 @@ export function useCaixaBolao() {
         calcularTotaisSessao,
         fecharCaixaBolao,
         buscarMinhasVendas,
-        refresh: buscarSessaoAtiva
+        refresh
     };
 }
