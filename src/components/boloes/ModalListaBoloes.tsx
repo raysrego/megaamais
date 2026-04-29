@@ -28,6 +28,7 @@ import { ModalVendaLoteBolao } from './ModalVendaLoteBolao';
 import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmContext';
 import { FINANCIAL_RULES } from '@/lib/financial-constants';
+import { getProdutos } from '@/actions/boloes';
 
 interface ModalListaBoloesProps {
     jogo: string;
@@ -41,7 +42,7 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
     const { toast } = useToast();
     const confirm = useConfirm();
 
-    const [filter, setFilter] = useState('todos'); // todos, disponiveis, finalizados
+    const [filter, setFilter] = useState('todos');
     const [boloes, setBoloes] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -61,16 +62,15 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
     const [cotaToSell, setCotaToSell] = useState<any | null>(null);
     const [bolaoForBulkSale, setBolaoForBulkSale] = useState<any | null>(null);
 
-    // Para obter o produto selecionado (necessário para o select de dezenas na edição)
+    // Para o select de dezenas na edição
     const [produtos, setProdutos] = useState<any[]>([]);
     useEffect(() => {
         const loadProdutos = async () => {
             try {
-                const { getProdutos } = await import('@/actions/boloes');
                 const data = await getProdutos(lojaSelecionada?.id);
                 setProdutos(data);
             } catch (error) {
-                console.error('Erro ao carregar produtos para edição:', error);
+                console.error('Erro ao carregar produtos:', error);
             }
         };
         loadProdutos();
@@ -87,7 +87,7 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                 const data = await getBoloes({ lojaId: lojaSelecionada.id });
                 setBoloes(data.filter(b => b.jogo === jogo));
             } catch (error) {
-                console.error('Falha ao carregar bolões para o modal', error);
+                console.error('Falha ao carregar bolões:', error);
             } finally {
                 setIsLoading(false);
             }
@@ -99,7 +99,7 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
         e.stopPropagation();
         const confirmed = await confirm({
             title: 'Excluir Concurso',
-            description: 'Deseja realmente excluir este concurso e todas as suas cotas? Esta ação não pode ser desfeita.',
+            description: 'Deseja realmente excluir este bolão e todas as suas cotas? Esta ação não pode ser desfeita.',
             variant: 'danger',
             confirmLabel: 'Sim, Excluir'
         });
@@ -162,7 +162,7 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
         try {
             const result = await getCotasBolao(bolao.id);
             if (result.error) {
-                setCotasError(`Erro Supabase: ${result.error}`);
+                setCotasError(`Erro: ${result.error}`);
                 setCotas([]);
             } else {
                 setCotas(result.data);
@@ -276,7 +276,7 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                             Loterias CAIXA
                         </div>
                         <h2 style={{ fontSize: '1.75rem', fontWeight: 800, margin: 0 }}>{jogo}</h2>
-                        <p style={{ opacity: 0.9, fontSize: '0.9rem', marginTop: '0.25rem' }}>Confira todas as cotas e concursos ativos para esta modalidade</p>
+                        <p style={{ opacity: 0.9, fontSize: '0.9rem', marginTop: '0.25rem' }}>Confira todas as cotas e concursos ativos</p>
                     </div>
                     <button onClick={onClose} style={{
                         background: 'rgba(0,0,0,0.2)',
@@ -294,7 +294,7 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                     </button>
                 </div>
 
-                {/* Seletor de filial (visível apenas para admin ou multi‑loja) */}
+                {/* Seletor de filial (visível apenas para quem pode gerenciar múltiplas lojas) */}
                 {(isAdmin || lojasDisponiveis.length > 1) && (
                     <div className="p-4 px-6 border-b border-border bg-bg-card">
                         <div className="flex items-center gap-3">
@@ -339,7 +339,7 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                     </div>
                 </div>
 
-                {/* Conteúdo principal (lista de bolões ou gestão de cotas) */}
+                {/* Conteúdo principal (lista de bolões ou gerenciamento de cotas) */}
                 <div style={{ flex: 1, overflowY: 'auto', background: 'var(--bg-dark)', position: 'relative' }}>
                     {viewMode === 'list' && (
                         isLoading ? (
@@ -503,7 +503,7 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                         ) : (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '3rem', color: 'var(--text-muted)' }}>
                                 <Search size={48} style={{ marginBottom: '1rem', opacity: 0.1 }} />
-                                <p>Nenhum bolão encontrado para esta filial e concurso.</p>
+                                <p>Nenhum bolão encontrado para esta filial.</p>
                             </div>
                         )
                     )}
@@ -659,7 +659,7 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                     <span>Exibindo {filteredBoloes.length} itens</span>
                 </div>
 
-                {/* Modal de edição (completo) */}
+                {/* Modal de edição completo */}
                 {editingBolao && (
                     <div style={{
                         position: 'fixed',
