@@ -1,7 +1,9 @@
+// src/actions/boloes.ts
 'use server';
 
 import { createClient } from '@/lib/supabase-server';
 import { revalidatePath } from 'next/cache';
+import { Bolao, BolaoRow } from '@/types/bolao';
 
 // ============================================================
 // UTILITÁRIOS
@@ -91,8 +93,6 @@ export async function getProdutos(lojaId?: string) {
 // BOLÕES
 // ============================================================
 
-// app/actions/boloes.ts (parte da função getBoloes)
-
 export async function getBoloes(options?: { produtoId?: number; lojaId?: string | null; limit?: number; includeFinalizados?: boolean }) {
     const supabase = await createClient();
     let query = supabase
@@ -133,7 +133,7 @@ export async function getBoloes(options?: { produtoId?: number; lojaId?: string 
         concurso: item.concurso,
         dataSorteio: item.data_sorteio,
         qtdJogos: item.qtd_jogos,
-        dezenas: item.dezenas,               // ← ESSENCIAL
+        dezenas: item.dezenas,
         valorCotaBase: Number(item.valor_cota_base),
         taxaAdministrativa: Number(item.taxa_administrativa),
         qtdCotas: item.qtd_cotas,
@@ -147,11 +147,12 @@ export async function getBoloes(options?: { produtoId?: number; lojaId?: string 
     }));
 }
 
+// Função createBolao com validação de duplicidade REMOVIDA
 export async function createBolao(bolao: Bolao & { lojaId: string }) {
     const supabase = await createClient();
 
-    // Removida a verificação de duplicidade para permitir múltiplos bolões com o mesmo concurso
-    // (inclusive mesmo produto e loja)
+    // VALIDAÇÃO DE DUPLICIDADE REMOVIDA – permite múltiplos bolões com mesmo concurso
+    // (inclusive para o mesmo produto e loja)
 
     const { data, error } = await supabase
         .from('boloes')
@@ -179,7 +180,6 @@ export async function createBolao(bolao: Bolao & { lojaId: string }) {
 
     const newBolao = data;
 
-    // Gerar cotas individuais
     const cotasToInsert = Array.from({ length: bolao.qtdCotas }, (_, i) => ({
         bolao_id: newBolao.id,
         uid: generateCotaUid(newBolao.id, i),
@@ -205,8 +205,19 @@ export async function getBolaoById(id: number) {
         .from('boloes')
         .select(`
             *,
-            produtos ( nome, cor, slug, icone, horario_fechamento ),
-            cotas_boloes ( id, uid, status, data_venda )
+            produtos (
+                nome,
+                cor,
+                slug,
+                icone,
+                horario_fechamento
+            ),
+            cotas_boloes (
+                id,
+                uid,
+                status,
+                data_venda
+            )
         `)
         .eq('id', id)
         .single();
@@ -256,7 +267,7 @@ export async function updateBolao(id: number, data: any) {
         .single();
     if (fetchError) throw fetchError;
 
-    if (bolaoAtual.cotas_vendidas > 0) {
+    if (bolaoAtual.cotasVendidas > 0) {
         const { data: updated, error } = await supabase
             .from('boloes')
             .update({ status: data.status })
@@ -295,7 +306,7 @@ export async function deleteBolao(id: number) {
         .eq('id', id)
         .single();
     if (fetchError) throw fetchError;
-    if (bolao.cotas_vendidas > 0) throw new Error('Não é possível excluir um bolão com vendas.');
+    if (bolao.cotasVendidas > 0) throw new Error('Não é possível excluir um bolão com vendas.');
     const { error } = await supabase.from('boloes').delete().eq('id', id);
     if (error) throw error;
     return true;
@@ -348,7 +359,7 @@ export async function processarEncalheBolao(bolaoId: number) {
 
 export async function registrarVendaBolao(params: {
     bolaoId: number;
-    sessaoBolaoId?: number | null;   // agora aceita null ou undefined
+    sessaoBolaoId: number;
     quantidadeCotas: number;
     valorTotal: number;
     metodoPagamento: 'dinheiro' | 'pix' | 'cartao_debito' | 'cartao_credito';
@@ -360,10 +371,9 @@ export async function registrarVendaBolao(params: {
     if (!user) return { success: false, error: 'Usuário não autenticado' };
 
     try {
-        // Envia null se não houver sessão
         const { data, error } = await supabase.rpc('vender_cotas_bolao', {
             p_bolao_id: params.bolaoId,
-            p_sessao_bolao_id: params.sessaoBolaoId ?? null,  // converte undefined/null para null
+            p_sessao_bolao_id: params.sessaoBolaoId,
             p_usuario_id: user.id,
             p_quantidade: params.quantidadeCotas,
             p_valor_total: params.valorTotal,
