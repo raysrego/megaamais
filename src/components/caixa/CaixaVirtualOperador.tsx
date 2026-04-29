@@ -110,7 +110,7 @@ export function CaixaVirtualOperador() {
                                         Venda #{venda.id.toString().padStart(4, '0')}
                                     </p>
                                     <p className="text-xs text-muted">
-                                        {new Date(venda.data_venda).toLocaleString('pt-BR')}
+                                        {new Date(venda.created_at).toLocaleString('pt-BR')}
                                     </p>
                                 </div>
                                 <div className="text-right">
