@@ -147,20 +147,11 @@ export async function getBoloes(options?: { produtoId?: number; lojaId?: string 
     }));
 }
 
-export async function createBolao(bolao: { produtoId: number; lojaId: string; concurso: string; dataSorteio: string; qtdJogos: number; dezenas: number; valorCotaBase: number; taxaAdministrativa: number; qtdCotas: number; precoVendaCota: number; cotasVendidas: number; status: string }) {
+export async function createBolao(bolao: Bolao & { lojaId: string }) {
     const supabase = await createClient();
 
-    // Validar duplicidade
-    const { data: existing } = await supabase
-        .from('boloes')
-        .select('id')
-        .eq('produto_id', bolao.produtoId)
-        .eq('concurso', bolao.concurso)
-        .eq('loja_id', bolao.lojaId)
-        .neq('status', 'cancelado')
-        .maybeSingle();
-
-    if (existing) return { success: false, error: 'Já existe um bolão ativo para este concurso e produto.' };
+    // Removida a verificação de duplicidade para permitir múltiplos bolões com o mesmo concurso
+    // (inclusive mesmo produto e loja)
 
     const { data, error } = await supabase
         .from('boloes')
@@ -181,17 +172,26 @@ export async function createBolao(bolao: { produtoId: number; lojaId: string; co
         .select()
         .single();
 
-    if (error) return { success: false, error: `Falha ao criar bolão: ${error.message}` };
+    if (error) {
+        console.error('Error creating bolao:', error);
+        return { success: false, error: `Falha ao criar bolão: ${error.message}` };
+    }
 
     const newBolao = data;
+
+    // Gerar cotas individuais
     const cotasToInsert = Array.from({ length: bolao.qtdCotas }, (_, i) => ({
         bolao_id: newBolao.id,
         uid: generateCotaUid(newBolao.id, i),
         status: 'disponivel'
     }));
 
-    const { error: errCotas } = await supabase.from('cotas_boloes').insert(cotasToInsert);
+    const { error: errCotas } = await supabase
+        .from('cotas_boloes')
+        .insert(cotasToInsert);
+
     if (errCotas) {
+        console.error('Error creating individual cotas:', errCotas);
         await supabase.from('boloes').delete().eq('id', newBolao.id);
         return { success: false, error: `Falha ao criar cotas: ${errCotas.message}` };
     }
