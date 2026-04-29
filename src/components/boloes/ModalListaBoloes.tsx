@@ -44,9 +44,8 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
     const [isLoadingCotas, setIsLoadingCotas] = useState(false);
     const [cotasError, setCotasError] = useState<string | null>(null);
 
-    // 🔧 CORREÇÃO: usar as propriedades corretas do usePerfil
     const { podeGerenciarCaixaBolao: canManageBoloes, perfil, isAdmin } = usePerfil();
-    const lojaId = perfil?.loja_id; // ID da loja do operador (pode ser null para admin)
+    const lojaId = perfil?.loja_id;
 
     const { toast } = useToast();
     const confirm = useConfirm();
@@ -57,7 +56,6 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
     const [cotaToSell, setCotaToSell] = useState<any | null>(null);
     const [bolaoForBulkSale, setBolaoForBulkSale] = useState<any | null>(null);
 
-    // Carregar produtos para o select de dezenas na edição
     const [produtos, setProdutos] = useState<any[]>([]);
     useEffect(() => {
         const loadProdutos = async () => {
@@ -77,7 +75,6 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
     useEffect(() => {
         const load = async () => {
             try {
-                // Para admin: não passa lojaId (vê todas); para operador: passa lojaId
                 const filterLojaId = isAdmin ? undefined : lojaId;
                 const data = await getBoloes({ lojaId: filterLojaId });
                 setBoloes(data.filter(b => b.jogo === jogo));
@@ -87,7 +84,6 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                 setIsLoading(false);
             }
         };
-        // Aguarda ter o ID da loja (para operadores) ou admin definido
         if (isAdmin || lojaId) {
             load();
         } else if (!isAdmin && !lojaId) {
@@ -180,6 +176,21 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
         }
     };
 
+    // 🔄 Função auxiliar para atualizar dados após qualquer venda
+    const refreshAfterSale = async (bolaoId: number) => {
+        try {
+            const filterLojaId = isAdmin ? undefined : lojaId;
+            const updatedBoloes = await getBoloes({ lojaId: filterLojaId });
+            setBoloes(updatedBoloes.filter(b => b.jogo === jogo));
+            if (viewMode === 'cotas' && selectedBolao?.id === bolaoId) {
+                const cotasResult = await getCotasBolao(bolaoId);
+                setCotas(cotasResult.data);
+            }
+        } catch (error) {
+            console.error('Erro ao atualizar dados após venda:', error);
+        }
+    };
+
     // Venda unitária usando a action oficial
     const sellCota = async (cota: any, bolao: any) => {
         setSellingId(cota.id);
@@ -195,9 +206,13 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
 
             if (!result.success) throw new Error(result.error);
 
+            // Atualiza estado local
             setCotas(prev => prev.map(c => c.id === cota.id ? { ...c, status: 'vendida' } : c));
             setBoloes(prev => prev.map(b => b.id === bolao.id ? { ...b, cotasVendidas: b.cotasVendidas + 1 } : b));
             toast({ message: 'Cota vendida com sucesso!', type: 'success' });
+
+            // 🔔 Dispara evento para atualizar o Caixa Bolão (totais)
+            window.dispatchEvent(new CustomEvent('vendaBolaoRealizada'));
         } catch (error: any) {
             toast({ message: error.message, type: 'error' });
         } finally {
@@ -217,17 +232,11 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
         const bolaoId = bolaoForBulkSale.id;
         setBolaoForBulkSale(null);
 
-        try {
-            const filterLojaId = isAdmin ? undefined : lojaId;
-            const updatedBoloes = await getBoloes({ lojaId: filterLojaId });
-            setBoloes(updatedBoloes.filter(b => b.jogo === jogo));
-            if (viewMode === 'cotas' && selectedBolao?.id === bolaoId) {
-                const cotasResult = await getCotasBolao(bolaoId);
-                setCotas(cotasResult.data);
-            }
-        } catch (error) {
-            console.error('Erro ao atualizar dados após venda em lote');
-        }
+        // 🔔 Dispara evento para atualizar o Caixa Bolão (totais)
+        window.dispatchEvent(new CustomEvent('vendaBolaoRealizada'));
+
+        // Atualiza os dados da lista e das cotas
+        await refreshAfterSale(bolaoId);
     };
 
     const filteredBoloes = boloes.filter(b => {
@@ -508,10 +517,20 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
 
                 {/* Modais de venda unitária e lote */}
                 {cotaToSell && selectedBolao && (
-                    <ModalVendaBolao cota={cotaToSell} bolao={selectedBolao} onClose={() => setCotaToSell(null)} onSuccess={handleSellSuccess} />
+                    <ModalVendaBolao 
+                        key={cotaToSell.id} 
+                        cota={cotaToSell} 
+                        bolao={selectedBolao} 
+                        onClose={() => setCotaToSell(null)} 
+                        onSuccess={handleSellSuccess} 
+                    />
                 )}
                 {bolaoForBulkSale && (
-                    <ModalVendaLoteBolao bolao={bolaoForBulkSale} onClose={() => setBolaoForBulkSale(null)} onSuccess={handleBulkSellSuccess} />
+                    <ModalVendaLoteBolao 
+                        bolao={bolaoForBulkSale} 
+                        onClose={() => setBolaoForBulkSale(null)} 
+                        onSuccess={handleBulkSellSuccess} 
+                    />
                 )}
             </div>
         </div>
