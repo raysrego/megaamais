@@ -99,33 +99,41 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
     }, [jogo, lojaSelecionada]);
 
     // Excluir bolão (com recarga da lista)
-    const handleDeleteBolao = async (e: React.MouseEvent, id: number) => {
-        e.stopPropagation();
-        const confirmed = await confirm({
-            title: 'Excluir Concurso',
-            description: 'Deseja realmente excluir este bolão e todas as suas cotas? Esta ação não pode ser desfeita.',
-            variant: 'danger',
-            confirmLabel: 'Sim, Excluir'
-        });
-        if (!confirmed) return;
+   const handleDeleteBolao = async (e: React.MouseEvent, id: number) => {
+    e.stopPropagation();
+    const confirmed = await confirm({
+        title: 'Excluir Concurso',
+        description: 'Deseja realmente excluir este bolão e todas as suas cotas? Esta ação não pode ser desfeita.',
+        variant: 'danger',
+        confirmLabel: 'Sim, Excluir'
+    });
+    if (!confirmed) return;
 
-        setIsDeleting(id);
-        try {
-            const result = await deleteBolao(id);
-            if (result.success) {
-                await carregarBoloes(); // recarrega a lista do backend
-                toast({ message: 'Bolão excluído com sucesso!', type: 'success' });
-            } else {
-                throw new Error(result.error || 'Erro desconhecido');
-            }
-        } catch (error: any) {
-            console.error('Erro ao excluir bolão:', error);
-            toast({ message: 'Falha ao excluir bolão: ' + error.message, type: 'error' });
-            await carregarBoloes(); // recarrega para garantir consistência
-        } finally {
-            setIsDeleting(null);
+    // 1. Atualização otimista: remove o item da lista imediatamente
+    const bolaoRemovido = boloes.find(b => b.id === id);
+    if (bolaoRemovido) {
+        setBoloes(prev => prev.filter(b => b.id !== id));
+    }
+
+    setIsDeleting(id);
+    try {
+        const result = await deleteBolao(id);
+        if (result.success) {
+            toast({ message: 'Bolão excluído com sucesso!', type: 'success' });
+            // Recarrega a lista para garantir consistência (opcional mas recomendado)
+            await carregarBoloes();
+        } else {
+            throw new Error(result.error || 'Erro desconhecido');
         }
-    };
+    } catch (error: any) {
+        console.error('Erro ao excluir bolão:', error);
+        toast({ message: 'Falha ao excluir bolão: ' + error.message, type: 'error' });
+        // Se falhou, recarrega a lista para restaurar o item removido otimistamente
+        await carregarBoloes();
+    } finally {
+        setIsDeleting(null);
+    }
+};
 
     const handleEditBolao = (e: React.MouseEvent, bolao: any) => {
         e.stopPropagation();
