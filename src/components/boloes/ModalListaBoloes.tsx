@@ -109,26 +109,25 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
     });
     if (!confirmed) return;
 
-    // 1. Atualização otimista: remove o item da lista imediatamente
-    const bolaoRemovido = boloes.find(b => b.id === id);
-    if (bolaoRemovido) {
-        setBoloes(prev => prev.filter(b => b.id !== id));
-    }
+    // 1. Remove o item da UI imediatamente (otimista)
+    setBoloes(prev => prev.filter(b => b.id !== id));
 
     setIsDeleting(id);
     try {
         const result = await deleteBolao(id);
         if (result.success) {
             toast({ message: 'Bolão excluído com sucesso!', type: 'success' });
-            // Recarrega a lista para garantir consistência (opcional mas recomendado)
+            // 2. Recarrega a lista para garantir consistência com o servidor
             await carregarBoloes();
         } else {
+            // Se a exclusão falhou, recarrega para restaurar o item removido
+            await carregarBoloes();
             throw new Error(result.error || 'Erro desconhecido');
         }
     } catch (error: any) {
         console.error('Erro ao excluir bolão:', error);
         toast({ message: 'Falha ao excluir bolão: ' + error.message, type: 'error' });
-        // Se falhou, recarrega a lista para restaurar o item removido otimistamente
+        // Recarrega novamente para garantir consistência
         await carregarBoloes();
     } finally {
         setIsDeleting(null);
