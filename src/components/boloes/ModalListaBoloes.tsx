@@ -97,36 +97,37 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
         carregarBoloes();
     }, [jogo, lojaSelecionada]);
 
-    const handleDeleteBolao = async (e: React.MouseEvent, id: number) => {
-        e.stopPropagation();
-        const confirmed = await confirm({
-            title: 'Excluir Concurso',
-            description: 'Deseja realmente excluir este bolão e todas as suas cotas? Esta ação não pode ser desfeita.',
-            variant: 'danger',
-            confirmLabel: 'Sim, Excluir'
-        });
-        if (!confirmed) return;
+   const handleDeleteBolao = async (e: React.MouseEvent, id: number) => {
+    e.stopPropagation();
+    const confirmed = await confirm({
+        title: 'Excluir Concurso',
+        description: 'Deseja realmente excluir este bolão e todas as suas cotas? Esta ação não pode ser desfeita.',
+        variant: 'danger',
+        confirmLabel: 'Sim, Excluir'
+    });
+    if (!confirmed) return;
 
-        setIsDeleting(id);
-        try {
-            const result = await deleteBolao(id);
-            // Se a exclusão retornar um objeto com sucesso (opcional, adapte se necessário)
-            if (result === true || result?.success !== false) {
-                // Recarrega a lista do backend para garantir consistência
-                await carregarBoloes();
-                toast({ message: 'Bolão excluído com sucesso!', type: 'success' });
-            } else {
-                throw new Error(result?.error || 'Erro desconhecido');
-            }
-        } catch (error: any) {
-            console.error('Erro ao excluir bolão:', error);
-            toast({ message: 'Falha ao excluir bolão: ' + error.message, type: 'error' });
-            // Em caso de erro, recarrega a lista para corrigir possível estado inconsistente
-            await carregarBoloes();
-        } finally {
-            setIsDeleting(null);
+    setIsDeleting(id);
+    try {
+        const result = await deleteBolao(id);
+        // Verifica se o resultado é booleano ou objeto com propriedade success
+        const isSuccess = typeof result === 'boolean' ? result : result?.success === true;
+        if (isSuccess) {
+            await carregarBoloes(); // recarrega a lista do backend
+            toast({ message: 'Bolão excluído com sucesso!', type: 'success' });
+        } else {
+            const errorMsg = typeof result === 'object' && result?.error ? result.error : 'Erro desconhecido';
+            throw new Error(errorMsg);
         }
-    };
+    } catch (error: any) {
+        console.error('Erro ao excluir bolão:', error);
+        toast({ message: 'Falha ao excluir bolão: ' + error.message, type: 'error' });
+        // Recarrega a lista para garantir consistência mesmo em caso de erro
+        await carregarBoloes();
+    } finally {
+        setIsDeleting(null);
+    }
+};
 
     const handleEditBolao = (e: React.MouseEvent, bolao: any) => {
         e.stopPropagation();
