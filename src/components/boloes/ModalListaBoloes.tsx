@@ -78,21 +78,23 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
 
     const selectedProduct = produtos.find(p => p.nome === jogo);
 
-    // Carregar bolões com filtro da loja selecionada
+    // Função para carregar a lista de bolões (usada tanto na inicialização quanto após exclusões)
+    const carregarBoloes = async () => {
+        if (!lojaSelecionada?.id) return;
+        setIsLoading(true);
+        try {
+            const data = await getBoloes({ lojaId: lojaSelecionada.id });
+            setBoloes(data.filter(b => b.jogo === jogo));
+        } catch (error) {
+            console.error('Falha ao carregar bolões:', error);
+            toast({ message: 'Erro ao carregar bolões. Tente novamente.', type: 'error' });
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     useEffect(() => {
-        const load = async () => {
-            if (!lojaSelecionada?.id) return;
-            setIsLoading(true);
-            try {
-                const data = await getBoloes({ lojaId: lojaSelecionada.id });
-                setBoloes(data.filter(b => b.jogo === jogo));
-            } catch (error) {
-                console.error('Falha ao carregar bolões:', error);
-            } finally {
-                setIsLoading(false);
-            }
-        };
-        load();
+        carregarBoloes();
     }, [jogo, lojaSelecionada]);
 
     const handleDeleteBolao = async (e: React.MouseEvent, id: number) => {
@@ -107,11 +109,20 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
 
         setIsDeleting(id);
         try {
-            await deleteBolao(id);
-            setBoloes(prev => prev.filter(b => b.id !== id));
-            toast({ message: 'Bolão excluído com sucesso!', type: 'success' });
+            const result = await deleteBolao(id);
+            // Se a exclusão retornar um objeto com sucesso (opcional, adapte se necessário)
+            if (result === true || result?.success !== false) {
+                // Recarrega a lista do backend para garantir consistência
+                await carregarBoloes();
+                toast({ message: 'Bolão excluído com sucesso!', type: 'success' });
+            } else {
+                throw new Error(result?.error || 'Erro desconhecido');
+            }
         } catch (error: any) {
+            console.error('Erro ao excluir bolão:', error);
             toast({ message: 'Falha ao excluir bolão: ' + error.message, type: 'error' });
+            // Em caso de erro, recarrega a lista para corrigir possível estado inconsistente
+            await carregarBoloes();
         } finally {
             setIsDeleting(null);
         }
@@ -146,6 +157,7 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
 
         try {
             await updateBolao(editingBolao.id, dadosAtualizados);
+            // Atualiza localmente o bolão editado
             setBoloes(prev => prev.map(b => b.id === editingBolao.id ? { ...b, ...dadosAtualizados } : b));
             setEditingBolao(null);
             toast({ message: 'Alterações salvas com sucesso!', type: 'success' });
@@ -192,6 +204,7 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                 metodo: 'dinheiro',
                 cotaId: cotaId
             });
+            // Atualiza cota e contador de vendas localmente
             setCotas(prev => prev.map(c => c.id === cotaId ? { ...c, status: 'vendida' } : c));
             setBoloes(prev => prev.map(b => b.id === selectedBolao.id ? { ...b, cotasVendidas: b.cotasVendidas + 1 } : b));
             toast({ message: 'Cota vendida com sucesso!', type: 'success' });
@@ -207,8 +220,8 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
         const bolaoId = bolaoForBulkSale.id;
         setBolaoForBulkSale(null);
         try {
-            const updatedData = await getBoloes({ lojaId: lojaSelecionada?.id });
-            setBoloes(updatedData.filter(b => b.jogo === jogo));
+            // Recarrega lista de bolões e também as cotas se necessário
+            await carregarBoloes();
             if (viewMode === 'cotas' && selectedBolao?.id === bolaoId) {
                 const cotasResult = await getCotasBolao(bolaoId);
                 setCotas(cotasResult.data);
@@ -294,7 +307,7 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                     </button>
                 </div>
 
-                {/* Seletor de filial (visível apenas para quem pode gerenciar múltiplas lojas) */}
+                {/* Seletor de filial */}
                 {(isAdmin || lojasDisponiveis.length > 1) && (
                     <div className="p-4 px-6 border-b border-border bg-bg-card">
                         <div className="flex items-center gap-3">
@@ -315,7 +328,7 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                     </div>
                 )}
 
-                {/* Filtros de status e busca */}
+                {/* Filtros */}
                 <div className="p-4 px-6 border-b border-border bg-bg-card flex items-center gap-4 overflow-x-auto">
                     {['todos', 'disponiveis', 'finalizados'].map(f => (
                         <button
@@ -339,7 +352,7 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                     </div>
                 </div>
 
-                {/* Conteúdo principal (lista de bolões ou gerenciamento de cotas) */}
+                {/* Conteúdo principal */}
                 <div style={{ flex: 1, overflowY: 'auto', background: 'var(--bg-dark)', position: 'relative' }}>
                     {viewMode === 'list' && (
                         isLoading ? (
@@ -426,6 +439,7 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                                                             <button
                                                                 onClick={(e) => { e.stopPropagation(); setBolaoForBulkSale(bolao); }}
                                                                 title="Venda em Lote"
+                                                                className="btn-icon"
                                                                 style={{
                                                                     width: 32,
                                                                     height: 32,
@@ -444,6 +458,7 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                                                             <button
                                                                 onClick={(e) => handleEditBolao(e, bolao)}
                                                                 title="Editar Concurso"
+                                                                className="btn-icon"
                                                                 style={{
                                                                     width: 32,
                                                                     height: 32,
@@ -463,6 +478,7 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                                                                 onClick={(e) => handleDeleteBolao(e, bolao.id)}
                                                                 disabled={isDeleting === bolao.id}
                                                                 title="Excluir Concurso"
+                                                                className="btn-icon"
                                                                 style={{
                                                                     width: 32,
                                                                     height: 32,
@@ -659,7 +675,7 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                     <span>Exibindo {filteredBoloes.length} itens</span>
                 </div>
 
-                {/* Modal de edição completo */}
+                {/* Modal de edição */}
                 {editingBolao && (
                     <div style={{
                         position: 'fixed',
@@ -762,7 +778,7 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                     </div>
                 )}
 
-                {/* Modal de venda unitária */}
+                {/* Modais de venda */}
                 {cotaToSell && selectedBolao && (
                     <ModalVendaBolao
                         cota={cotaToSell}
@@ -772,7 +788,6 @@ export function ModalListaBoloes({ jogo, cor, onClose }: ModalListaBoloesProps) 
                     />
                 )}
 
-                {/* Modal de venda em lote */}
                 {bolaoForBulkSale && (
                     <ModalVendaLoteBolao
                         bolao={bolaoForBulkSale}
