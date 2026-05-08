@@ -9,9 +9,11 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.76",
     "@radix-ui/react-dialog": "^1.1.15",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.93.1",
+    "ai": "^6.0.177",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "file-saver": "^2.0.5",
