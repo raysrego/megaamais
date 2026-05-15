@@ -1,6 +1,6 @@
 // app/api/financeiro/ocr-ficha/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { openai } from '@ai-sdk/openai';
+import { anthropic } from '@ai-sdk/anthropic';
 import { generateObject } from 'ai';
 import { z } from 'zod';
 
@@ -39,11 +39,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Nenhum arquivo enviado' }, { status: 400 });
     }
 
-    // Converter para base64 (formato aceito pela OpenAI)
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
     const base64Image = buffer.toString('base64');
-    const mimeType = file.type; // ex: image/jpeg, image/png
 
     // Instrução para o modelo
     const prompt = `Você é um extrator de dados de fichas de fechamento de terminal de lotérica da CAIXA.
@@ -60,16 +58,17 @@ Importante:
 
 Retorne um JSON estruturado conforme o schema.`;
 
-    // Chamar o modelo com geração de objeto estruturado
+    const mediaType = (file.type || 'image/jpeg') as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+
     const { object: dados } = await generateObject({
-      model: openai('gpt-4o-mini'), // modelo barato e rápido, otimizado para tarefas estruturadas
+      model: anthropic('claude-opus-4-5'),
       schema: DadosFichaSchema,
       messages: [
         {
           role: 'user',
           content: [
             { type: 'text', text: prompt },
-            { type: 'image', image: base64Image, mimeType },
+            { type: 'image', image: base64Image, mediaType },
           ],
         },
       ],
