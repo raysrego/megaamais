@@ -20,12 +20,14 @@ import {
     Printer,
     Copy,
     ChevronDown,
-    ChevronRight
+    ChevronRight,
+    Upload
 } from 'lucide-react';
 import { MoneyInput } from '../ui/MoneyInput';
 import { FinancialGrowthChart } from './FinancialGrowthChart';
 import { ReplicarUltimoMesModal } from './ReplicarUltimoMesModal';
 import { ModalBaixaFinanceira } from './ModalBaixaFinanceira';
+import { ModalImportacaoOFX } from './ModalImportacaoOFX';
 import { useFinanceiro, TransacaoFinanceira } from '@/hooks/useFinanceiro';
 import { useItensFinanceiros, ItemFinanceiro } from '@/hooks/useItensFinanceiros';
 import { useLoja } from '@/contexts/LojaContext';
@@ -109,6 +111,7 @@ export function VisaoGestor() {
     const [transacaoParaBaixa, setTransacaoParaBaixa] = useState<TransacaoFinanceira | null>(null);
     const [editingTransaction, setEditingTransaction] = useState<TransacaoFinanceira | null>(null);
     const [dataUltimaAtualizacao, setDataUltimaAtualizacao] = useState<Date | null>(null);
+    const [showOFXModal, setShowOFXModal] = useState(false);
 
     // State para categorias expandidas no DRE (diferenciando receitas e despesas)
     const [categoriasExpandidas, setCategoriasExpandidas] = useState<Set<string>>(new Set());
@@ -1017,6 +1020,7 @@ export function VisaoGestor() {
                             <button className="btn btn-sm btn-ghost text-muted hover:text-white" onClick={handleExport} disabled={filteredList.length===0}><FileText size={16} /></button>
                             <button className="btn btn-sm btn-ghost text-muted hover:text-white" onClick={handlePrintTabela}><Printer size={16} /></button>
                             <button className="btn btn-sm btn-ghost text-blue-300 hover:text-white border border-blue-500/20" onClick={() => setShowReplicarModal(true)} disabled={loading}><Copy size={14} /> Replicar Mês</button>
+                            <button className="btn btn-sm btn-ghost text-cyan-300 hover:text-white border border-cyan-500/20" onClick={() => setShowOFXModal(true)} disabled={loading}><Upload size={14} /> Importar OFX</button>
                             <button className="btn btn-sm btn-accent" onClick={() => handleOpenModalNew(abaAtiva === 'receitas' ? 'receita' : 'despesa')} disabled={loading}><Plus size={14} /> Novo Lançamento</button>
                         </div>
                     ) : (
@@ -1289,6 +1293,7 @@ export function VisaoGestor() {
             {/* Modais */}
             <ReplicarUltimoMesModal isOpen={showReplicarModal} onClose={()=>setShowReplicarModal(false)} lojaId={lojaAtual?.id||null} anoAtual={ano} mesAtual={mesSelecionado} onSuccess={()=>buscarTransacoesSeguro(ano,visualizacaoAnual?0:mesSelecionado,lojaAtual?.id||null)} />
             <ModalBaixaFinanceira isOpen={modalBaixaOpen} onClose={()=>{setModalBaixaOpen(false);setTransacaoParaBaixa(null);}} transaction={transacaoParaBaixa} onConfirm={handleConfirmBaixa} />
+            <ModalImportacaoOFX isOpen={showOFXModal} onClose={()=>setShowOFXModal(false)} categorias={categorias} lojaId={lojaAtual?.id||null} onSuccess={()=>buscarTransacoesSeguro(ano,visualizacaoAnual?0:mesSelecionado,lojaAtual?.id||null)} />
 
             {/* Modal de lançamento (com categoria pai e subcategoria) */}
             {showModal && (
