@@ -1,18 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback } from 'react';
-import {
-    X,
-    Upload,
-    FileText,
-    AlertCircle,
-    CheckCircle2,
-    Loader2,
-    TrendingUp,
-    TrendingDown,
-    ChevronDown,
-    Info
-} from 'lucide-react';
+import { X, Upload, FileText, CircleAlert as AlertCircle, CircleCheck as CheckCircle2, Loader as Loader2, TrendingUp, TrendingDown, ChevronDown, Info } from 'lucide-react';
 import { parseOFX, OFXTransacao, OFXDados } from '@/lib/ofx-parser';
 import { ItemFinanceiro } from '@/hooks/useItensFinanceiros';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';

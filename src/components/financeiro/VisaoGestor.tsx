@@ -1,28 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import {
-    Pencil,
-    Trash2,
-    TrendingUp,
-    TrendingDown,
-    DollarSign,
-    BarChart3,
-    Scale,
-    AlertCircle,
-    Plus,
-    X,
-    Calendar,
-    RefreshCcw,
-    CheckCircle2,
-    Loader2,
-    FileText,
-    Printer,
-    Copy,
-    ChevronDown,
-    ChevronRight,
-    Upload
-} from 'lucide-react';
+import { Pencil, Trash2, TrendingUp, TrendingDown, DollarSign, ChartBar as BarChart3, Scale, CircleAlert as AlertCircle, Plus, X, Calendar, RefreshCcw, CircleCheck as CheckCircle2, Loader as Loader2, FileText, Printer, Copy, ChevronDown, ChevronRight, Upload } from 'lucide-react';
 import { MoneyInput } from '../ui/MoneyInput';
 import { FinancialGrowthChart } from './FinancialGrowthChart';
 import { ReplicarUltimoMesModal } from './ReplicarUltimoMesModal';
