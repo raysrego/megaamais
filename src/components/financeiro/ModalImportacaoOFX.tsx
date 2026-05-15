@@ -136,7 +136,6 @@ export function ModalImportacaoOFX({ isOpen, onClose, categorias, lojaId, onSucc
 
             const payloads = paraImportar.map(l => {
                 const tipo = l.tipo === 'CREDIT' ? 'receita' : 'despesa';
-                const cat = l.categoriaId ? categorias.find(c => c.id === l.categoriaId) : null;
 
                 return {
                     tipo,
@@ -150,7 +149,7 @@ export function ModalImportacaoOFX({ isOpen, onClose, categorias, lojaId, onSucc
                     frequencia: null,
                     loja_id: lojaId,
                     item_financeiro_id: l.categoriaId || null,
-                    metodo_pagamento: 'outros',
+                    metodo_pagamento: 'dinheiro',
                     usuario_id: user?.id || null
                 };
             });
