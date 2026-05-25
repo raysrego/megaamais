@@ -1,23 +1,23 @@
-﻿'use client';
+'use client';
 
 import { useEffect, useState } from 'react';
-import { LayoutDashboard, Calculator, ShieldCheck, Zap, History } from 'lucide-react';
+import { LayoutDashboard, Calculator, ShieldCheck, Zap, ClipboardCheck } from 'lucide-react';
 import { VisaoGestorCaixa } from '@/components/caixa/VisaoGestorCaixa';
 import { VisaoOperadorCaixa } from '@/components/caixa/VisaoOperadorCaixa';
+import { AuditoriaFechamentos } from '@/components/caixa/AuditoriaFechamentos';
 import { ModalGestaoCaixa } from '@/components/ModalGestaoCaixa';
 import Link from 'next/link';
 import { usePerfil } from '@/hooks/usePerfil';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { LoadingState } from '@/components/ui/LoadingState';
 
-type AbaAtiva = 'gestor' | 'operador';
+type AbaAtiva = 'gestor' | 'operador' | 'auditoria';
 
 export default function FluxoCaixaPage() {
     const { isAdmin, loading } = usePerfil();
     const [abaAtiva, setAbaAtiva] = useState<AbaAtiva>('operador');
     const [showGestaoCaixa, setShowGestaoCaixa] = useState(false);
 
-    // Efeito para setar aba correta assim que carregar perfil
     useEffect(() => {
         if (!loading) {
             if (isAdmin) {
@@ -67,6 +67,15 @@ export default function FluxoCaixaPage() {
                     >
                         <Calculator size={16} /> Fluxo Operador
                     </button>
+                    {isAdmin && (
+                        <button
+                            onClick={() => setAbaAtiva('auditoria')}
+                            className={`btn ${abaAtiva === 'auditoria' ? 'btn-primary' : 'btn-ghost'} h-[42px] px-6 text-xs font-bold`}
+                            style={{ borderRadius: '10px' }}
+                        >
+                            <ClipboardCheck size={16} /> Auditoria
+                        </button>
+                    )}
                 </div>
 
                 {abaAtiva === 'gestor' && (
@@ -81,6 +90,7 @@ export default function FluxoCaixaPage() {
             <div className="aba-conteudo animate-in fade-in duration-500">
                 {isAdmin && abaAtiva === 'gestor' && <VisaoGestorCaixa />}
                 {abaAtiva === 'operador' && <VisaoOperadorCaixa />}
+                {isAdmin && abaAtiva === 'auditoria' && <AuditoriaFechamentos />}
             </div>
         </div>
     );

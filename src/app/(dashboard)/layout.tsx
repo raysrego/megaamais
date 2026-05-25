@@ -3,7 +3,7 @@
 export const dynamic = 'force-dynamic';
 
 import React, { useState } from 'react';
-import { LayoutDashboard, Ticket, Calendar, ChartBar as BarChart4, Scale, Users, UserCog, DollarSign, ShieldCheck, FolderCog, ChevronLeft, ChevronDown, ChevronRight, Bell, Settings, Sun, Moon, LogOut, Tag, Building2, Monitor, Package, Wallet, FileText, Hop as Home, Brain } from 'lucide-react';
+import { LayoutDashboard, Ticket, Calendar, ChartBar as BarChart4, Scale, Users, UserCog, DollarSign, ShieldCheck, FolderCog, ChevronLeft, ChevronDown, ChevronRight, Bell, Settings, Sun, Moon, LogOut, Tag, Building2, Monitor, Package, Wallet, FileText, Hop as Home } from 'lucide-react';
 import { logout } from '@/app/login/actions';
 import { clearBrowserSupabaseClient } from '@/lib/supabase-browser';
 import Link from 'next/link';
@@ -38,7 +38,6 @@ export default function DashboardLayout({
         { href: '/operador', label: 'Painel do Operador', icon: <UserCog size={20} />, roles: ['all'] },
         { href: '/financeiro', label: 'Financeiro', icon: <DollarSign size={20} />, roles: ['admin', 'gerente'] },
         { href: '/cofre', label: 'Gestão de Cofre', icon: <ShieldCheck size={20} />, roles: ['admin', 'gerente'] },
-        { href: '/financeiro/fechamento-automatizado', label: 'Fechamento IA', icon: <Brain size={20} />, roles: ['admin'] },
     ];
 
     const allCadastrosSubItems = [

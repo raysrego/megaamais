@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { ChevronRight, CircleCheck as CheckCircle2, TriangleAlert as AlertTriangle, RefreshCw, ShieldCheck, Loader as Loader2, X, TrendingUp, TrendingDown, ListFilter as Filter } from 'lucide-react';
+import { ChevronRight, CircleCheck as CheckCircle2, TriangleAlert as AlertTriangle, RefreshCw, ShieldCheck, Loader as Loader2, X, TrendingUp, TrendingDown, ListFilter as Filter, Brain, AlertCircle, CheckCircle, AlertTriangle as AlertTriangleIcon } from 'lucide-react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import { useToast } from '@/contexts/ToastContext';
 import {
@@ -10,6 +10,19 @@ import {
     rejeitarFechamento,
     type FechamentoAuditoria
 } from '@/actions/auditoria';
+
+interface AnaliseIA {
+    id: string;
+    recomendacao: 'APROVAR' | 'REJEITAR' | 'REVISAR';
+    risco: 'BAIXO' | 'MEDIO' | 'ALTO';
+    parecer: string;
+    alertas: string[];
+}
+
+interface ResultadoAnalise {
+    analises: AnaliseIA[];
+    resumo: string;
+}
 
 interface Fechamento {
     id: string;
@@ -242,6 +255,10 @@ export function AuditoriaFechamentos() {
     const [filtroDataInicio, setFiltroDataInicio] = useState('');
     const [filtroDataFim, setFiltroDataFim] = useState('');
 
+    // IA Analysis
+    const [analisandoIA, setAnalisandoIA] = useState(false);
+    const [resultadoIA, setResultadoIA] = useState<ResultadoAnalise | null>(null);
+
     const fetchHistorico = useCallback(async () => {
         setLoading(true);
         try {
@@ -303,6 +320,59 @@ export function AuditoriaFechamentos() {
     useEffect(() => {
         fetchHistorico();
     }, [fetchHistorico]);
+
+    const fazerAnaliseIA = useCallback(async () => {
+        const pendentes = fechamentos.filter(f => f.status_validacao === 'pendente');
+        if (pendentes.length === 0) {
+            toast({ message: 'Nenhum fechamento pendente para analisar.', type: 'warning' });
+            return;
+        }
+
+        setAnalisandoIA(true);
+        setResultadoIA(null);
+
+        try {
+            const payload = pendentes.map(f => ({
+                id: f.id,
+                data_turno: f.data_turno,
+                terminal_id: f.terminal_id,
+                operador_nome: f.operador_nome || 'Sistema',
+                total_entradas: (f.total_pix || 0) + (f.total_dinheiro || 0),
+                total_saidas: (f.total_sangrias || 0) + (f.total_depositos || 0) + (f.total_boletos || 0) + (f.total_trocados || 0),
+                valor_na_conta: f.valor_na_conta || 0,
+                total_pix: f.total_pix || 0,
+                total_dinheiro: f.total_dinheiro || 0,
+                total_sangrias: f.total_sangrias || 0,
+                total_depositos: f.total_depositos || 0,
+                total_boletos: f.total_boletos || 0,
+                total_trocados: f.total_trocados || 0,
+                valor_cofre: f.valor_cofre || 0,
+                valor_pix_externo: f.valor_pix_externo || 0,
+                divergencia: f.divergencia || 0,
+                justificativa: f.justificativa,
+            }));
+
+            const res = await fetch('/api/caixa/analise-auditoria', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fechamentos: payload }),
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.error ?? 'Erro na API');
+            }
+
+            const resultado: ResultadoAnalise = await res.json();
+            setResultadoIA(resultado);
+            toast({ message: `Análise concluída para ${pendentes.length} fechamento(s)!`, type: 'success' });
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : 'Erro desconhecido';
+            toast({ message: 'Erro na análise IA: ' + msg, type: 'error' });
+        } finally {
+            setAnalisandoIA(false);
+        }
+    }, [fechamentos, toast]);
 
     const handleCloseModal = () => {
         setShowValidationModal(false);
@@ -396,6 +466,16 @@ export function AuditoriaFechamentos() {
                     <button onClick={fetchHistorico} className="btn btn-ghost btn-sm">
                         <RefreshCw size={14} /> Atualizar
                     </button>
+                    <button
+                        onClick={fazerAnaliseIA}
+                        disabled={analisandoIA || fechamentos.filter(f => f.status_validacao === 'pendente').length === 0}
+                        className="btn btn-primary btn-sm disabled:opacity-50"
+                    >
+                        {analisandoIA
+                            ? <><Loader2 size={14} className="animate-spin" /> Analisando...</>
+                            : <><Brain size={14} /> Fazer análise</>
+                        }
+                    </button>
                 </div>
             </div>
 
@@ -431,6 +511,75 @@ export function AuditoriaFechamentos() {
                     </button>
                 </div>
             </div>
+
+            {/* Resultado da Análise IA */}
+            {resultadoIA && (
+                <div className="mb-6 rounded-xl border border-border bg-bg-card overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-surface-subtle">
+                        <div className="flex items-center gap-2">
+                            <Brain size={16} className="text-primary" />
+                            <span className="text-sm font-bold">Resultado da Análise IA</span>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary/10 text-primary">
+                                {resultadoIA.analises.length} fechamento(s)
+                            </span>
+                        </div>
+                        <button onClick={() => setResultadoIA(null)} className="btn btn-ghost btn-sm px-2">
+                            <X size={14} />
+                        </button>
+                    </div>
+
+                    {resultadoIA.resumo && (
+                        <div className="px-4 py-3 border-b border-border text-sm text-muted bg-surface-subtle/50">
+                            {resultadoIA.resumo}
+                        </div>
+                    )}
+
+                    <div className="divide-y divide-border">
+                        {resultadoIA.analises.map((analise) => {
+                            const fechamento = fechamentos.find(f => f.id === analise.id);
+                            const corReco = analise.recomendacao === 'APROVAR' ? 'text-success' : analise.recomendacao === 'REJEITAR' ? 'text-danger' : 'text-warning';
+                            const bgReco = analise.recomendacao === 'APROVAR' ? 'bg-success/10 border-success/20' : analise.recomendacao === 'REJEITAR' ? 'bg-danger/10 border-danger/20' : 'bg-warning/10 border-warning/20';
+                            const IconReco = analise.recomendacao === 'APROVAR' ? CheckCircle : analise.recomendacao === 'REJEITAR' ? AlertCircle : AlertTriangleIcon;
+                            return (
+                                <div key={analise.id} className="px-4 py-3">
+                                    <div className="flex items-start gap-3">
+                                        <div className={`mt-0.5 flex-shrink-0 p-1.5 rounded-lg border ${bgReco}`}>
+                                            <IconReco size={14} className={corReco} />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                                <span className="text-xs font-bold">
+                                                    {fechamento ? `${fechamento.terminal_id} — ${formatarDataLocal(fechamento.data_turno)}` : `ID: ${analise.id}`}
+                                                </span>
+                                                <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${bgReco} ${corReco}`}>
+                                                    {analise.recomendacao}
+                                                </span>
+                                                <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+                                                    analise.risco === 'ALTO' ? 'bg-danger/10 text-danger' :
+                                                    analise.risco === 'MEDIO' ? 'bg-warning/10 text-warning' :
+                                                    'bg-success/10 text-success'
+                                                }`}>
+                                                    Risco {analise.risco}
+                                                </span>
+                                            </div>
+                                            <p className="text-xs text-muted">{analise.parecer}</p>
+                                            {analise.alertas && analise.alertas.length > 0 && (
+                                                <ul className="mt-1.5 space-y-0.5">
+                                                    {analise.alertas.map((alerta, i) => (
+                                                        <li key={i} className="text-[11px] text-warning flex items-center gap-1">
+                                                            <AlertTriangle size={10} /> {alerta}
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
 
             <div style={{ display: 'grid', gridTemplateColumns: selectedFechamento ? '1fr 480px' : '1fr', gap: '1.5rem' }}>
                 {/* Tabela */}
