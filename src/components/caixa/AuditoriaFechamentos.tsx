@@ -1,7 +1,14 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { ChevronRight, CircleCheck as CheckCircle2, TriangleAlert as AlertTriangle, RefreshCw, ShieldCheck, Loader as Loader2, X, TrendingUp, TrendingDown, ListFilter as Filter, Brain, CircleAlert as AlertCircle, CircleCheck as CheckCircle, TriangleAlert as AlertTriangleIcon, FileText } from 'lucide-react';
+import {
+    ChevronRight, CircleCheck as CheckCircle2, TriangleAlert as AlertTriangle,
+    RefreshCw, ShieldCheck, Loader as Loader2, X, TrendingUp, TrendingDown,
+    ListFilter as Filter, Brain, CircleAlert as AlertCircle,
+    CircleCheck as CheckCircle, TriangleAlert as AlertTriangleIcon,
+    FileText, Banknote, Wallet, ArrowDownLeft, ArrowUpRight,
+    Receipt, CreditCard, Landmark, Coins,
+} from 'lucide-react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import { useToast } from '@/contexts/ToastContext';
 import {
@@ -10,7 +17,46 @@ import {
     rejeitarFechamento,
 } from '@/actions/auditoria';
 
-// ─── Types ─────────────────────────────────────────────────────────────────────
+// ─── TFL types (espelho de FechamentoCaixaTFL) ─────────────────────────────────
+
+interface JogoTFL { descricao: string; numero_sorteio?: string | null; quantidade: number; valor: number; }
+interface ContaTFL { descricao: string; quantidade: number; valor: number; }
+interface PremioTFL { descricao: string; quantidade: number; valor: number; }
+interface PagamentoTFL { descricao: string; quantidade: number; valor: number; }
+interface ServicoContaTFL { descricao: string; quantidade: number; valor: number; }
+
+interface RelatorioTFL {
+    data_referencia: string | null;
+    terminal: string | null;
+    total_creditos: number | null;
+    total_debitos: number | null;
+    saldo_final: number | null;
+    recebimentos: {
+        jogos: JogoTFL[];
+        total_jogos_quantidade: number | null;
+        total_jogos_valor: number | null;
+        contas: ContaTFL[];
+        total_contas_quantidade: number | null;
+        total_contas_valor: number | null;
+        total_recebimentos_quantidade: number | null;
+        total_recebimentos_valor: number | null;
+    };
+    premios_pagos: { itens: PremioTFL[]; total_quantidade: number | null; total_valor: number | null; };
+    pagamentos: { itens: PagamentoTFL[]; total_quantidade: number | null; total_valor: number | null; };
+    servicos_conta: { itens: ServicoContaTFL[]; total_quantidade: number | null; total_valor: number | null; };
+    total_em_caixa: number | null;
+    totais_finais: {
+        creditos_manuais: number | null;
+        creditos_tfl: number | null;
+        debitos_manuais: number | null;
+        debitos_tfl: number | null;
+        total_creditos: number | null;
+        total_debitos: number | null;
+        saldo_final: number | null;
+    };
+}
+
+// ─── Main types ────────────────────────────────────────────────────────────────
 
 type FonteRegistro = 'caixa_sessoes' | 'fechamento_tfl';
 
@@ -44,6 +90,7 @@ interface Fechamento {
     total_debitos?: number;
     saldo_final?: number;
     arquivo_nome?: string;
+    dados_extraidos?: RelatorioTFL;
 }
 
 interface AnaliseIA {
@@ -60,6 +107,11 @@ interface ResultadoAnalise {
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
+
+function fmt(valor: number | null | undefined): string {
+    if (valor == null) return '—';
+    return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
 
 const formatarDataLocal = (dataStr: string) => {
     if (!dataStr) return '-';
@@ -80,11 +132,311 @@ const formatarDataHoraLocal = (dataStr: string | null) => {
     if (dataStr.includes('T')) {
         const [data, hora] = dataStr.split('T');
         const [ano, mes, dia] = data.split('-');
-        const horaLocal = hora.substring(0, 5);
-        return `${dia}/${mes}/${ano} ${horaLocal}`;
+        return `${dia}/${mes}/${ano} ${hora.substring(0, 5)}`;
     }
     return formatarDataLocal(dataStr);
 };
+
+// ─── Detalhamento TFL ─────────────────────────────────────────────────────────
+
+function SecaoTFL({ titulo, children }: { titulo: string; children: React.ReactNode }) {
+    return (
+        <div>
+            <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">{titulo}</p>
+            {children}
+        </div>
+    );
+}
+
+function TabelaTFL({ rows, totalLabel, totalQtd, totalValor, corTotal }: {
+    rows: { desc: string; qtd: number; valor: number }[];
+    totalLabel?: string;
+    totalQtd?: number | null;
+    totalValor?: number | null;
+    corTotal?: string;
+}) {
+    return (
+        <table className="w-full text-sm">
+            <thead>
+                <tr className="border-b border-border text-[10px] text-muted">
+                    <th className="text-left pb-1 font-bold">Descrição</th>
+                    <th className="text-right pb-1 font-bold">Qtde</th>
+                    <th className="text-right pb-1 font-bold">Valor</th>
+                </tr>
+            </thead>
+            <tbody>
+                {rows.map((r, i) => (
+                    <tr key={i} className="border-b border-border/40 last:border-0">
+                        <td className="py-1">{r.desc}</td>
+                        <td className="py-1 text-right text-muted tabular-nums">{r.qtd}</td>
+                        <td className="py-1 text-right font-semibold tabular-nums">{fmt(r.valor)}</td>
+                    </tr>
+                ))}
+                {totalLabel && (
+                    <tr className={`font-bold border-t border-border ${corTotal ?? ''}`}>
+                        <td className="pt-2 uppercase">{totalLabel}</td>
+                        <td className="pt-2 text-right tabular-nums">{totalQtd ?? '—'}</td>
+                        <td className={`pt-2 text-right tabular-nums ${corTotal ?? ''}`}>{fmt(totalValor)}</td>
+                    </tr>
+                )}
+            </tbody>
+        </table>
+    );
+}
+
+function DetalhesTFL({ dados }: { dados: RelatorioTFL }) {
+    return (
+        <div className="space-y-5 text-sm">
+            <div className="grid grid-cols-3 gap-2">
+                <div className="p-3 rounded-xl border border-border bg-surface-subtle">
+                    <p className="text-[10px] text-muted font-bold uppercase mb-1">Créditos</p>
+                    <p className="text-base font-black text-success tabular-nums">{fmt(dados.total_creditos)}</p>
+                </div>
+                <div className="p-3 rounded-xl border border-border bg-surface-subtle">
+                    <p className="text-[10px] text-muted font-bold uppercase mb-1">Débitos</p>
+                    <p className="text-base font-black text-danger tabular-nums">{fmt(dados.total_debitos)}</p>
+                </div>
+                <div className="p-3 rounded-xl border border-border bg-surface-subtle">
+                    <p className="text-[10px] text-muted font-bold uppercase mb-1">Saldo Final</p>
+                    <p className="text-base font-black text-primary-blue-light tabular-nums">{fmt(dados.saldo_final)}</p>
+                </div>
+            </div>
+
+            {dados.recebimentos?.jogos?.length > 0 && (
+                <SecaoTFL titulo="Recebimentos — Jogos">
+                    <TabelaTFL
+                        rows={dados.recebimentos.jogos.map(j => ({
+                            desc: j.descricao + (j.numero_sorteio ? ` #${j.numero_sorteio}` : ''),
+                            qtd: j.quantidade,
+                            valor: j.valor,
+                        }))}
+                        totalLabel="Total Jogos"
+                        totalQtd={dados.recebimentos.total_jogos_quantidade}
+                        totalValor={dados.recebimentos.total_jogos_valor}
+                        corTotal="text-success"
+                    />
+                </SecaoTFL>
+            )}
+
+            {dados.recebimentos?.contas?.length > 0 && (
+                <SecaoTFL titulo="Recebimentos — Contas">
+                    <TabelaTFL
+                        rows={dados.recebimentos.contas.map(c => ({ desc: c.descricao, qtd: c.quantidade, valor: c.valor }))}
+                        totalLabel="Total Contas"
+                        totalQtd={dados.recebimentos.total_contas_quantidade}
+                        totalValor={dados.recebimentos.total_contas_valor}
+                        corTotal="text-success"
+                    />
+                    <div className="flex justify-between text-sm font-black border-t-2 border-border pt-2 mt-1">
+                        <span className="uppercase">Total Recebimentos</span>
+                        <span className="text-success tabular-nums">{fmt(dados.recebimentos.total_recebimentos_valor)}</span>
+                    </div>
+                </SecaoTFL>
+            )}
+
+            {dados.premios_pagos?.itens?.length > 0 && (
+                <SecaoTFL titulo="Prêmios Pagos">
+                    <TabelaTFL
+                        rows={dados.premios_pagos.itens.map(p => ({ desc: p.descricao, qtd: p.quantidade, valor: p.valor }))}
+                        totalLabel="Total Prêmios"
+                        totalQtd={dados.premios_pagos.total_quantidade}
+                        totalValor={dados.premios_pagos.total_valor}
+                        corTotal="text-danger"
+                    />
+                </SecaoTFL>
+            )}
+
+            {dados.pagamentos?.itens?.length > 0 && (
+                <SecaoTFL titulo="Pagamentos">
+                    <TabelaTFL
+                        rows={dados.pagamentos.itens.map(p => ({ desc: p.descricao, qtd: p.quantidade, valor: p.valor }))}
+                    />
+                </SecaoTFL>
+            )}
+
+            {dados.servicos_conta?.itens?.length > 0 && (
+                <SecaoTFL titulo="Serviços Conta Corrente / Poupança">
+                    <TabelaTFL
+                        rows={dados.servicos_conta.itens.map(s => ({ desc: s.descricao, qtd: s.quantidade, valor: s.valor }))}
+                        totalLabel="Total Conta"
+                        totalQtd={dados.servicos_conta.total_quantidade}
+                        totalValor={dados.servicos_conta.total_valor}
+                    />
+                </SecaoTFL>
+            )}
+
+            {dados.total_em_caixa != null && (
+                <div className="p-3 rounded-xl bg-primary-blue-light/10 border border-primary-blue-light/20 text-center">
+                    <p className="text-[10px] font-bold text-primary-blue-light uppercase mb-1">Total em Caixa</p>
+                    <p className="text-xl font-black text-primary-blue-light">{fmt(dados.total_em_caixa)}</p>
+                </div>
+            )}
+
+            <SecaoTFL titulo="Totais Finais">
+                <div className="rounded-xl border border-border p-3 bg-surface-subtle space-y-1">
+                    {[
+                        { label: 'Créditos Manuais', valor: dados.totais_finais?.creditos_manuais },
+                        { label: 'Créditos TFL',     valor: dados.totais_finais?.creditos_tfl },
+                        { label: 'Débitos Manuais',  valor: dados.totais_finais?.debitos_manuais },
+                        { label: 'Débitos TFL',      valor: dados.totais_finais?.debitos_tfl },
+                    ].map((r, i) => (
+                        <div key={i} className="flex justify-between text-xs py-0.5">
+                            <span className="text-muted">{r.label}</span>
+                            <span className="font-semibold tabular-nums">{fmt(r.valor)}</span>
+                        </div>
+                    ))}
+                    <div className="border-t border-border pt-2 mt-2 space-y-1">
+                        <div className="flex justify-between text-sm font-bold">
+                            <span>Total Créditos</span>
+                            <span className="text-success tabular-nums">{fmt(dados.totais_finais?.total_creditos)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm font-bold">
+                            <span>Total Débitos</span>
+                            <span className="text-danger tabular-nums">{fmt(dados.totais_finais?.total_debitos)}</span>
+                        </div>
+                        <div className="flex justify-between text-base font-black border-t border-border pt-2">
+                            <span>Saldo Final</span>
+                            <span className="text-primary-blue-light tabular-nums">{fmt(dados.totais_finais?.saldo_final)}</span>
+                        </div>
+                    </div>
+                </div>
+            </SecaoTFL>
+        </div>
+    );
+}
+
+// ─── Detalhamento Operador ────────────────────────────────────────────────────
+
+function DetalhesOperador({ f }: { f: Fechamento }) {
+    const totalEntradas = (f.total_pix || 0) + (f.total_dinheiro || 0);
+    const totalSaidas = (f.total_sangrias || 0) + (f.total_depositos || 0) + (f.total_boletos || 0) + (f.total_trocados || 0);
+
+    return (
+        <div className="space-y-4 text-sm">
+            {/* KPIs */}
+            <div className="grid grid-cols-3 gap-2">
+                <div className="p-3 rounded-xl border border-border bg-surface-subtle">
+                    <p className="text-[10px] text-muted font-bold uppercase mb-1">Entradas</p>
+                    <p className="text-base font-black text-success tabular-nums">{fmt(totalEntradas)}</p>
+                </div>
+                <div className="p-3 rounded-xl border border-border bg-surface-subtle">
+                    <p className="text-[10px] text-muted font-bold uppercase mb-1">Saídas</p>
+                    <p className="text-base font-black text-danger tabular-nums">{fmt(totalSaidas)}</p>
+                </div>
+                <div className="p-3 rounded-xl border border-border bg-surface-subtle">
+                    <p className="text-[10px] text-muted font-bold uppercase mb-1">Valor na Conta</p>
+                    <p className="text-base font-black text-primary-blue-light tabular-nums">{fmt(f.valor_na_conta)}</p>
+                </div>
+            </div>
+
+            {/* Entradas */}
+            <div>
+                <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">Detalhamento de Entradas</p>
+                <div className="rounded-xl border border-border overflow-hidden">
+                    <div className="flex items-center justify-between px-3 py-2 border-b border-border/60 bg-surface-subtle/50">
+                        <div className="flex items-center gap-2 text-success">
+                            <Wallet size={13} />
+                            <span className="text-xs font-semibold">PIX</span>
+                        </div>
+                        <span className="text-sm font-bold text-success tabular-nums">{fmt(f.total_pix)}</span>
+                    </div>
+                    <div className="flex items-center justify-between px-3 py-2 bg-surface-subtle/20">
+                        <div className="flex items-center gap-2 text-success">
+                            <Banknote size={13} />
+                            <span className="text-xs font-semibold">Dinheiro</span>
+                        </div>
+                        <span className="text-sm font-bold text-success tabular-nums">{fmt(f.total_dinheiro)}</span>
+                    </div>
+                    <div className="flex items-center justify-between px-3 py-2 border-t border-border bg-success/5">
+                        <span className="text-xs font-black uppercase text-success">Total Entradas</span>
+                        <span className="text-sm font-black text-success tabular-nums">{fmt(totalEntradas)}</span>
+                    </div>
+                </div>
+            </div>
+
+            {/* Saídas */}
+            <div>
+                <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">Detalhamento de Saídas</p>
+                <div className="rounded-xl border border-border overflow-hidden">
+                    {[
+                        { icon: <ArrowUpRight size={13} />, label: 'Sangrias',  valor: f.total_sangrias  || 0 },
+                        { icon: <Landmark     size={13} />, label: 'Depósitos', valor: f.total_depositos || 0 },
+                        { icon: <Receipt      size={13} />, label: 'Boletos',   valor: f.total_boletos   || 0 },
+                        { icon: <Coins        size={13} />, label: 'Trocados',  valor: f.total_trocados  || 0 },
+                    ].map((row, i, arr) => (
+                        <div key={i} className={`flex items-center justify-between px-3 py-2 ${i < arr.length - 1 ? 'border-b border-border/60' : ''} bg-surface-subtle/20`}>
+                            <div className="flex items-center gap-2 text-danger">
+                                {row.icon}
+                                <span className="text-xs font-semibold">{row.label}</span>
+                            </div>
+                            <span className="text-sm font-bold text-danger tabular-nums">{fmt(row.valor)}</span>
+                        </div>
+                    ))}
+                    <div className="flex items-center justify-between px-3 py-2 border-t border-border bg-danger/5">
+                        <span className="text-xs font-black uppercase text-danger">Total Saídas</span>
+                        <span className="text-sm font-black text-danger tabular-nums">{fmt(totalSaidas)}</span>
+                    </div>
+                </div>
+            </div>
+
+            {/* Complementares */}
+            {((f.valor_pix_externo || 0) > 0 || (f.valor_cofre || 0) > 0 || f.valor_inicial > 0) && (
+                <div>
+                    <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">Valores Complementares</p>
+                    <div className="rounded-xl border border-border overflow-hidden">
+                        {f.valor_inicial > 0 && (
+                            <div className="flex items-center justify-between px-3 py-2 border-b border-border/60 bg-surface-subtle/20">
+                                <div className="flex items-center gap-2 text-muted">
+                                    <CreditCard size={13} />
+                                    <span className="text-xs font-semibold">Fundo de Caixa Inicial</span>
+                                </div>
+                                <span className="text-sm font-bold tabular-nums">{fmt(f.valor_inicial)}</span>
+                            </div>
+                        )}
+                        {(f.valor_pix_externo || 0) > 0 && (
+                            <div className="flex items-center justify-between px-3 py-2 border-b border-border/60 bg-surface-subtle/20">
+                                <div className="flex items-center gap-2 text-muted">
+                                    <ArrowDownLeft size={13} />
+                                    <span className="text-xs font-semibold">PIX Externo Informado</span>
+                                </div>
+                                <span className="text-sm font-bold tabular-nums">{fmt(f.valor_pix_externo)}</span>
+                            </div>
+                        )}
+                        {(f.valor_cofre || 0) > 0 && (
+                            <div className="flex items-center justify-between px-3 py-2 bg-surface-subtle/20">
+                                <div className="flex items-center gap-2 text-muted">
+                                    <ShieldCheck size={13} />
+                                    <span className="text-xs font-semibold">Enviado ao Cofre</span>
+                                </div>
+                                <span className="text-sm font-bold tabular-nums">{fmt(f.valor_cofre)}</span>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Resumo final */}
+            <div className="rounded-xl border border-border p-3 bg-surface-subtle space-y-1">
+                <div className="flex justify-between text-xs py-0.5">
+                    <span className="text-muted">Saldo Esperado</span>
+                    <span className="font-semibold tabular-nums">{fmt(f.saldo_esperado)}</span>
+                </div>
+                <div className="flex justify-between text-xs py-0.5">
+                    <span className="text-muted">Valor Declarado no Caixa</span>
+                    <span className="font-semibold tabular-nums">{fmt(f.saldo_no_caixa)}</span>
+                </div>
+                <div className={`flex justify-between text-sm font-bold border-t border-border pt-2 mt-1 ${Math.abs(f.divergencia) > 5 ? 'text-danger' : 'text-success'}`}>
+                    <span>Divergência</span>
+                    <span className="tabular-nums">{fmt(f.divergencia)}</span>
+                </div>
+                <div className="flex justify-between text-base font-black border-t border-border pt-2 mt-1">
+                    <span>Valor na Conta</span>
+                    <span className="text-primary-blue-light tabular-nums">{fmt(f.valor_na_conta)}</span>
+                </div>
+            </div>
+        </div>
+    );
+}
 
 // ─── Modal de auditoria ────────────────────────────────────────────────────────
 
@@ -102,102 +454,37 @@ function ModalAuditoria({ fechamento, onClose, onAprovar, onRejeitar }: ModalAud
 
     const isTFL = fechamento.fonte === 'fechamento_tfl';
 
-    const totalEntradas = isTFL
-        ? (fechamento.total_creditos ?? 0)
-        : (fechamento.total_pix || 0) + (fechamento.total_dinheiro || 0);
-
-    const totalSaidas = isTFL
-        ? (fechamento.total_debitos ?? 0)
-        : (fechamento.total_sangrias || 0) + (fechamento.total_depositos || 0) +
-          (fechamento.total_boletos || 0) + (fechamento.total_trocados || 0);
-
-    const valorDestaque = isTFL ? (fechamento.saldo_final ?? 0) : (fechamento.valor_na_conta || 0);
-    const labelDestaque = isTFL ? 'SALDO FINAL TFL' : 'VALOR NA CONTA';
-    const descDestaque = isTFL ? 'Saldo conforme relatório TFL' : 'PIX Externo + (Entradas - Saídas)';
-
     return (
         <>
             <div className="fixed inset-0 bg-black/80 z-[9998]" onClick={onClose} />
-            <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] max-w-md bg-bg-card border border-border rounded-2xl z-[9999] p-6">
-                <div className="flex justify-between items-center mb-4">
+            <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-2xl max-h-[90vh] overflow-y-auto bg-bg-card border border-border rounded-2xl z-[9999] p-6">
+                <div className="flex justify-between items-center mb-5">
                     <div>
                         <h2 className="text-xl font-bold">Auditoria de Fechamento</h2>
-                        {isTFL && (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-primary bg-primary/10 border border-primary/20 rounded px-2 py-0.5 mt-1">
-                                <FileText size={10} /> RELATÓRIO TFL
-                            </span>
-                        )}
-                    </div>
-                    <button onClick={onClose} className="btn btn-ghost btn-sm">
-                        <X size={18} />
-                    </button>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 mb-6 p-3 rounded-xl bg-surface-subtle border border-border text-sm">
-                    <div>
-                        <p className="text-[9px] text-muted uppercase font-bold">Terminal</p>
-                        <p className="font-bold">{fechamento.terminal_id}</p>
-                    </div>
-                    <div>
-                        <p className="text-[9px] text-muted uppercase font-bold">{isTFL ? 'Arquivo' : 'Operador'}</p>
-                        <p className="font-bold truncate">{isTFL ? (fechamento.arquivo_nome ?? '—') : fechamento.operador_nome}</p>
-                    </div>
-                    <div>
-                        <p className="text-[9px] text-muted uppercase font-bold">Data</p>
-                        <p className="font-bold">{formatarDataLocal(fechamento.data_turno)}</p>
-                    </div>
-                    <div>
-                        <p className="text-[9px] text-muted uppercase font-bold">Fechamento</p>
-                        <p className="font-bold">{formatarDataHoraLocal(fechamento.data_fechamento)}</p>
-                    </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4 mb-6">
-                    <div className="p-4 rounded-xl bg-success/10 border border-success/20 text-center">
-                        <div className="flex items-center justify-center gap-1 mb-2">
-                            <TrendingUp size={16} className="text-success" />
-                            <span className="text-[10px] text-success uppercase font-bold">
-                                {isTFL ? 'CRÉDITOS' : 'ENTRADA'}
+                        <div className="flex items-center gap-2 mt-1">
+                            {isTFL
+                                ? <span className="inline-flex items-center gap-1 text-[10px] font-bold text-primary bg-primary/10 border border-primary/20 rounded px-2 py-0.5"><FileText size={10} /> RELATÓRIO TFL</span>
+                                : <span className="text-[10px] font-bold text-blue-400 bg-blue-500/10 border border-blue-500/20 rounded px-2 py-0.5">OPERADOR</span>
+                            }
+                            <span className="text-xs text-muted">
+                                Terminal {fechamento.terminal_id} • {formatarDataLocal(fechamento.data_turno)}
                             </span>
                         </div>
-                        <p className="text-2xl font-black text-success">
-                            R$ {totalEntradas.toFixed(2)}
-                        </p>
                     </div>
-                    <div className="p-4 rounded-xl bg-danger/10 border border-danger/20 text-center">
-                        <div className="flex items-center justify-center gap-1 mb-2">
-                            <TrendingDown size={16} className="text-danger" />
-                            <span className="text-[10px] text-danger uppercase font-bold">
-                                {isTFL ? 'DÉBITOS' : 'SAÍDA'}
-                            </span>
-                        </div>
-                        <p className="text-2xl font-black text-danger">
-                            R$ {totalSaidas.toFixed(2)}
-                        </p>
-                    </div>
+                    <button onClick={onClose} className="btn btn-ghost btn-sm"><X size={18} /></button>
                 </div>
 
-                <div className="p-4 rounded-xl bg-primary-blue-light/10 border border-primary-blue-light/20 mb-6 text-center">
-                    <p className="text-[10px] font-bold text-primary-blue-light uppercase mb-1">
-                        {labelDestaque}
-                    </p>
-                    <p className="text-2xl font-black text-primary-blue-light">
-                        R$ {valorDestaque.toFixed(2)}
-                    </p>
-                    <p className="text-[9px] text-muted mt-1">{descDestaque}</p>
+                {/* Detalhamento completo */}
+                <div className="mb-6">
+                    {isTFL && fechamento.dados_extraidos
+                        ? <DetalhesTFL dados={fechamento.dados_extraidos} />
+                        : <DetalhesOperador f={fechamento} />
+                    }
                 </div>
 
-                {!isTFL && (fechamento.valor_cofre || 0) > 0 && (
-                    <div className="bg-surface-subtle p-3 rounded-lg border border-border mb-4">
-                        <div className="flex justify-between text-sm">
-                            <span className="text-muted">Valor no cofre</span>
-                            <span className="font-bold">R$ {(fechamento.valor_cofre || 0).toFixed(2)}</span>
-                        </div>
-                    </div>
-                )}
-
+                {/* Justificativa do operador */}
                 {fechamento.justificativa && (
-                    <div className="mb-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+                    <div className="mb-5 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
                         <span className="text-[9px] text-yellow-500 font-bold uppercase">
                             {isTFL ? 'Observações' : 'Justificativa do Operador'}
                         </span>
@@ -205,24 +492,19 @@ function ModalAuditoria({ fechamento, onClose, onAprovar, onRejeitar }: ModalAud
                     </div>
                 )}
 
+                {/* Ações */}
                 {!modoRejeitar ? (
-                    <div className="flex gap-3 justify-end mt-4">
+                    <div className="flex gap-3 justify-end border-t border-border pt-4">
                         <button className="btn btn-ghost text-sm" onClick={onClose}>Cancelar</button>
-                        <button
-                            className="btn bg-danger/10 text-danger hover:bg-danger/20 text-sm"
-                            onClick={() => setModoRejeitar(true)}
-                        >
+                        <button className="btn bg-danger/10 text-danger hover:bg-danger/20 text-sm" onClick={() => setModoRejeitar(true)}>
                             Rejeitar
                         </button>
-                        <button
-                            className="btn btn-success text-sm"
-                            onClick={() => onAprovar(observacoes)}
-                        >
-                            Aprovar
+                        <button className="btn btn-success text-sm" onClick={() => onAprovar(observacoes)}>
+                            <ShieldCheck size={14} /> Aprovar Fechamento
                         </button>
                     </div>
                 ) : (
-                    <div className="space-y-3 mt-4">
+                    <div className="space-y-3 border-t border-border pt-4">
                         <div className="form-group">
                             <label className="text-xs font-bold">Justificativa da rejeição</label>
                             <textarea
@@ -234,11 +516,10 @@ function ModalAuditoria({ fechamento, onClose, onAprovar, onRejeitar }: ModalAud
                             />
                         </div>
                         <div className="flex gap-3 justify-end">
-                            <button className="btn btn-ghost text-sm" onClick={() => setModoRejeitar(false)}>
-                                Voltar
-                            </button>
+                            <button className="btn btn-ghost text-sm" onClick={() => setModoRejeitar(false)}>Voltar</button>
                             <button
                                 className="btn btn-danger text-sm"
+                                disabled={!justificativa.trim()}
                                 onClick={() => onRejeitar({ justificativa })}
                             >
                                 Confirmar Rejeição
@@ -265,14 +546,13 @@ export function AuditoriaFechamentos() {
     const [filtroDataInicio, setFiltroDataInicio] = useState('');
     const [filtroDataFim, setFiltroDataFim] = useState('');
 
-    // IA Analysis
     const [analisandoIA, setAnalisandoIA] = useState(false);
     const [resultadoIA, setResultadoIA] = useState<ResultadoAnalise | null>(null);
 
     const fetchHistorico = useCallback(async () => {
         setLoading(true);
         try {
-            // ── 1. caixa_sessoes ─────────────────────────────────────────────
+            // ── caixa_sessoes ────────────────────────────────────────────────
             const sessoesBruto = await getFechamentosAuditoria({
                 status: filtroStatus !== 'todos' ? filtroStatus : undefined,
                 dataInicio: filtroDataInicio || undefined,
@@ -319,22 +599,16 @@ export function AuditoriaFechamentos() {
                 };
             });
 
-            // ── 2. fechamento_tfl ─────────────────────────────────────────────
+            // ── fechamento_tfl (inclui dados_extraidos) ──────────────────────
             let tflQuery = supabase
                 .from('fechamento_tfl')
-                .select('id, data_referencia, terminal, total_creditos, total_debitos, saldo_final, arquivo_nome, status_auditoria, observacoes_auditoria, created_at')
+                .select('id, data_referencia, terminal, total_creditos, total_debitos, saldo_final, arquivo_nome, status_auditoria, observacoes_auditoria, dados_extraidos, created_at')
                 .order('created_at', { ascending: false })
                 .limit(100);
 
-            if (filtroStatus !== 'todos') {
-                tflQuery = tflQuery.eq('status_auditoria', filtroStatus);
-            }
-            if (filtroDataInicio) {
-                tflQuery = tflQuery.gte('data_referencia', filtroDataInicio);
-            }
-            if (filtroDataFim) {
-                tflQuery = tflQuery.lte('data_referencia', filtroDataFim);
-            }
+            if (filtroStatus !== 'todos') tflQuery = tflQuery.eq('status_auditoria', filtroStatus);
+            if (filtroDataInicio) tflQuery = tflQuery.gte('data_referencia', filtroDataInicio);
+            if (filtroDataFim) tflQuery = tflQuery.lte('data_referencia', filtroDataFim);
 
             const { data: tflBruto, error: tflError } = await tflQuery;
             if (tflError) throw tflError;
@@ -362,14 +636,13 @@ export function AuditoriaFechamentos() {
                 justificativa: r.observacoes_auditoria,
                 valor_cofre: 0,
                 valor_pix_externo: 0,
-                // TFL extras
                 total_creditos: r.total_creditos || 0,
                 total_debitos: r.total_debitos || 0,
                 saldo_final: r.saldo_final || 0,
                 arquivo_nome: r.arquivo_nome,
+                dados_extraidos: r.dados_extraidos ?? undefined,
             }));
 
-            // ── 3. Merge e ordenar por data desc ─────────────────────────────
             const todos = [...deSessoes, ...deTFL].sort((a, b) => {
                 const da = a.data_fechamento || a.data_turno;
                 const db = b.data_fechamento || b.data_turno;
@@ -378,31 +651,24 @@ export function AuditoriaFechamentos() {
 
             setFechamentos(todos);
         } catch (err: any) {
-            console.error('Erro ao carregar histórico:', err);
             toast({ message: 'Erro ao carregar fechamentos: ' + (err.message || 'Erro desconhecido'), type: 'error' });
         } finally {
             setLoading(false);
         }
     }, [filtroStatus, filtroDataInicio, filtroDataFim, toast, supabase]);
 
-    useEffect(() => {
-        fetchHistorico();
-    }, [fetchHistorico]);
+    useEffect(() => { fetchHistorico(); }, [fetchHistorico]);
 
-    // ── Aprovar ───────────────────────────────────────────────────────────────
     const handleAprovar = async (fechamento: Fechamento, observacoes: string) => {
         try {
             if (fechamento.fonte === 'caixa_sessoes') {
                 await aprovarFechamento(parseInt(fechamento.id), observacoes);
             } else {
-                const { error } = await supabase
-                    .from('fechamento_tfl')
-                    .update({
-                        status_auditoria: 'aprovado',
-                        observacoes_auditoria: observacoes,
-                        auditado_em: new Date().toISOString(),
-                    })
-                    .eq('id', fechamento.id);
+                const { error } = await supabase.from('fechamento_tfl').update({
+                    status_auditoria: 'aprovado',
+                    observacoes_auditoria: observacoes,
+                    auditado_em: new Date().toISOString(),
+                }).eq('id', fechamento.id);
                 if (error) throw error;
             }
             toast({ message: 'Fechamento aprovado com sucesso!', type: 'success' });
@@ -414,20 +680,16 @@ export function AuditoriaFechamentos() {
         setShowValidationModal(false);
     };
 
-    // ── Rejeitar ──────────────────────────────────────────────────────────────
     const handleRejeitar = async (fechamento: Fechamento, justificativa: string) => {
         try {
             if (fechamento.fonte === 'caixa_sessoes') {
                 await rejeitarFechamento(parseInt(fechamento.id), justificativa, false);
             } else {
-                const { error } = await supabase
-                    .from('fechamento_tfl')
-                    .update({
-                        status_auditoria: 'rejeitado',
-                        observacoes_auditoria: justificativa,
-                        auditado_em: new Date().toISOString(),
-                    })
-                    .eq('id', fechamento.id);
+                const { error } = await supabase.from('fechamento_tfl').update({
+                    status_auditoria: 'rejeitado',
+                    observacoes_auditoria: justificativa,
+                    auditado_em: new Date().toISOString(),
+                }).eq('id', fechamento.id);
                 if (error) throw error;
             }
             toast({ message: 'Fechamento rejeitado!', type: 'warning' });
@@ -439,17 +701,14 @@ export function AuditoriaFechamentos() {
         setShowValidationModal(false);
     };
 
-    // ── Análise IA ────────────────────────────────────────────────────────────
     const fazerAnaliseIA = useCallback(async () => {
         const pendentes = fechamentos.filter(f => f.status_validacao === 'pendente');
         if (pendentes.length === 0) {
             toast({ message: 'Nenhum fechamento pendente para analisar.', type: 'warning' });
             return;
         }
-
         setAnalisandoIA(true);
         setResultadoIA(null);
-
         try {
             const payload = pendentes.map(f => {
                 const isTFL = f.fonte === 'fechamento_tfl';
@@ -473,37 +732,24 @@ export function AuditoriaFechamentos() {
                     justificativa: f.justificativa,
                 };
             });
-
             const res = await fetch('/api/caixa/analise-auditoria', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ fechamentos: payload }),
             });
-
-            if (!res.ok) {
-                const err = await res.json();
-                throw new Error(err.error ?? 'Erro na API');
-            }
-
+            if (!res.ok) throw new Error((await res.json()).error ?? 'Erro na API');
             const resultado: ResultadoAnalise = await res.json();
             setResultadoIA(resultado);
             toast({ message: `Análise concluída para ${pendentes.length} fechamento(s)!`, type: 'success' });
         } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : 'Erro desconhecido';
-            toast({ message: 'Erro na análise IA: ' + msg, type: 'error' });
+            toast({ message: 'Erro na análise IA: ' + (err instanceof Error ? err.message : 'Erro desconhecido'), type: 'error' });
         } finally {
             setAnalisandoIA(false);
         }
     }, [fechamentos, toast]);
 
-    // ── Status badge ──────────────────────────────────────────────────────────
     const getStatusBadge = (status: string) => {
-        const labels: Record<string, string> = {
-            pendente: 'PENDENTE',
-            aprovado: 'APROVADO',
-            rejeitado: 'REJEITADO',
-            correcao_solicitada: 'CORREÇÃO',
-        };
+        const labels: Record<string, string> = { pendente: 'PENDENTE', aprovado: 'APROVADO', rejeitado: 'REJEITADO', correcao_solicitada: 'CORREÇÃO' };
         const colors: Record<string, string> = {
             pendente: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
             aprovado: 'bg-green-500/10 text-green-400 border-green-500/20',
@@ -517,26 +763,16 @@ export function AuditoriaFechamentos() {
         );
     };
 
-    const getFonteBadge = (fonte: FonteRegistro) => {
-        if (fonte === 'fechamento_tfl') {
-            return (
-                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-primary/10 text-primary border border-primary/20 flex items-center gap-0.5">
-                    <FileText size={9} /> TFL
-                </span>
-            );
-        }
-        return (
+    const getFonteBadge = (fonte: FonteRegistro) =>
+        fonte === 'fechamento_tfl' ? (
+            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-primary/10 text-primary border border-primary/20 flex items-center gap-0.5">
+                <FileText size={9} /> TFL
+            </span>
+        ) : (
             <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-blue-500/10 text-blue-400 border border-blue-500/20">
                 OP
             </span>
         );
-    };
-
-    const limparFiltros = () => {
-        setFiltroDataInicio('');
-        setFiltroDataFim('');
-        setFiltroStatus('todos');
-    };
 
     const valorPrincipal = (f: Fechamento) =>
         f.fonte === 'fechamento_tfl' ? (f.saldo_final ?? 0) : (f.valor_na_conta || 0);
@@ -562,7 +798,7 @@ export function AuditoriaFechamentos() {
                         <p className="text-xs text-muted">Operadores (OP) e Relatórios TFL unificados</p>
                     </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap justify-end">
                     <select
                         className="input text-xs"
                         value={filtroStatus}
@@ -598,25 +834,15 @@ export function AuditoriaFechamentos() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                         <label className="text-[10px] font-bold text-muted uppercase block mb-1">Data Início</label>
-                        <input
-                            type="date"
-                            value={filtroDataInicio}
-                            onChange={e => setFiltroDataInicio(e.target.value)}
-                            className="input w-full text-sm"
-                        />
+                        <input type="date" value={filtroDataInicio} onChange={e => setFiltroDataInicio(e.target.value)} className="input w-full text-sm" />
                     </div>
                     <div>
                         <label className="text-[10px] font-bold text-muted uppercase block mb-1">Data Fim</label>
-                        <input
-                            type="date"
-                            value={filtroDataFim}
-                            onChange={e => setFiltroDataFim(e.target.value)}
-                            className="input w-full text-sm"
-                        />
+                        <input type="date" value={filtroDataFim} onChange={e => setFiltroDataFim(e.target.value)} className="input w-full text-sm" />
                     </div>
                 </div>
                 <div className="flex justify-end mt-3">
-                    <button onClick={limparFiltros} className="btn btn-ghost btn-sm text-xs">
+                    <button onClick={() => { setFiltroDataInicio(''); setFiltroDataFim(''); setFiltroStatus('todos'); }} className="btn btn-ghost btn-sm text-xs">
                         <X size={12} /> Limpar Filtros
                     </button>
                 </div>
@@ -633,20 +859,14 @@ export function AuditoriaFechamentos() {
                                 {resultadoIA.analises.length} fechamento(s)
                             </span>
                         </div>
-                        <button onClick={() => setResultadoIA(null)} className="btn btn-ghost btn-sm px-2">
-                            <X size={14} />
-                        </button>
+                        <button onClick={() => setResultadoIA(null)} className="btn btn-ghost btn-sm px-2"><X size={14} /></button>
                     </div>
-
                     {resultadoIA.resumo && (
-                        <div className="px-4 py-3 border-b border-border text-sm text-muted bg-surface-subtle/50">
-                            {resultadoIA.resumo}
-                        </div>
+                        <div className="px-4 py-3 border-b border-border text-sm text-muted bg-surface-subtle/50">{resultadoIA.resumo}</div>
                     )}
-
                     <div className="divide-y divide-border">
                         {resultadoIA.analises.map((analise) => {
-                            const fechamento = fechamentos.find(f => f.id === analise.id);
+                            const fech = fechamentos.find(f => f.id === analise.id);
                             const corReco = analise.recomendacao === 'APROVAR' ? 'text-success' : analise.recomendacao === 'REJEITAR' ? 'text-danger' : 'text-warning';
                             const bgReco = analise.recomendacao === 'APROVAR' ? 'bg-success/10 border-success/20' : analise.recomendacao === 'REJEITAR' ? 'bg-danger/10 border-danger/20' : 'bg-warning/10 border-warning/20';
                             const IconReco = analise.recomendacao === 'APROVAR' ? CheckCircle : analise.recomendacao === 'REJEITAR' ? AlertCircle : AlertTriangleIcon;
@@ -659,28 +879,20 @@ export function AuditoriaFechamentos() {
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-2 mb-1 flex-wrap">
                                                 <span className="text-xs font-bold">
-                                                    {fechamento
-                                                        ? `${fechamento.terminal_id} — ${formatarDataLocal(fechamento.data_turno)}`
-                                                        : `ID: ${analise.id}`}
+                                                    {fech ? `${fech.terminal_id} — ${formatarDataLocal(fech.data_turno)}` : `ID: ${analise.id}`}
                                                 </span>
-                                                {fechamento && getFonteBadge(fechamento.fonte)}
-                                                <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${bgReco} ${corReco}`}>
-                                                    {analise.recomendacao}
-                                                </span>
-                                                <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
-                                                    analise.risco === 'ALTO' ? 'bg-danger/10 text-danger' :
-                                                    analise.risco === 'MEDIO' ? 'bg-warning/10 text-warning' :
-                                                    'bg-success/10 text-success'
-                                                }`}>
+                                                {fech && getFonteBadge(fech.fonte)}
+                                                <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${bgReco} ${corReco}`}>{analise.recomendacao}</span>
+                                                <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${analise.risco === 'ALTO' ? 'bg-danger/10 text-danger' : analise.risco === 'MEDIO' ? 'bg-warning/10 text-warning' : 'bg-success/10 text-success'}`}>
                                                     Risco {analise.risco}
                                                 </span>
                                             </div>
                                             <p className="text-xs text-muted">{analise.parecer}</p>
-                                            {analise.alertas && analise.alertas.length > 0 && (
+                                            {analise.alertas?.length > 0 && (
                                                 <ul className="mt-1.5 space-y-0.5">
-                                                    {analise.alertas.map((alerta, i) => (
+                                                    {analise.alertas.map((a, i) => (
                                                         <li key={i} className="text-[11px] text-warning flex items-center gap-1">
-                                                            <AlertTriangle size={10} /> {alerta}
+                                                            <AlertTriangle size={10} /> {a}
                                                         </li>
                                                     ))}
                                                 </ul>
@@ -695,7 +907,7 @@ export function AuditoriaFechamentos() {
             )}
 
             {/* Tabela + painel de detalhes */}
-            <div style={{ display: 'grid', gridTemplateColumns: selectedFechamento ? '1fr 480px' : '1fr', gap: '1.5rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: selectedFechamento ? '1fr 520px' : '1fr', gap: '1.5rem' }}>
                 <div className="card p-0 overflow-hidden">
                     {fechamentos.length === 0 ? (
                         <div className="p-12 text-center border-dashed">
@@ -730,16 +942,14 @@ export function AuditoriaFechamentos() {
                                             <td className="py-2 px-2">{getFonteBadge(f.fonte)}</td>
                                             <td className="text-xs py-2 px-2">{formatarDataLocal(f.data_turno)}</td>
                                             <td className="py-2 px-2">
-                                                <span className="px-2 py-1 rounded-lg text-xs font-black bg-blue-500/10 text-blue-400">
-                                                    {f.terminal_id}
-                                                </span>
+                                                <span className="px-2 py-1 rounded-lg text-xs font-black bg-blue-500/10 text-blue-400">{f.terminal_id}</span>
                                             </td>
                                             <td className="text-xs py-2 px-2 opacity-60 max-w-[140px] truncate">
                                                 {f.fonte === 'fechamento_tfl' ? (f.arquivo_nome ?? '—') : f.operador_nome}
                                             </td>
                                             <td className="py-2 px-2">{getStatusBadge(f.status_validacao)}</td>
-                                            <td className={`font-bold text-right py-2 px-2 ${valorPrincipal(f) >= 0 ? 'text-success' : 'text-danger'}`}>
-                                                R$ {valorPrincipal(f).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            <td className={`font-bold text-right py-2 px-2 tabular-nums ${valorPrincipal(f) >= 0 ? 'text-success' : 'text-danger'}`}>
+                                                {fmt(valorPrincipal(f))}
                                             </td>
                                             <td className="text-right py-2 px-2">
                                                 <ChevronRight size={16} className="text-muted" />
@@ -754,8 +964,8 @@ export function AuditoriaFechamentos() {
 
                 {/* Painel de Detalhes */}
                 {selectedFechamento && (
-                    <div className="card flex flex-col h-full overflow-y-auto max-h-[80vh]">
-                        <div className="flex items-center justify-between mb-6">
+                    <div className="card flex flex-col overflow-y-auto max-h-[85vh]">
+                        <div className="flex items-center justify-between mb-4">
                             <div className="flex items-center gap-2">
                                 <h3 className="text-sm font-bold uppercase tracking-wider text-muted">Detalhes</h3>
                                 {getFonteBadge(selectedFechamento.fonte)}
@@ -763,88 +973,35 @@ export function AuditoriaFechamentos() {
                             <button onClick={() => setSelectedFechamento(null)} className="btn btn-ghost btn-sm px-2">fechar</button>
                         </div>
 
-                        <div className="flex items-center gap-4 mb-6 p-4 rounded-xl bg-surface-subtle border border-border">
-                            <div className="w-12 h-12 rounded-full flex items-center justify-center bg-warning/10 text-warning">
-                                <ShieldCheck size={24} />
+                        {/* Identificação */}
+                        <div className="flex items-center gap-3 mb-5 p-3 rounded-xl bg-surface-subtle border border-border">
+                            <div className="w-10 h-10 rounded-full flex items-center justify-center bg-warning/10 text-warning flex-shrink-0">
+                                <ShieldCheck size={20} />
                             </div>
-                            <div>
-                                <div className="text-lg font-bold">{selectedFechamento.terminal_id}</div>
-                                <div className="text-xs text-muted">
+                            <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-base font-bold">{selectedFechamento.terminal_id}</span>
+                                    {getStatusBadge(selectedFechamento.status_validacao)}
+                                </div>
+                                <div className="text-xs text-muted truncate">
                                     {selectedFechamento.fonte === 'fechamento_tfl'
                                         ? selectedFechamento.arquivo_nome
                                         : selectedFechamento.operador_nome}
-                                    {' • '}
-                                    {formatarDataLocal(selectedFechamento.data_turno)}
+                                    {' • '}{formatarDataLocal(selectedFechamento.data_turno)}
+                                    {selectedFechamento.data_fechamento && ` • ${formatarDataHoraLocal(selectedFechamento.data_fechamento)}`}
                                 </div>
                             </div>
                         </div>
 
-                        {/* Totais */}
-                        {selectedFechamento.fonte === 'fechamento_tfl' ? (
-                            <div className="grid grid-cols-2 gap-3 mb-4">
-                                <div className="p-4 rounded-xl bg-success/10 border border-success/20 text-center">
-                                    <div className="flex items-center justify-center gap-1 mb-2">
-                                        <TrendingUp size={14} className="text-success" />
-                                        <span className="text-[9px] text-success uppercase font-bold">CRÉDITOS</span>
-                                    </div>
-                                    <p className="text-xl font-black text-success">
-                                        R$ {(selectedFechamento.total_creditos ?? 0).toFixed(2)}
-                                    </p>
-                                </div>
-                                <div className="p-4 rounded-xl bg-danger/10 border border-danger/20 text-center">
-                                    <div className="flex items-center justify-center gap-1 mb-2">
-                                        <TrendingDown size={14} className="text-danger" />
-                                        <span className="text-[9px] text-danger uppercase font-bold">DÉBITOS</span>
-                                    </div>
-                                    <p className="text-xl font-black text-danger">
-                                        R$ {(selectedFechamento.total_debitos ?? 0).toFixed(2)}
-                                    </p>
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="grid grid-cols-2 gap-3 mb-4">
-                                <div className="p-4 rounded-xl bg-success/10 border border-success/20 text-center">
-                                    <div className="flex items-center justify-center gap-1 mb-2">
-                                        <TrendingUp size={14} className="text-success" />
-                                        <span className="text-[9px] text-success uppercase font-bold">ENTRADA</span>
-                                    </div>
-                                    <p className="text-xl font-black text-success">
-                                        R$ {((selectedFechamento.total_pix || 0) + (selectedFechamento.total_dinheiro || 0)).toFixed(2)}
-                                    </p>
-                                </div>
-                                <div className="p-4 rounded-xl bg-danger/10 border border-danger/20 text-center">
-                                    <div className="flex items-center justify-center gap-1 mb-2">
-                                        <TrendingDown size={14} className="text-danger" />
-                                        <span className="text-[9px] text-danger uppercase font-bold">SAÍDA</span>
-                                    </div>
-                                    <p className="text-xl font-black text-danger">
-                                        R$ {((selectedFechamento.total_sangrias || 0) + (selectedFechamento.total_depositos || 0) + (selectedFechamento.total_boletos || 0)).toFixed(2)}
-                                    </p>
-                                </div>
-                            </div>
-                        )}
+                        {/* Detalhamento completo */}
+                        {selectedFechamento.fonte === 'fechamento_tfl' && selectedFechamento.dados_extraidos
+                            ? <DetalhesTFL dados={selectedFechamento.dados_extraidos} />
+                            : <DetalhesOperador f={selectedFechamento} />
+                        }
 
-                        {/* Valor destaque */}
-                        <div className="p-4 rounded-xl bg-primary-blue-light/10 border border-primary-blue-light/20 mb-4 text-center">
-                            <p className="text-[9px] font-bold text-primary-blue-light uppercase mb-1">
-                                {selectedFechamento.fonte === 'fechamento_tfl' ? 'SALDO FINAL TFL' : 'VALOR NA CONTA'}
-                            </p>
-                            <p className="text-2xl font-black text-primary-blue-light">
-                                R$ {valorPrincipal(selectedFechamento).toFixed(2)}
-                            </p>
-                        </div>
-
-                        {selectedFechamento.fonte !== 'fechamento_tfl' && (selectedFechamento.valor_cofre || 0) > 0 && (
-                            <div className="bg-surface-subtle p-3 rounded-lg border border-border mb-3">
-                                <div className="flex justify-between text-sm">
-                                    <span className="text-muted">Valor no cofre</span>
-                                    <span className="font-bold">R$ {(selectedFechamento.valor_cofre || 0).toFixed(2)}</span>
-                                </div>
-                            </div>
-                        )}
-
+                        {/* Justificativa */}
                         {selectedFechamento.justificativa && (
-                            <div className="mb-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+                            <div className="mt-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
                                 <span className="text-[9px] text-yellow-500 font-bold uppercase">
                                     {selectedFechamento.fonte === 'fechamento_tfl' ? 'Observações' : 'Justificativa do Operador'}
                                 </span>
@@ -855,12 +1012,12 @@ export function AuditoriaFechamentos() {
                         )}
 
                         {selectedFechamento.status_validacao === 'pendente' && (
-                            <div className="mt-auto">
+                            <div className="mt-5">
                                 <button
-                                    className="btn btn-primary w-full py-4 text-lg font-bold"
+                                    className="btn btn-primary w-full py-3 text-base font-bold"
                                     onClick={() => setShowValidationModal(true)}
                                 >
-                                    <ShieldCheck className="mr-2" />
+                                    <ShieldCheck size={16} className="mr-2" />
                                     Auditar Agora
                                 </button>
                             </div>
