@@ -712,14 +712,56 @@ export function AuditoriaFechamentos() {
         try {
             const payload = pendentes.map(f => {
                 const isTFL = f.fonte === 'fechamento_tfl';
+                if (isTFL) {
+                    return {
+                        id: f.id,
+                        tipo: 'tfl' as const,
+                        data_turno: f.data_turno,
+                        terminal_id: f.terminal_id,
+                        operador_nome: f.arquivo_nome ?? '—',
+                        justificativa: f.justificativa,
+                        dados_tfl: f.dados_extraidos ? {
+                            total_creditos: f.dados_extraidos.total_creditos,
+                            total_debitos: f.dados_extraidos.total_debitos,
+                            saldo_final: f.dados_extraidos.saldo_final,
+                            recebimentos: {
+                                jogos: f.dados_extraidos.recebimentos?.jogos ?? [],
+                                total_jogos_valor: f.dados_extraidos.recebimentos?.total_jogos_valor,
+                                contas: f.dados_extraidos.recebimentos?.contas ?? [],
+                                total_contas_valor: f.dados_extraidos.recebimentos?.total_contas_valor,
+                                total_recebimentos_valor: f.dados_extraidos.recebimentos?.total_recebimentos_valor,
+                            },
+                            premios_pagos: {
+                                itens: f.dados_extraidos.premios_pagos?.itens ?? [],
+                                total_valor: f.dados_extraidos.premios_pagos?.total_valor,
+                            },
+                            pagamentos: {
+                                itens: f.dados_extraidos.pagamentos?.itens ?? [],
+                                total_valor: f.dados_extraidos.pagamentos?.total_valor,
+                            },
+                            servicos_conta: {
+                                itens: f.dados_extraidos.servicos_conta?.itens ?? [],
+                                total_valor: f.dados_extraidos.servicos_conta?.total_valor,
+                            },
+                            totais_finais: f.dados_extraidos.totais_finais,
+                        } : {
+                            total_creditos: f.total_creditos ?? 0,
+                            total_debitos: f.total_debitos ?? 0,
+                            saldo_final: f.saldo_final ?? 0,
+                        },
+                    };
+                }
                 return {
                     id: f.id,
+                    tipo: 'operador' as const,
                     data_turno: f.data_turno,
                     terminal_id: f.terminal_id,
-                    operador_nome: isTFL ? (f.arquivo_nome ?? '—') : (f.operador_nome ?? 'Sistema'),
-                    total_entradas: isTFL ? (f.total_creditos ?? 0) : (f.total_pix || 0) + (f.total_dinheiro || 0),
-                    total_saidas: isTFL ? (f.total_debitos ?? 0) : (f.total_sangrias || 0) + (f.total_depositos || 0) + (f.total_boletos || 0) + (f.total_trocados || 0),
-                    valor_na_conta: isTFL ? (f.saldo_final ?? 0) : (f.valor_na_conta || 0),
+                    operador_nome: f.operador_nome ?? 'Sistema',
+                    justificativa: f.justificativa,
+                    valor_inicial: f.valor_inicial || 0,
+                    saldo_esperado: f.saldo_esperado ?? 0,
+                    saldo_declarado: f.saldo_no_caixa || 0,
+                    divergencia: f.divergencia || 0,
                     total_pix: f.total_pix || 0,
                     total_dinheiro: f.total_dinheiro || 0,
                     total_sangrias: f.total_sangrias || 0,
@@ -728,8 +770,7 @@ export function AuditoriaFechamentos() {
                     total_trocados: f.total_trocados || 0,
                     valor_cofre: f.valor_cofre || 0,
                     valor_pix_externo: f.valor_pix_externo || 0,
-                    divergencia: f.divergencia || 0,
-                    justificativa: f.justificativa,
+                    valor_na_conta: f.valor_na_conta || 0,
                 };
             });
             const res = await fetch('/api/caixa/analise-auditoria', {
