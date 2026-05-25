@@ -1,31 +1,22 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { ChevronRight, CircleCheck as CheckCircle2, TriangleAlert as AlertTriangle, RefreshCw, ShieldCheck, Loader as Loader2, X, TrendingUp, TrendingDown, ListFilter as Filter, Brain, AlertCircle, CheckCircle, AlertTriangle as AlertTriangleIcon } from 'lucide-react';
+import { ChevronRight, CircleCheck as CheckCircle2, TriangleAlert as AlertTriangle, RefreshCw, ShieldCheck, Loader as Loader2, X, TrendingUp, TrendingDown, ListFilter as Filter, Brain, CircleAlert as AlertCircle, CircleCheck as CheckCircle, TriangleAlert as AlertTriangleIcon, FileText } from 'lucide-react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import { useToast } from '@/contexts/ToastContext';
 import {
     getFechamentosAuditoria,
     aprovarFechamento,
     rejeitarFechamento,
-    type FechamentoAuditoria
 } from '@/actions/auditoria';
 
-interface AnaliseIA {
-    id: string;
-    recomendacao: 'APROVAR' | 'REJEITAR' | 'REVISAR';
-    risco: 'BAIXO' | 'MEDIO' | 'ALTO';
-    parecer: string;
-    alertas: string[];
-}
+// ─── Types ─────────────────────────────────────────────────────────────────────
 
-interface ResultadoAnalise {
-    analises: AnaliseIA[];
-    resumo: string;
-}
+type FonteRegistro = 'caixa_sessoes' | 'fechamento_tfl';
 
 interface Fechamento {
     id: string;
+    fonte: FonteRegistro;
     data_turno: string;
     data_fechamento: string;
     terminal_id: string;
@@ -43,15 +34,33 @@ interface Fechamento {
     total_boletos: number;
     total_trocados: number;
     status_validacao: string;
-    tipo: 'tfl' | 'bolao';
     justificativa?: string;
     valor_cofre?: number;
     valor_pix_externo?: number;
     fundo_caixa_devolvido?: boolean;
     saldo_esperado?: number;
+    // TFL-specific
+    total_creditos?: number;
+    total_debitos?: number;
+    saldo_final?: number;
+    arquivo_nome?: string;
 }
 
-// Funções de formatação de data
+interface AnaliseIA {
+    id: string;
+    recomendacao: 'APROVAR' | 'REJEITAR' | 'REVISAR';
+    risco: 'BAIXO' | 'MEDIO' | 'ALTO';
+    parecer: string;
+    alertas: string[];
+}
+
+interface ResultadoAnalise {
+    analises: AnaliseIA[];
+    resumo: string;
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+
 const formatarDataLocal = (dataStr: string) => {
     if (!dataStr) return '-';
     if (dataStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
@@ -77,53 +86,64 @@ const formatarDataHoraLocal = (dataStr: string | null) => {
     return formatarDataLocal(dataStr);
 };
 
-// Modal de auditoria simplificado
-interface ModalAuditoriaSimplificadaProps {
+// ─── Modal de auditoria ────────────────────────────────────────────────────────
+
+interface ModalAuditoriaProps {
     fechamento: Fechamento;
     onClose: () => void;
     onAprovar: (observacoes: string) => void;
-    onRejeitar: (dados: { justificativa: string; diferenca?: number }) => void;
+    onRejeitar: (dados: { justificativa: string }) => void;
 }
 
-function ModalAuditoriaSimplificada({
-    fechamento,
-    onClose,
-    onAprovar,
-    onRejeitar
-}: ModalAuditoriaSimplificadaProps) {
+function ModalAuditoria({ fechamento, onClose, onAprovar, onRejeitar }: ModalAuditoriaProps) {
     const [modoRejeitar, setModoRejeitar] = useState(false);
     const [justificativa, setJustificativa] = useState('');
     const [observacoes, setObservacoes] = useState('');
 
-    const totalEntradas = (fechamento.total_pix || 0) + (fechamento.total_dinheiro || 0);
-    const totalSaidas = (fechamento.total_sangrias || 0) + 
-                        (fechamento.total_depositos || 0) + 
-                        (fechamento.total_boletos || 0) + 
-                        (fechamento.total_trocados || 0);
+    const isTFL = fechamento.fonte === 'fechamento_tfl';
+
+    const totalEntradas = isTFL
+        ? (fechamento.total_creditos ?? 0)
+        : (fechamento.total_pix || 0) + (fechamento.total_dinheiro || 0);
+
+    const totalSaidas = isTFL
+        ? (fechamento.total_debitos ?? 0)
+        : (fechamento.total_sangrias || 0) + (fechamento.total_depositos || 0) +
+          (fechamento.total_boletos || 0) + (fechamento.total_trocados || 0);
+
+    const valorDestaque = isTFL ? (fechamento.saldo_final ?? 0) : (fechamento.valor_na_conta || 0);
+    const labelDestaque = isTFL ? 'SALDO FINAL TFL' : 'VALOR NA CONTA';
+    const descDestaque = isTFL ? 'Saldo conforme relatório TFL' : 'PIX Externo + (Entradas - Saídas)';
 
     return (
         <>
-            <div className="fixed inset-0 bg-black/80 z-9998" onClick={onClose} />
-            <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] max-w-md bg-bg-card border border-border rounded-2xl z-9999 p-6">
+            <div className="fixed inset-0 bg-black/80 z-[9998]" onClick={onClose} />
+            <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] max-w-md bg-bg-card border border-border rounded-2xl z-[9999] p-6">
                 <div className="flex justify-between items-center mb-4">
-                    <h2 className="text-xl font-bold">Auditoria de Fechamento</h2>
+                    <div>
+                        <h2 className="text-xl font-bold">Auditoria de Fechamento</h2>
+                        {isTFL && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-primary bg-primary/10 border border-primary/20 rounded px-2 py-0.5 mt-1">
+                                <FileText size={10} /> RELATÓRIO TFL
+                            </span>
+                        )}
+                    </div>
                     <button onClick={onClose} className="btn btn-ghost btn-sm">
                         <X size={18} />
                     </button>
                 </div>
 
-                {/* Informações básicas */}
                 <div className="grid grid-cols-2 gap-3 mb-6 p-3 rounded-xl bg-surface-subtle border border-border text-sm">
                     <div>
                         <p className="text-[9px] text-muted uppercase font-bold">Terminal</p>
                         <p className="font-bold">{fechamento.terminal_id}</p>
                     </div>
                     <div>
-                        <p className="text-[9px] text-muted uppercase font-bold">Operador</p>
-                        <p className="font-bold">{fechamento.operador_nome}</p>
+                        <p className="text-[9px] text-muted uppercase font-bold">{isTFL ? 'Arquivo' : 'Operador'}</p>
+                        <p className="font-bold truncate">{isTFL ? (fechamento.arquivo_nome ?? '—') : fechamento.operador_nome}</p>
                     </div>
                     <div>
-                        <p className="text-[9px] text-muted uppercase font-bold">Data do turno</p>
+                        <p className="text-[9px] text-muted uppercase font-bold">Data</p>
                         <p className="font-bold">{formatarDataLocal(fechamento.data_turno)}</p>
                     </div>
                     <div>
@@ -132,12 +152,13 @@ function ModalAuditoriaSimplificada({
                     </div>
                 </div>
 
-                {/* Totais de Entrada e Saída */}
                 <div className="grid grid-cols-2 gap-4 mb-6">
                     <div className="p-4 rounded-xl bg-success/10 border border-success/20 text-center">
                         <div className="flex items-center justify-center gap-1 mb-2">
                             <TrendingUp size={16} className="text-success" />
-                            <span className="text-[10px] text-success uppercase font-bold">ENTRADA</span>
+                            <span className="text-[10px] text-success uppercase font-bold">
+                                {isTFL ? 'CRÉDITOS' : 'ENTRADA'}
+                            </span>
                         </div>
                         <p className="text-2xl font-black text-success">
                             R$ {totalEntradas.toFixed(2)}
@@ -146,7 +167,9 @@ function ModalAuditoriaSimplificada({
                     <div className="p-4 rounded-xl bg-danger/10 border border-danger/20 text-center">
                         <div className="flex items-center justify-center gap-1 mb-2">
                             <TrendingDown size={16} className="text-danger" />
-                            <span className="text-[10px] text-danger uppercase font-bold">SAÍDA</span>
+                            <span className="text-[10px] text-danger uppercase font-bold">
+                                {isTFL ? 'DÉBITOS' : 'SAÍDA'}
+                            </span>
                         </div>
                         <p className="text-2xl font-black text-danger">
                             R$ {totalSaidas.toFixed(2)}
@@ -154,21 +177,17 @@ function ModalAuditoriaSimplificada({
                     </div>
                 </div>
 
-                {/* Valor na Conta */}
                 <div className="p-4 rounded-xl bg-primary-blue-light/10 border border-primary-blue-light/20 mb-6 text-center">
                     <p className="text-[10px] font-bold text-primary-blue-light uppercase mb-1">
-                        💰 VALOR NA CONTA
+                        {labelDestaque}
                     </p>
                     <p className="text-2xl font-black text-primary-blue-light">
-                        R$ {(fechamento.valor_na_conta || 0).toFixed(2)}
+                        R$ {valorDestaque.toFixed(2)}
                     </p>
-                    <p className="text-[9px] text-muted mt-1">
-                        PIX Externo + (Entradas - Saídas)
-                    </p>
+                    <p className="text-[9px] text-muted mt-1">{descDestaque}</p>
                 </div>
 
-                {/* Informações adicionais */}
-                {(fechamento.valor_cofre || 0) > 0 && (
+                {!isTFL && (fechamento.valor_cofre || 0) > 0 && (
                     <div className="bg-surface-subtle p-3 rounded-lg border border-border mb-4">
                         <div className="flex justify-between text-sm">
                             <span className="text-muted">Valor no cofre</span>
@@ -177,24 +196,15 @@ function ModalAuditoriaSimplificada({
                     </div>
                 )}
 
-                {(fechamento.valor_pix_externo || 0) > 0 && (
-                    <div className="bg-surface-subtle p-3 rounded-lg border border-border mb-4">
-                        <div className="flex justify-between text-sm">
-                            <span className="text-muted">PIX externo</span>
-                            <span className="font-bold">R$ {(fechamento.valor_pix_externo || 0).toFixed(2)}</span>
-                        </div>
-                    </div>
-                )}
-
-                {/* Justificativa */}
                 {fechamento.justificativa && (
                     <div className="mb-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
-                        <span className="text-[9px] text-yellow-500 font-bold uppercase">Justificativa do Operador</span>
+                        <span className="text-[9px] text-yellow-500 font-bold uppercase">
+                            {isTFL ? 'Observações' : 'Justificativa do Operador'}
+                        </span>
                         <p className="text-xs text-yellow-600 dark:text-yellow-200 mt-1 italic">"{fechamento.justificativa}"</p>
                     </div>
                 )}
 
-                {/* Ações */}
                 {!modoRejeitar ? (
                     <div className="flex gap-3 justify-end mt-4">
                         <button className="btn btn-ghost text-sm" onClick={onClose}>Cancelar</button>
@@ -241,6 +251,8 @@ function ModalAuditoriaSimplificada({
     );
 }
 
+// ─── Main Component ────────────────────────────────────────────────────────────
+
 export function AuditoriaFechamentos() {
     const supabase = createBrowserSupabaseClient();
     const { toast } = useToast();
@@ -250,8 +262,6 @@ export function AuditoriaFechamentos() {
     const [selectedFechamento, setSelectedFechamento] = useState<Fechamento | null>(null);
     const [showValidationModal, setShowValidationModal] = useState(false);
     const [filtroStatus, setFiltroStatus] = useState<'todos' | 'pendente' | 'aprovado' | 'rejeitado'>('todos');
-
-    // Filtros por data
     const [filtroDataInicio, setFiltroDataInicio] = useState('');
     const [filtroDataFim, setFiltroDataFim] = useState('');
 
@@ -262,26 +272,28 @@ export function AuditoriaFechamentos() {
     const fetchHistorico = useCallback(async () => {
         setLoading(true);
         try {
-            const data = await getFechamentosAuditoria({
+            // ── 1. caixa_sessoes ─────────────────────────────────────────────
+            const sessoesBruto = await getFechamentosAuditoria({
                 status: filtroStatus !== 'todos' ? filtroStatus : undefined,
                 dataInicio: filtroDataInicio || undefined,
                 dataFim: filtroDataFim || undefined,
             });
 
-            const fechamentosProcessados: Fechamento[] = data.map((f: any) => {
+            const deSessoes: Fechamento[] = sessoesBruto.map((f: any) => {
                 const totalPix = (f.resumo_entradas_pix || 0) + (f.resumo_entradas_bolao_pix || 0);
                 const totalDinheiro = (f.resumo_entradas_dinheiro || 0) + (f.resumo_entradas_bolao_dinheiro || 0);
                 const totalEntradas = totalPix + totalDinheiro;
-                const totalSaidas = (f.resumo_saidas_sangria || 0) + 
-                                    (f.resumo_saidas_deposito || 0) + 
-                                    (f.resumo_saidas_boleto || 0) + 
-                                    (f.resumo_saidas_trocados || 0);
+                const totalSaidas =
+                    (f.resumo_saidas_sangria || 0) +
+                    (f.resumo_saidas_deposito || 0) +
+                    (f.resumo_saidas_boleto || 0) +
+                    (f.resumo_saidas_trocados || 0);
                 const totalLancamentos = totalEntradas - totalSaidas;
                 const valorNaConta = (f.pix_externo_informado || 0) + totalLancamentos;
-                const saldoEsperado = (f.valor_inicial || 0) + totalLancamentos;
 
                 return {
-                    id: f.id,
+                    id: String(f.id),
+                    fonte: 'caixa_sessoes' as FonteRegistro,
                     data_turno: f.data_turno || '',
                     data_fechamento: f.data_fechamento,
                     terminal_id: f.terminal_id || 'TFL-WEB',
@@ -299,28 +311,135 @@ export function AuditoriaFechamentos() {
                     total_boletos: f.resumo_saidas_boleto || 0,
                     total_trocados: f.resumo_saidas_trocados || 0,
                     status_validacao: f.auditoria_status || f.status,
-                    tipo: 'tfl',
                     justificativa: f.observacoes_operador,
                     valor_cofre: f.valor_enviado_cofre || 0,
                     valor_pix_externo: f.pix_externo_informado || 0,
                     fundo_caixa_devolvido: f.fundo_caixa_devolvido,
-                    saldo_esperado: saldoEsperado
+                    saldo_esperado: (f.valor_inicial || 0) + totalLancamentos,
                 };
             });
 
-            setFechamentos(fechamentosProcessados);
+            // ── 2. fechamento_tfl ─────────────────────────────────────────────
+            let tflQuery = supabase
+                .from('fechamento_tfl')
+                .select('id, data_referencia, terminal, total_creditos, total_debitos, saldo_final, arquivo_nome, status_auditoria, observacoes_auditoria, created_at')
+                .order('created_at', { ascending: false })
+                .limit(100);
+
+            if (filtroStatus !== 'todos') {
+                tflQuery = tflQuery.eq('status_auditoria', filtroStatus);
+            }
+            if (filtroDataInicio) {
+                tflQuery = tflQuery.gte('data_referencia', filtroDataInicio);
+            }
+            if (filtroDataFim) {
+                tflQuery = tflQuery.lte('data_referencia', filtroDataFim);
+            }
+
+            const { data: tflBruto, error: tflError } = await tflQuery;
+            if (tflError) throw tflError;
+
+            const deTFL: Fechamento[] = (tflBruto ?? []).map((r: any) => ({
+                id: String(r.id),
+                fonte: 'fechamento_tfl' as FonteRegistro,
+                data_turno: r.data_referencia || '',
+                data_fechamento: r.created_at,
+                terminal_id: r.terminal || '—',
+                operador_id: '',
+                operador_nome: r.arquivo_nome || '—',
+                valor_inicial: 0,
+                total_lancamentos: (r.total_creditos || 0) - (r.total_debitos || 0),
+                saldo_no_caixa: r.saldo_final || 0,
+                divergencia: 0,
+                valor_na_conta: r.saldo_final || 0,
+                total_pix: 0,
+                total_dinheiro: 0,
+                total_sangrias: 0,
+                total_depositos: 0,
+                total_boletos: 0,
+                total_trocados: 0,
+                status_validacao: r.status_auditoria || 'pendente',
+                justificativa: r.observacoes_auditoria,
+                valor_cofre: 0,
+                valor_pix_externo: 0,
+                // TFL extras
+                total_creditos: r.total_creditos || 0,
+                total_debitos: r.total_debitos || 0,
+                saldo_final: r.saldo_final || 0,
+                arquivo_nome: r.arquivo_nome,
+            }));
+
+            // ── 3. Merge e ordenar por data desc ─────────────────────────────
+            const todos = [...deSessoes, ...deTFL].sort((a, b) => {
+                const da = a.data_fechamento || a.data_turno;
+                const db = b.data_fechamento || b.data_turno;
+                return db.localeCompare(da);
+            });
+
+            setFechamentos(todos);
         } catch (err: any) {
             console.error('Erro ao carregar histórico:', err);
             toast({ message: 'Erro ao carregar fechamentos: ' + (err.message || 'Erro desconhecido'), type: 'error' });
         } finally {
             setLoading(false);
         }
-    }, [filtroStatus, filtroDataInicio, filtroDataFim, toast]);
+    }, [filtroStatus, filtroDataInicio, filtroDataFim, toast, supabase]);
 
     useEffect(() => {
         fetchHistorico();
     }, [fetchHistorico]);
 
+    // ── Aprovar ───────────────────────────────────────────────────────────────
+    const handleAprovar = async (fechamento: Fechamento, observacoes: string) => {
+        try {
+            if (fechamento.fonte === 'caixa_sessoes') {
+                await aprovarFechamento(parseInt(fechamento.id), observacoes);
+            } else {
+                const { error } = await supabase
+                    .from('fechamento_tfl')
+                    .update({
+                        status_auditoria: 'aprovado',
+                        observacoes_auditoria: observacoes,
+                        auditado_em: new Date().toISOString(),
+                    })
+                    .eq('id', fechamento.id);
+                if (error) throw error;
+            }
+            toast({ message: 'Fechamento aprovado com sucesso!', type: 'success' });
+            await fetchHistorico();
+            setSelectedFechamento(null);
+        } catch (error: any) {
+            toast({ message: error.message || 'Erro ao aprovar', type: 'error' });
+        }
+        setShowValidationModal(false);
+    };
+
+    // ── Rejeitar ──────────────────────────────────────────────────────────────
+    const handleRejeitar = async (fechamento: Fechamento, justificativa: string) => {
+        try {
+            if (fechamento.fonte === 'caixa_sessoes') {
+                await rejeitarFechamento(parseInt(fechamento.id), justificativa, false);
+            } else {
+                const { error } = await supabase
+                    .from('fechamento_tfl')
+                    .update({
+                        status_auditoria: 'rejeitado',
+                        observacoes_auditoria: justificativa,
+                        auditado_em: new Date().toISOString(),
+                    })
+                    .eq('id', fechamento.id);
+                if (error) throw error;
+            }
+            toast({ message: 'Fechamento rejeitado!', type: 'warning' });
+            await fetchHistorico();
+            setSelectedFechamento(null);
+        } catch (error: any) {
+            toast({ message: error.message || 'Erro ao rejeitar', type: 'error' });
+        }
+        setShowValidationModal(false);
+    };
+
+    // ── Análise IA ────────────────────────────────────────────────────────────
     const fazerAnaliseIA = useCallback(async () => {
         const pendentes = fechamentos.filter(f => f.status_validacao === 'pendente');
         if (pendentes.length === 0) {
@@ -332,25 +451,28 @@ export function AuditoriaFechamentos() {
         setResultadoIA(null);
 
         try {
-            const payload = pendentes.map(f => ({
-                id: f.id,
-                data_turno: f.data_turno,
-                terminal_id: f.terminal_id,
-                operador_nome: f.operador_nome || 'Sistema',
-                total_entradas: (f.total_pix || 0) + (f.total_dinheiro || 0),
-                total_saidas: (f.total_sangrias || 0) + (f.total_depositos || 0) + (f.total_boletos || 0) + (f.total_trocados || 0),
-                valor_na_conta: f.valor_na_conta || 0,
-                total_pix: f.total_pix || 0,
-                total_dinheiro: f.total_dinheiro || 0,
-                total_sangrias: f.total_sangrias || 0,
-                total_depositos: f.total_depositos || 0,
-                total_boletos: f.total_boletos || 0,
-                total_trocados: f.total_trocados || 0,
-                valor_cofre: f.valor_cofre || 0,
-                valor_pix_externo: f.valor_pix_externo || 0,
-                divergencia: f.divergencia || 0,
-                justificativa: f.justificativa,
-            }));
+            const payload = pendentes.map(f => {
+                const isTFL = f.fonte === 'fechamento_tfl';
+                return {
+                    id: f.id,
+                    data_turno: f.data_turno,
+                    terminal_id: f.terminal_id,
+                    operador_nome: isTFL ? (f.arquivo_nome ?? '—') : (f.operador_nome ?? 'Sistema'),
+                    total_entradas: isTFL ? (f.total_creditos ?? 0) : (f.total_pix || 0) + (f.total_dinheiro || 0),
+                    total_saidas: isTFL ? (f.total_debitos ?? 0) : (f.total_sangrias || 0) + (f.total_depositos || 0) + (f.total_boletos || 0) + (f.total_trocados || 0),
+                    valor_na_conta: isTFL ? (f.saldo_final ?? 0) : (f.valor_na_conta || 0),
+                    total_pix: f.total_pix || 0,
+                    total_dinheiro: f.total_dinheiro || 0,
+                    total_sangrias: f.total_sangrias || 0,
+                    total_depositos: f.total_depositos || 0,
+                    total_boletos: f.total_boletos || 0,
+                    total_trocados: f.total_trocados || 0,
+                    valor_cofre: f.valor_cofre || 0,
+                    valor_pix_externo: f.valor_pix_externo || 0,
+                    divergencia: f.divergencia || 0,
+                    justificativa: f.justificativa,
+                };
+            });
 
             const res = await fetch('/api/caixa/analise-auditoria', {
                 method: 'POST',
@@ -374,54 +496,38 @@ export function AuditoriaFechamentos() {
         }
     }, [fechamentos, toast]);
 
-    const handleCloseModal = () => {
-        setShowValidationModal(false);
-    };
-
-    const handleAprovar = async (sessaoId: number, observacoes: string) => {
-        console.log('[Auditoria] Aprovando:', sessaoId, observacoes);
-        try {
-            await aprovarFechamento(sessaoId, observacoes);
-            toast({ message: 'Fechamento aprovado com sucesso!', type: 'success' });
-            await fetchHistorico();
-            setSelectedFechamento(null);
-        } catch (error: any) {
-            console.error('[Auditoria] Erro:', error);
-            toast({ message: error.message || 'Erro ao aprovar', type: 'error' });
-        }
-        handleCloseModal();
-    };
-
-    const handleRejeitar = async (sessaoId: number, justificativa: string) => {
-        console.log('[Auditoria] Rejeitando:', sessaoId, justificativa);
-        try {
-            await rejeitarFechamento(sessaoId, justificativa, false);
-            toast({ message: 'Fechamento rejeitado!', type: 'warning' });
-            await fetchHistorico();
-            setSelectedFechamento(null);
-        } catch (error: any) {
-            console.error('[Auditoria] Erro:', error);
-            toast({ message: error.message || 'Erro ao rejeitar', type: 'error' });
-        }
-        handleCloseModal();
-    };
-
+    // ── Status badge ──────────────────────────────────────────────────────────
     const getStatusBadge = (status: string) => {
         const labels: Record<string, string> = {
             pendente: 'PENDENTE',
             aprovado: 'APROVADO',
             rejeitado: 'REJEITADO',
-            correcao_solicitada: 'CORREÇÃO'
+            correcao_solicitada: 'CORREÇÃO',
         };
         const colors: Record<string, string> = {
             pendente: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
             aprovado: 'bg-green-500/10 text-green-400 border-green-500/20',
             rejeitado: 'bg-red-500/10 text-red-400 border-red-500/20',
-            correcao_solicitada: 'bg-orange-500/10 text-orange-400 border-orange-500/20'
+            correcao_solicitada: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
         };
         return (
-            <span className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase border ${colors[status] || colors.pendente}`}>
-                {labels[status] || status}
+            <span className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase border ${colors[status] ?? colors.pendente}`}>
+                {labels[status] ?? status}
+            </span>
+        );
+    };
+
+    const getFonteBadge = (fonte: FonteRegistro) => {
+        if (fonte === 'fechamento_tfl') {
+            return (
+                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-primary/10 text-primary border border-primary/20 flex items-center gap-0.5">
+                    <FileText size={9} /> TFL
+                </span>
+            );
+        }
+        return (
+            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                OP
             </span>
         );
     };
@@ -431,6 +537,9 @@ export function AuditoriaFechamentos() {
         setFiltroDataFim('');
         setFiltroStatus('todos');
     };
+
+    const valorPrincipal = (f: Fechamento) =>
+        f.fonte === 'fechamento_tfl' ? (f.saldo_final ?? 0) : (f.valor_na_conta || 0);
 
     if (loading) {
         return (
@@ -442,6 +551,7 @@ export function AuditoriaFechamentos() {
 
     return (
         <div className="auditoria-fechamentos">
+            {/* Header */}
             <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
@@ -449,7 +559,7 @@ export function AuditoriaFechamentos() {
                     </div>
                     <div>
                         <h3 className="text-lg font-bold">Auditoria de Fechamentos</h3>
-                        <p className="text-xs text-muted">Validação de encerramentos de turno</p>
+                        <p className="text-xs text-muted">Operadores (OP) e Relatórios TFL unificados</p>
                     </div>
                 </div>
                 <div className="flex gap-2">
@@ -549,8 +659,11 @@ export function AuditoriaFechamentos() {
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-2 mb-1 flex-wrap">
                                                 <span className="text-xs font-bold">
-                                                    {fechamento ? `${fechamento.terminal_id} — ${formatarDataLocal(fechamento.data_turno)}` : `ID: ${analise.id}`}
+                                                    {fechamento
+                                                        ? `${fechamento.terminal_id} — ${formatarDataLocal(fechamento.data_turno)}`
+                                                        : `ID: ${analise.id}`}
                                                 </span>
+                                                {fechamento && getFonteBadge(fechamento.fonte)}
                                                 <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${bgReco} ${corReco}`}>
                                                     {analise.recomendacao}
                                                 </span>
@@ -581,8 +694,8 @@ export function AuditoriaFechamentos() {
                 </div>
             )}
 
+            {/* Tabela + painel de detalhes */}
             <div style={{ display: 'grid', gridTemplateColumns: selectedFechamento ? '1fr 480px' : '1fr', gap: '1.5rem' }}>
-                {/* Tabela */}
                 <div className="card p-0 overflow-hidden">
                     {fechamentos.length === 0 ? (
                         <div className="p-12 text-center border-dashed">
@@ -594,37 +707,41 @@ export function AuditoriaFechamentos() {
                             <table className="w-full">
                                 <thead>
                                     <tr className="border-b border-border">
-                                        <th className="text-left py-2 px-2 text-xs font-bold text-muted uppercase">Data Turno</th>
-                                        <th className="text-left py-2 px-2 text-xs font-bold text-muted uppercase">Data Fechamento</th>
+                                        <th className="text-left py-2 px-2 text-xs font-bold text-muted uppercase">Tipo</th>
+                                        <th className="text-left py-2 px-2 text-xs font-bold text-muted uppercase">Data</th>
                                         <th className="text-left py-2 px-2 text-xs font-bold text-muted uppercase">Terminal</th>
-                                        <th className="text-left py-2 px-2 text-xs font-bold text-muted uppercase">Operador</th>
+                                        <th className="text-left py-2 px-2 text-xs font-bold text-muted uppercase">Operador / Arquivo</th>
                                         <th className="text-left py-2 px-2 text-xs font-bold text-muted uppercase">Status</th>
-                                        <th className="text-right py-2 px-2 text-xs font-bold text-muted uppercase">Valor na Conta</th>
+                                        <th className="text-right py-2 px-2 text-xs font-bold text-muted uppercase">Valor</th>
                                         <th style={{ width: '50px' }}></th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {fechamentos.map((f) => (
                                         <tr
-                                            key={f.id}
+                                            key={`${f.fonte}-${f.id}`}
                                             onClick={() => setSelectedFechamento(f)}
                                             className={`cursor-pointer hover:bg-bg-card-hover transition-colors ${
-                                                selectedFechamento?.id === f.id ? 'bg-primary/5 border-l-4 border-primary' : ''
+                                                selectedFechamento?.id === f.id && selectedFechamento?.fonte === f.fonte
+                                                    ? 'bg-primary/5 border-l-4 border-primary'
+                                                    : ''
                                             }`}
                                         >
-                                            <td className="text-xs">{formatarDataLocal(f.data_turno)}</td>
-                                            <td className="text-xs">{formatarDataHoraLocal(f.data_fechamento)}</td>
-                                            <td>
-                                                <span className={`px-2 py-1 rounded-lg text-xs font-black bg-blue-500/10 text-blue-400`}>
+                                            <td className="py-2 px-2">{getFonteBadge(f.fonte)}</td>
+                                            <td className="text-xs py-2 px-2">{formatarDataLocal(f.data_turno)}</td>
+                                            <td className="py-2 px-2">
+                                                <span className="px-2 py-1 rounded-lg text-xs font-black bg-blue-500/10 text-blue-400">
                                                     {f.terminal_id}
                                                 </span>
                                             </td>
-                                            <td className="text-xs opacity-60">{f.operador_nome}</td>
-                                            <td>{getStatusBadge(f.status_validacao)}</td>
-                                            <td className={`font-bold text-right ${(f.valor_na_conta || 0) >= 0 ? 'text-success' : 'text-danger'}`}>
-                                                R$ {(f.valor_na_conta || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            <td className="text-xs py-2 px-2 opacity-60 max-w-[140px] truncate">
+                                                {f.fonte === 'fechamento_tfl' ? (f.arquivo_nome ?? '—') : f.operador_nome}
                                             </td>
-                                            <td className="text-right">
+                                            <td className="py-2 px-2">{getStatusBadge(f.status_validacao)}</td>
+                                            <td className={`font-bold text-right py-2 px-2 ${valorPrincipal(f) >= 0 ? 'text-success' : 'text-danger'}`}>
+                                                R$ {valorPrincipal(f).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </td>
+                                            <td className="text-right py-2 px-2">
                                                 <ChevronRight size={16} className="text-muted" />
                                             </td>
                                         </tr>
@@ -635,14 +752,15 @@ export function AuditoriaFechamentos() {
                     )}
                 </div>
 
-                {/* Card de Detalhes */}
+                {/* Painel de Detalhes */}
                 {selectedFechamento && (
                     <div className="card flex flex-col h-full overflow-y-auto max-h-[80vh]">
                         <div className="flex items-center justify-between mb-6">
-                            <h3 className="text-sm font-bold uppercase tracking-wider text-muted">Detalhes do Turno</h3>
-                            <button onClick={() => setSelectedFechamento(null)} className="btn btn-ghost btn-sm px-2">
-                                fechar
-                            </button>
+                            <div className="flex items-center gap-2">
+                                <h3 className="text-sm font-bold uppercase tracking-wider text-muted">Detalhes</h3>
+                                {getFonteBadge(selectedFechamento.fonte)}
+                            </div>
+                            <button onClick={() => setSelectedFechamento(null)} className="btn btn-ghost btn-sm px-2">fechar</button>
                         </div>
 
                         <div className="flex items-center gap-4 mb-6 p-4 rounded-xl bg-surface-subtle border border-border">
@@ -651,41 +769,72 @@ export function AuditoriaFechamentos() {
                             </div>
                             <div>
                                 <div className="text-lg font-bold">{selectedFechamento.terminal_id}</div>
-                                <div className="text-xs text-muted">{selectedFechamento.operador_nome} • {formatarDataLocal(selectedFechamento.data_turno)}</div>
+                                <div className="text-xs text-muted">
+                                    {selectedFechamento.fonte === 'fechamento_tfl'
+                                        ? selectedFechamento.arquivo_nome
+                                        : selectedFechamento.operador_nome}
+                                    {' • '}
+                                    {formatarDataLocal(selectedFechamento.data_turno)}
+                                </div>
                             </div>
                         </div>
 
                         {/* Totais */}
-                        <div className="grid grid-cols-2 gap-3 mb-4">
-                            <div className="p-4 rounded-xl bg-success/10 border border-success/20 text-center">
-                                <div className="flex items-center justify-center gap-1 mb-2">
-                                    <TrendingUp size={14} className="text-success" />
-                                    <span className="text-[9px] text-success uppercase font-bold">ENTRADA</span>
+                        {selectedFechamento.fonte === 'fechamento_tfl' ? (
+                            <div className="grid grid-cols-2 gap-3 mb-4">
+                                <div className="p-4 rounded-xl bg-success/10 border border-success/20 text-center">
+                                    <div className="flex items-center justify-center gap-1 mb-2">
+                                        <TrendingUp size={14} className="text-success" />
+                                        <span className="text-[9px] text-success uppercase font-bold">CRÉDITOS</span>
+                                    </div>
+                                    <p className="text-xl font-black text-success">
+                                        R$ {(selectedFechamento.total_creditos ?? 0).toFixed(2)}
+                                    </p>
                                 </div>
-                                <p className="text-xl font-black text-success">
-                                    R$ {((selectedFechamento.total_pix || 0) + (selectedFechamento.total_dinheiro || 0)).toFixed(2)}
-                                </p>
-                            </div>
-                            <div className="p-4 rounded-xl bg-danger/10 border border-danger/20 text-center">
-                                <div className="flex items-center justify-center gap-1 mb-2">
-                                    <TrendingDown size={14} className="text-danger" />
-                                    <span className="text-[9px] text-danger uppercase font-bold">SAÍDA</span>
+                                <div className="p-4 rounded-xl bg-danger/10 border border-danger/20 text-center">
+                                    <div className="flex items-center justify-center gap-1 mb-2">
+                                        <TrendingDown size={14} className="text-danger" />
+                                        <span className="text-[9px] text-danger uppercase font-bold">DÉBITOS</span>
+                                    </div>
+                                    <p className="text-xl font-black text-danger">
+                                        R$ {(selectedFechamento.total_debitos ?? 0).toFixed(2)}
+                                    </p>
                                 </div>
-                                <p className="text-xl font-black text-danger">
-                                    R$ {((selectedFechamento.total_sangrias || 0) + (selectedFechamento.total_depositos || 0) + (selectedFechamento.total_boletos || 0)).toFixed(2)}
-                                </p>
                             </div>
-                        </div>
+                        ) : (
+                            <div className="grid grid-cols-2 gap-3 mb-4">
+                                <div className="p-4 rounded-xl bg-success/10 border border-success/20 text-center">
+                                    <div className="flex items-center justify-center gap-1 mb-2">
+                                        <TrendingUp size={14} className="text-success" />
+                                        <span className="text-[9px] text-success uppercase font-bold">ENTRADA</span>
+                                    </div>
+                                    <p className="text-xl font-black text-success">
+                                        R$ {((selectedFechamento.total_pix || 0) + (selectedFechamento.total_dinheiro || 0)).toFixed(2)}
+                                    </p>
+                                </div>
+                                <div className="p-4 rounded-xl bg-danger/10 border border-danger/20 text-center">
+                                    <div className="flex items-center justify-center gap-1 mb-2">
+                                        <TrendingDown size={14} className="text-danger" />
+                                        <span className="text-[9px] text-danger uppercase font-bold">SAÍDA</span>
+                                    </div>
+                                    <p className="text-xl font-black text-danger">
+                                        R$ {((selectedFechamento.total_sangrias || 0) + (selectedFechamento.total_depositos || 0) + (selectedFechamento.total_boletos || 0)).toFixed(2)}
+                                    </p>
+                                </div>
+                            </div>
+                        )}
 
-                        {/* Valor na Conta */}
+                        {/* Valor destaque */}
                         <div className="p-4 rounded-xl bg-primary-blue-light/10 border border-primary-blue-light/20 mb-4 text-center">
-                            <p className="text-[9px] font-bold text-primary-blue-light uppercase mb-1">💰 VALOR NA CONTA</p>
-                            <p className="text-2xl font-black text-primary-blue-light">R$ {(selectedFechamento.valor_na_conta || 0).toFixed(2)}</p>
-                            <p className="text-[9px] text-muted mt-1">PIX Externo + (Entradas - Saídas)</p>
+                            <p className="text-[9px] font-bold text-primary-blue-light uppercase mb-1">
+                                {selectedFechamento.fonte === 'fechamento_tfl' ? 'SALDO FINAL TFL' : 'VALOR NA CONTA'}
+                            </p>
+                            <p className="text-2xl font-black text-primary-blue-light">
+                                R$ {valorPrincipal(selectedFechamento).toFixed(2)}
+                            </p>
                         </div>
 
-                        {/* Informações adicionais */}
-                        {(selectedFechamento.valor_cofre || 0) > 0 && (
+                        {selectedFechamento.fonte !== 'fechamento_tfl' && (selectedFechamento.valor_cofre || 0) > 0 && (
                             <div className="bg-surface-subtle p-3 rounded-lg border border-border mb-3">
                                 <div className="flex justify-between text-sm">
                                     <span className="text-muted">Valor no cofre</span>
@@ -694,15 +843,17 @@ export function AuditoriaFechamentos() {
                             </div>
                         )}
 
-                        {/* Justificativa */}
                         {selectedFechamento.justificativa && (
                             <div className="mb-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
-                                <span className="text-[9px] text-yellow-500 font-bold uppercase">Justificativa do Operador</span>
-                                <p className="text-xs text-yellow-600 dark:text-yellow-200 mt-1 italic">"{selectedFechamento.justificativa}"</p>
+                                <span className="text-[9px] text-yellow-500 font-bold uppercase">
+                                    {selectedFechamento.fonte === 'fechamento_tfl' ? 'Observações' : 'Justificativa do Operador'}
+                                </span>
+                                <p className="text-xs text-yellow-600 dark:text-yellow-200 mt-1 italic">
+                                    "{selectedFechamento.justificativa}"
+                                </p>
                             </div>
                         )}
 
-                        {/* Botão de auditoria */}
                         {selectedFechamento.status_validacao === 'pendente' && (
                             <div className="mt-auto">
                                 <button
@@ -720,11 +871,11 @@ export function AuditoriaFechamentos() {
 
             {/* Modal */}
             {showValidationModal && selectedFechamento && (
-                <ModalAuditoriaSimplificada
+                <ModalAuditoria
                     fechamento={selectedFechamento}
-                    onClose={handleCloseModal}
-                    onAprovar={(obs) => handleAprovar(parseInt(selectedFechamento.id), obs)}
-                    onRejeitar={({ justificativa }) => handleRejeitar(parseInt(selectedFechamento.id), justificativa)}
+                    onClose={() => setShowValidationModal(false)}
+                    onAprovar={(obs) => handleAprovar(selectedFechamento, obs)}
+                    onRejeitar={({ justificativa }) => handleRejeitar(selectedFechamento, justificativa)}
                 />
             )}
         </div>
