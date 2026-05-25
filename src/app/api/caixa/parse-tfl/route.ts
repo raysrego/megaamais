@@ -115,32 +115,28 @@ export async function POST(request: NextRequest) {
 
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
-    const base64 = buffer.toString('base64');
 
     const isPDF = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-    const mediaType = isPDF ? 'application/pdf' : ((file.type || 'image/jpeg') as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp');
 
-    const messageContent: any[] = [
-      { type: 'text', text: PROMPT },
-    ];
+    type ContentPart =
+      | { type: 'text'; text: string }
+      | { type: 'file'; data: Buffer; mediaType: string }
+      | { type: 'image'; image: string; mediaType: string };
+
+    const content: ContentPart[] = [{ type: 'text', text: PROMPT }];
 
     if (isPDF) {
-      messageContent.push({
-        type: 'document',
-        source: { type: 'base64', media_type: 'application/pdf', data: base64 },
-      });
+      content.push({ type: 'file', data: buffer, mediaType: 'application/pdf' });
     } else {
-      messageContent.push({
-        type: 'image',
-        image: base64,
-        mediaType,
-      });
+      const base64 = buffer.toString('base64');
+      const mediaType = file.type || 'image/jpeg';
+      content.push({ type: 'image', image: base64, mediaType });
     }
 
     const { object: dados } = await generateObject({
       model: anthropic('claude-opus-4-5'),
       schema: RelatorioTFLSchema,
-      messages: [{ role: 'user', content: messageContent }],
+      messages: [{ role: 'user', content: content as any }],
     });
 
     return NextResponse.json(dados);
