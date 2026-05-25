@@ -349,8 +349,11 @@ function CardArquivo({
             {/* Header */}
             <div className="flex items-center gap-3 p-3">
                 {/* Thumbnail */}
-                <div className="relative flex-shrink-0 w-14 h-14 rounded-lg overflow-hidden border border-border bg-bg-secondary">
-                    <img src={item.preview} alt="ficha" className="w-full h-full object-cover" />
+                <div className="relative flex-shrink-0 w-14 h-14 rounded-lg overflow-hidden border border-border bg-bg-secondary flex items-center justify-center">
+                    {item.preview
+                        ? <img src={item.preview} alt="ficha" className="w-full h-full object-cover" />
+                        : <FileImage size={24} className="text-text-muted opacity-60" />
+                    }
                 </div>
 
                 {/* Info */}
@@ -521,17 +524,20 @@ export function FechamentoCaixaAutomatizado() {
     const addFiles = useCallback((files: FileList | null) => {
         if (!files) return;
         const novos: ArquivoUpload[] = Array.from(files)
-            .filter(f => f.type.startsWith('image/'))
-            .map(f => ({
-                id: crypto.randomUUID(),
-                file: f,
-                preview: URL.createObjectURL(f),
-                status: 'aguardando',
-                resultado: null,
-                erro: null,
-                savedId: null,
-                expandido: false,
-            }));
+            .filter(f => f.type.startsWith('image/') || f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'))
+            .map(f => {
+                const isPDF = f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf');
+                return {
+                    id: crypto.randomUUID(),
+                    file: f,
+                    preview: isPDF ? '' : URL.createObjectURL(f),
+                    status: 'aguardando',
+                    resultado: null,
+                    erro: null,
+                    savedId: null,
+                    expandido: false,
+                };
+            });
         setArquivos(prev => [...prev, ...novos]);
     }, []);
 
@@ -702,7 +708,7 @@ export function FechamentoCaixaAutomatizado() {
                         <input
                             ref={fileInputRef}
                             type="file"
-                            accept="image/*"
+                            accept="image/*,application/pdf"
                             multiple
                             className="hidden"
                             onChange={e => addFiles(e.target.files)}
@@ -713,7 +719,7 @@ export function FechamentoCaixaAutomatizado() {
                             </div>
                             <div className="text-center">
                                 <p className="text-sm font-medium text-text-primary">Arraste fotos das fichas aqui</p>
-                                <p className="text-xs mt-0.5">ou clique para selecionar — JPG, PNG, WEBP</p>
+                                <p className="text-xs mt-0.5">ou clique para selecionar — JPG, PNG, WEBP, PDF</p>
                             </div>
                         </div>
                     </div>
