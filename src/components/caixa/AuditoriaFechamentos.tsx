@@ -7,7 +7,7 @@ import {
     ListFilter as Filter, Brain, CircleAlert as AlertCircle,
     CircleCheck as CheckCircle, TriangleAlert as AlertTriangleIcon,
     FileText, Banknote, Wallet, ArrowDownLeft, ArrowUpRight,
-    Receipt, CreditCard, Landmark, Coins,
+    Receipt, CreditCard, Landmark, Coins, Plus, Trash2, CalendarDays,
 } from 'lucide-react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import { useToast } from '@/contexts/ToastContext';
@@ -16,6 +16,12 @@ import {
     aprovarFechamento,
     rejeitarFechamento,
 } from '@/actions/auditoria';
+import {
+    adicionarPixExterno,
+    removerPixExterno,
+    getPixExternosPorSessao,
+    type PixExterno,
+} from '@/actions/extrato-conciliacao';
 
 // ─── TFL types (espelho de FechamentoCaixaTFL) ─────────────────────────────────
 
@@ -85,6 +91,7 @@ interface Fechamento {
     valor_pix_externo?: number;
     fundo_caixa_devolvido?: boolean;
     saldo_esperado?: number;
+    loja_id?: string;
     // TFL-specific
     total_creditos?: number;
     total_debitos?: number;
@@ -438,6 +445,245 @@ function DetalhesOperador({ f }: { f: Fechamento }) {
     );
 }
 
+// ─── Formulário de PIX Externos Unitários ────────────────────────────────────
+
+function PixExternosForm({
+    sessaoId,
+    lojaId,
+    dataTurno,
+}: {
+    sessaoId: number;
+    lojaId: string;
+    dataTurno: string;
+}) {
+    const { toast } = useToast();
+    const [lista, setLista] = useState<PixExterno[]>([]);
+    const [carregando, setCarregando] = useState(true);
+    const [salvando, setSalvando] = useState(false);
+    const [novoValor, setNovoValor] = useState('');
+    const [novaData, setNovaData] = useState(dataTurno);
+    const [novaDescricao, setNovaDescricao] = useState('');
+
+    useEffect(() => {
+        getPixExternosPorSessao(sessaoId)
+            .then(setLista)
+            .catch(() => toast({ type: 'error', message: 'Erro ao carregar PIX externos.' }))
+            .finally(() => setCarregando(false));
+    }, [sessaoId, toast]);
+
+    async function adicionar() {
+        const valor = parseFloat(novoValor.replace(',', '.'));
+        if (!valor || valor <= 0) {
+            toast({ type: 'warning', message: 'Informe um valor válido.' });
+            return;
+        }
+        if (!novaData) {
+            toast({ type: 'warning', message: 'Informe a data do PIX.' });
+            return;
+        }
+        setSalvando(true);
+        try {
+            const pix = await adicionarPixExterno({
+                sessao_id: sessaoId,
+                loja_id: lojaId,
+                valor,
+                data_pix: novaData,
+                descricao: novaDescricao,
+            });
+            setLista(prev => [...prev, pix]);
+            setNovoValor('');
+            setNovaDescricao('');
+            toast({ type: 'success', message: 'PIX externo adicionado.' });
+        } catch (e: unknown) {
+            toast({ type: 'error', message: 'Erro ao adicionar PIX externo.' });
+            console.error(e);
+        } finally {
+            setSalvando(false);
+        }
+    }
+
+    async function remover(id: number) {
+        try {
+            await removerPixExterno(id);
+            setLista(prev => prev.filter(p => p.id !== id));
+            toast({ type: 'success', message: 'PIX externo removido.' });
+        } catch (e: unknown) {
+            toast({ type: 'error', message: 'Erro ao remover PIX externo.' });
+            console.error(e);
+        }
+    }
+
+    const totalPix = lista.reduce((a, p) => a + p.valor, 0);
+
+    return (
+        <div className="rounded-xl border border-blue-500/15 bg-blue-500/5 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                    <CreditCard size={13} className="text-blue-400" />
+                    <span className="text-xs font-bold text-blue-300">PIX Externos Unitários</span>
+                </div>
+                {lista.length > 0 && (
+                    <span className="text-[10px] font-bold text-blue-400">
+                        Total: {totalPix.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    </span>
+                )}
+            </div>
+
+            {/* Lista existente */}
+            {carregando ? (
+                <div className="flex items-center gap-2 text-xs text-muted py-1">
+                    <Loader2 size={11} className="animate-spin" /> Carregando...
+                </div>
+            ) : lista.length > 0 ? (
+                <div className="space-y-1.5">
+                    {lista.map(p => (
+                        <div key={p.id} className="flex items-center justify-between bg-white/3 rounded-lg px-3 py-2">
+                            <div className="flex items-center gap-3">
+                                <span className="text-[10px] text-muted flex items-center gap-1">
+                                    <CalendarDays size={10} />
+                                    {p.data_pix.split('T')[0].split('-').reverse().join('/')}
+                                </span>
+                                <span className="text-xs font-semibold text-blue-300">
+                                    {p.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                </span>
+                                {p.descricao && <span className="text-[10px] text-muted">{p.descricao}</span>}
+                                {p.conciliado && (
+                                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-success/10 text-success">Conciliado</span>
+                                )}
+                            </div>
+                            <button
+                                onClick={() => remover(p.id)}
+                                className="p-1 hover:text-error transition-colors text-muted"
+                            >
+                                <Trash2 size={11} />
+                            </button>
+                        </div>
+                    ))}
+                </div>
+            ) : (
+                <p className="text-[10px] text-muted">Nenhum PIX externo registrado.</p>
+            )}
+
+            {/* Formulário para adicionar */}
+            <div className="grid grid-cols-3 gap-2">
+                <div>
+                    <label className="block text-[10px] text-muted mb-1">Valor (R$)</label>
+                    <input
+                        type="number"
+                        step="0.01"
+                        placeholder="0,00"
+                        className="input w-full text-xs h-8"
+                        value={novoValor}
+                        onChange={e => setNovoValor(e.target.value)}
+                    />
+                </div>
+                <div>
+                    <label className="block text-[10px] text-muted mb-1">Data</label>
+                    <input
+                        type="date"
+                        className="input w-full text-xs h-8"
+                        value={novaData}
+                        onChange={e => setNovaData(e.target.value)}
+                    />
+                </div>
+                <div>
+                    <label className="block text-[10px] text-muted mb-1">Descrição</label>
+                    <input
+                        type="text"
+                        placeholder="Opcional"
+                        className="input w-full text-xs h-8"
+                        value={novaDescricao}
+                        onChange={e => setNovaDescricao(e.target.value)}
+                    />
+                </div>
+            </div>
+            <button
+                className="btn btn-ghost text-xs h-8 border border-blue-500/20 text-blue-300 hover:bg-blue-500/10 w-full"
+                onClick={adicionar}
+                disabled={salvando}
+            >
+                {salvando ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
+                Adicionar PIX Externo
+            </button>
+        </div>
+    );
+}
+
+// ─── Formulário de Depósito no Cofre ─────────────────────────────────────────
+
+function DepositoCofreForm({
+    sessaoId,
+    lojaId,
+    valorAtual,
+}: {
+    sessaoId: number;
+    lojaId: string;
+    valorAtual: number;
+}) {
+    const { toast } = useToast();
+    const supabase = createBrowserSupabaseClient();
+    const [valor, setValor] = useState(valorAtual > 0 ? String(valorAtual) : '');
+    const [salvando, setSalvando] = useState(false);
+    const [salvo, setSalvo] = useState(valorAtual > 0);
+
+    async function salvar() {
+        const v = parseFloat(valor.replace(',', '.'));
+        if (!v || v <= 0) {
+            toast({ type: 'warning', message: 'Informe um valor válido para o depósito.' });
+            return;
+        }
+        setSalvando(true);
+        try {
+            const { error } = await supabase
+                .from('caixa_sessoes')
+                .update({ valor_enviado_cofre: v })
+                .eq('id', sessaoId);
+            if (error) throw error;
+            setSalvo(true);
+            toast({ type: 'success', message: 'Depósito no cofre registrado.' });
+        } catch (e: unknown) {
+            toast({ type: 'error', message: 'Erro ao salvar depósito no cofre.' });
+            console.error(e);
+        } finally {
+            setSalvando(false);
+        }
+    }
+
+    return (
+        <div className="rounded-xl border border-warning/15 bg-warning/5 p-4 space-y-3">
+            <div className="flex items-center gap-2">
+                <Landmark size={13} className="text-warning" />
+                <span className="text-xs font-bold text-yellow-300">Depósito no Cofre</span>
+                {salvo && (
+                    <span className="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded bg-success/10 text-success">
+                        Registrado
+                    </span>
+                )}
+            </div>
+            <p className="text-[10px] text-muted">
+                Valor físico depositado no cofre ao final do turno. Aparecerá na conciliação bancária.
+            </p>
+            <div className="flex gap-2">
+                <input
+                    type="number"
+                    step="0.01"
+                    placeholder="0,00"
+                    className="input flex-1 text-xs h-8"
+                    value={valor}
+                    onChange={e => { setValor(e.target.value); setSalvo(false); }}
+                />
+                <button
+                    className="btn btn-ghost text-xs h-8 border border-warning/20 text-yellow-300 hover:bg-warning/10 px-4"
+                    onClick={salvar}
+                    disabled={salvando}
+                >
+                    {salvando ? <Loader2 size={11} className="animate-spin" /> : 'Salvar'}
+                </button>
+            </div>
+        </div>
+    );
+}
+
 // ─── Modal de auditoria ────────────────────────────────────────────────────────
 
 interface ModalAuditoriaProps {
@@ -481,6 +727,23 @@ function ModalAuditoria({ fechamento, onClose, onAprovar, onRejeitar }: ModalAud
                         : <DetalhesOperador f={fechamento} />
                     }
                 </div>
+
+                {/* PIX Externos e Depósito Cofre — apenas para caixa_sessoes */}
+                {!isTFL && (
+                    <div className="space-y-3 mb-6">
+                        <p className="text-[10px] font-bold text-muted uppercase tracking-wider">Dados para Conciliação Bancária</p>
+                        <PixExternosForm
+                            sessaoId={parseInt(fechamento.id)}
+                            lojaId={fechamento.loja_id ?? ''}
+                            dataTurno={fechamento.data_turno}
+                        />
+                        <DepositoCofreForm
+                            sessaoId={parseInt(fechamento.id)}
+                            lojaId={fechamento.loja_id ?? ''}
+                            valorAtual={fechamento.valor_cofre ?? 0}
+                        />
+                    </div>
+                )}
 
                 {/* Justificativa do operador */}
                 {fechamento.justificativa && (
@@ -596,6 +859,7 @@ export function AuditoriaFechamentos() {
                     valor_pix_externo: f.pix_externo_informado || 0,
                     fundo_caixa_devolvido: f.fundo_caixa_devolvido,
                     saldo_esperado: (f.valor_inicial || 0) + totalLancamentos,
+                    loja_id: f.loja_id,
                 };
             });
 

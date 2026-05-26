@@ -1,11 +1,19 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, Loader as Loader2, ArrowRightLeft, CircleCheck as CheckCircle2, TriangleAlert as AlertTriangle, Clock, ChevronRight, X, Landmark, Banknote, CreditCard, TrendingUp, TrendingDown, Calendar, FileText } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { RefreshCw, Loader as Loader2, ArrowRightLeft, CircleCheck as CheckCircle2, TriangleAlert as AlertTriangle, Clock, ChevronRight, X, Landmark, Banknote, CreditCard, TrendingUp, Upload, FileText, Calendar, Check, Search, CircleAlert, Info } from 'lucide-react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import { useToast } from '@/contexts/ToastContext';
 import { getFechamentosAuditoria } from '@/actions/auditoria';
-import { registrarExtratoDiario } from '@/actions/conciliacao';
+import {
+    salvarTransacoesOFX,
+    getTransacoesOFX,
+    executarConciliacaoDetalhada,
+    type OFXTransacaoSalva,
+    type ResultadoConciliacao,
+} from '@/actions/extrato-conciliacao';
+import { parseOFX, type OFXDados } from '@/lib/ofx-parser';
+import { useLoja } from '@/contexts/LojaContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -25,19 +33,6 @@ interface FechamentoPendente {
     diferenca_caixa: number;
     auditoria_status: string;
     loja_id: string;
-    conta_bancaria_id?: string;
-}
-
-interface ConciliacaoItem {
-    fechamento: FechamentoPendente;
-    extrato?: {
-        depositos_confirmados: number;
-        pix_ted_recebidos: number;
-        saldo_extrato: number | null;
-    };
-    status: 'pendente' | 'conciliado' | 'divergente';
-    diferencaDepositos: number;
-    diferencaPix: number;
 }
 
 interface ContaBancaria {
@@ -57,190 +52,571 @@ function fmt(v: number | null | undefined) {
 
 function fmtData(dataStr: string) {
     if (!dataStr) return '-';
-    if (dataStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
-        const [y, m, d] = dataStr.split('-');
-        return `${d}/${m}/${y}`;
-    }
-    return dataStr;
+    const clean = dataStr.split('T')[0];
+    const [y, m, d] = clean.split('-');
+    return `${d}/${m}/${y}`;
 }
 
-function statusBadge(status: ConciliacaoItem['status']) {
-    switch (status) {
-        case 'conciliado':
-            return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-success/10 text-success border border-success/20"><CheckCircle2 size={10} /> Conciliado</span>;
-        case 'divergente':
-            return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-warning/10 text-warning border border-warning/20"><AlertTriangle size={10} /> Divergente</span>;
-        default:
-            return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-muted/10 text-muted border border-muted/20"><Clock size={10} /> Pendente</span>;
-    }
+function StatusBadge({ status }: { status: 'pendente' | 'conciliado' | 'divergente' }) {
+    if (status === 'conciliado') return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-success/10 text-success border border-success/20">
+            <CheckCircle2 size={10} /> Conciliado
+        </span>
+    );
+    if (status === 'divergente') return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-warning/10 text-warning border border-warning/20">
+            <AlertTriangle size={10} /> Divergente
+        </span>
+    );
+    return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-muted/10 text-muted border border-muted/20">
+            <Clock size={10} /> Pendente
+        </span>
+    );
 }
 
-// ─── Modal de conciliação individual ─────────────────────────────────────────
+// ─── OFX Upload Panel ─────────────────────────────────────────────────────────
 
-function ModalConciliarItem({
-    item,
+function OFXUploadPanel({
+    lojaId,
     contas,
-    onClose,
-    onSalvar,
+    onImportado,
 }: {
-    item: ConciliacaoItem;
+    lojaId: string;
     contas: ContaBancaria[];
-    onClose: () => void;
-    onSalvar: (dados: {
-        conta_id: string;
-        depositos_confirmados: number;
-        pix_ted_recebidos: number;
-        debitos_pagamentos: number;
-        tarifas_bancarias: number;
-        saldo_extrato: number;
-    }) => Promise<void>;
+    onImportado: (dados: OFXDados, arquivoNome: string) => void;
 }) {
-    const [contaId, setContaId] = useState(contas[0]?.id ?? '');
-    const [depositosConfirmados, setDepositosConfirmados] = useState(
-        item.fechamento.resumo_saidas_deposito ?? 0
-    );
-    const [pixRecebidos, setPixRecebidos] = useState(
-        item.fechamento.resumo_entradas_pix ?? 0
-    );
-    const [debitoPagamentos, setDebitoPagamentos] = useState(0);
-    const [tarifas, setTarifas] = useState(0);
-    const [saldoExtrato, setSaldoExtrato] = useState(0);
-    const [saving, setSaving] = useState(false);
+    const [dragging, setDragging] = useState(false);
+    const [processando, setProcessando] = useState(false);
+    const [preview, setPreview] = useState<OFXDados | null>(null);
+    const [arquivoNome, setArquivoNome] = useState('');
+    const [contaSelecionada, setContaSelecionada] = useState(contas[0]?.id ?? '');
+    const fileRef = useRef<HTMLInputElement>(null);
+    const { toast } = useToast();
 
-    async function handleSalvar() {
-        if (!contaId) return;
-        setSaving(true);
+    async function processar(file: File) {
+        setProcessando(true);
         try {
-            await onSalvar({
-                conta_id: contaId,
-                depositos_confirmados: depositosConfirmados,
-                pix_ted_recebidos: pixRecebidos,
-                debitos_pagamentos: debitoPagamentos,
-                tarifas_bancarias: tarifas,
-                saldo_extrato: saldoExtrato,
-            });
-            onClose();
+            const text = await file.text();
+            const dados = parseOFX(text);
+            setPreview(dados);
+            setArquivoNome(file.name);
+        } catch (e) {
+            toast({ type: 'error', message: 'Erro ao ler arquivo OFX. Verifique o formato.' });
+            console.error(e);
         } finally {
-            setSaving(false);
+            setProcessando(false);
         }
     }
 
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-            <div className="card w-full max-w-lg mx-4">
-                <div className="flex items-center justify-between mb-6">
+    function onDrop(e: React.DragEvent) {
+        e.preventDefault();
+        setDragging(false);
+        const file = e.dataTransfer.files[0];
+        if (file && (file.name.endsWith('.ofx') || file.name.endsWith('.OFX'))) {
+            processar(file);
+        } else {
+            toast({ type: 'error', message: 'Envie um arquivo .OFX válido.' });
+        }
+    }
+
+    function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+        const file = e.target.files?.[0];
+        if (file) processar(file);
+    }
+
+    async function confirmarImport() {
+        if (!preview || !lojaId) return;
+        setProcessando(true);
+        try {
+            const transacoes = preview.transacoes.map(t => ({
+                loja_id: lojaId,
+                conta_id: contaSelecionada || undefined,
+                fitid: t.fitid,
+                tipo: t.tipo,
+                data: t.data,
+                valor: t.valor,
+                memo: t.memo,
+                checknum: t.checknum,
+            }));
+
+            const { inseridas, duplicadas } = await salvarTransacoesOFX(transacoes, lojaId, arquivoNome);
+            toast({
+                type: 'success',
+                message: `${inseridas} transação(ões) importada(s)${duplicadas > 0 ? `, ${duplicadas} já existia(m)` : ''}.`,
+            });
+            onImportado(preview, arquivoNome);
+            setPreview(null);
+        } catch (e) {
+            toast({ type: 'error', message: 'Erro ao salvar extrato no banco de dados.' });
+            console.error(e);
+        } finally {
+            setProcessando(false);
+        }
+    }
+
+    if (preview) {
+        const creditos = preview.transacoes.filter(t => t.tipo === 'CREDIT');
+        const debitos = preview.transacoes.filter(t => t.tipo === 'DEBIT');
+        const totalCreditos = creditos.reduce((a, t) => a + t.valor, 0);
+        const totalDebitos = debitos.reduce((a, t) => a + t.valor, 0);
+
+        return (
+            <div className="card p-5 space-y-5">
+                <div className="flex items-start justify-between">
                     <div>
-                        <h3 className="text-base font-bold">Registrar Extrato Bancário</h3>
-                        <p className="text-xs text-muted mt-0.5">
-                            Terminal {item.fechamento.terminal_id} — {fmtData(item.fechamento.data_turno)}
-                        </p>
+                        <h3 className="text-sm font-bold">Extrato OFX carregado</h3>
+                        <p className="text-xs text-muted mt-0.5">{arquivoNome}</p>
                     </div>
-                    <button className="btn btn-ghost p-2" onClick={onClose}><X size={16} /></button>
+                    <button className="btn btn-ghost p-1.5" onClick={() => setPreview(null)}>
+                        <X size={14} />
+                    </button>
                 </div>
 
-                {/* Referência do fechamento */}
-                <div className="rounded-xl border border-white/5 bg-white/2 p-4 mb-5 grid grid-cols-2 gap-3">
-                    <div>
-                        <p className="text-[10px] text-muted uppercase tracking-wider">Entradas PIX (sistema)</p>
-                        <p className="text-sm font-bold text-foreground">{fmt(item.fechamento.resumo_entradas_pix)}</p>
+                {/* Resumo do arquivo */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                        <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Banco</p>
+                        <p className="text-sm font-bold">{preview.bankid || '—'}</p>
                     </div>
-                    <div>
-                        <p className="text-[10px] text-muted uppercase tracking-wider">Depósitos Cofre (sistema)</p>
-                        <p className="text-sm font-bold text-foreground">{fmt(item.fechamento.resumo_saidas_deposito)}</p>
+                    <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                        <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Período</p>
+                        <p className="text-sm font-bold">{fmtData(preview.dtstart)} – {fmtData(preview.dtend)}</p>
                     </div>
-                    <div>
-                        <p className="text-[10px] text-muted uppercase tracking-wider">PIX Externo (sistema)</p>
-                        <p className="text-sm font-bold text-foreground">{fmt(item.fechamento.pix_externo_informado)}</p>
+                    <div className="rounded-xl border border-success/20 bg-success/5 p-3">
+                        <p className="text-[10px] text-success uppercase tracking-wider mb-1">{creditos.length} Créditos</p>
+                        <p className="text-sm font-bold text-success">{fmt(totalCreditos)}</p>
                     </div>
-                    <div>
-                        <p className="text-[10px] text-muted uppercase tracking-wider">Total Entradas (sistema)</p>
-                        <p className="text-sm font-bold text-foreground">{fmt(item.fechamento.resumo_total_entradas)}</p>
+                    <div className="rounded-xl border border-error/20 bg-error/5 p-3">
+                        <p className="text-[10px] text-error uppercase tracking-wider mb-1">{debitos.length} Débitos</p>
+                        <p className="text-sm font-bold text-error">{fmt(totalDebitos)}</p>
                     </div>
                 </div>
 
-                <div className="space-y-4">
-                    {contas.length > 0 && (
-                        <div>
-                            <label className="block text-xs font-semibold text-muted mb-1.5">Conta Bancária</label>
-                            <select
-                                className="input w-full text-sm"
-                                value={contaId}
-                                onChange={e => setContaId(e.target.value)}
-                            >
-                                {contas.map(c => (
-                                    <option key={c.id} value={c.id}>{c.banco} — {c.nome}</option>
-                                ))}
-                            </select>
-                        </div>
-                    )}
+                {/* Tabela de transações */}
+                <div className="rounded-xl border border-white/5 overflow-hidden max-h-64 overflow-y-auto">
+                    <table className="w-full text-xs">
+                        <thead className="sticky top-0 bg-[var(--card-bg)]">
+                            <tr className="border-b border-white/5">
+                                <th className="text-left px-3 py-2 text-[10px] font-bold text-muted uppercase">Data</th>
+                                <th className="text-left px-3 py-2 text-[10px] font-bold text-muted uppercase">Descrição</th>
+                                <th className="text-right px-3 py-2 text-[10px] font-bold text-muted uppercase">Valor</th>
+                                <th className="text-center px-3 py-2 text-[10px] font-bold text-muted uppercase">Tipo</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {preview.transacoes.map((t, i) => (
+                                <tr key={i} className="border-b border-white/3 hover:bg-white/2">
+                                    <td className="px-3 py-2">{fmtData(t.data)}</td>
+                                    <td className="px-3 py-2 text-muted max-w-[200px] truncate">{t.memo || t.fitid}</td>
+                                    <td className={`px-3 py-2 text-right font-mono font-semibold ${t.tipo === 'CREDIT' ? 'text-success' : 'text-error'}`}>
+                                        {t.tipo === 'CREDIT' ? '+' : '-'}{fmt(t.valor)}
+                                    </td>
+                                    <td className="px-3 py-2 text-center">
+                                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${t.tipo === 'CREDIT' ? 'bg-success/10 text-success' : 'bg-error/10 text-error'}`}>
+                                            {t.tipo === 'CREDIT' ? 'C' : 'D'}
+                                        </span>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
 
-                    <div className="grid grid-cols-2 gap-3">
-                        <div>
-                            <label className="block text-xs font-semibold text-muted mb-1.5">Depósitos Confirmados</label>
-                            <input
-                                type="number"
-                                step="0.01"
-                                className="input w-full text-sm"
-                                value={depositosConfirmados}
-                                onChange={e => setDepositosConfirmados(parseFloat(e.target.value) || 0)}
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-xs font-semibold text-muted mb-1.5">PIX / TED Recebidos</label>
-                            <input
-                                type="number"
-                                step="0.01"
-                                className="input w-full text-sm"
-                                value={pixRecebidos}
-                                onChange={e => setPixRecebidos(parseFloat(e.target.value) || 0)}
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-xs font-semibold text-muted mb-1.5">Débitos / Pagamentos</label>
-                            <input
-                                type="number"
-                                step="0.01"
-                                className="input w-full text-sm"
-                                value={debitoPagamentos}
-                                onChange={e => setDebitoPagamentos(parseFloat(e.target.value) || 0)}
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-xs font-semibold text-muted mb-1.5">Tarifas Bancárias</label>
-                            <input
-                                type="number"
-                                step="0.01"
-                                className="input w-full text-sm"
-                                value={tarifas}
-                                onChange={e => setTarifas(parseFloat(e.target.value) || 0)}
-                            />
-                        </div>
-                    </div>
-
+                {contas.length > 0 && (
                     <div>
-                        <label className="block text-xs font-semibold text-muted mb-1.5">Saldo no Extrato</label>
-                        <input
-                            type="number"
-                            step="0.01"
+                        <label className="block text-xs font-semibold text-muted mb-1.5">Vincular à conta bancária</label>
+                        <select
                             className="input w-full text-sm"
-                            value={saldoExtrato}
-                            onChange={e => setSaldoExtrato(parseFloat(e.target.value) || 0)}
-                        />
+                            value={contaSelecionada}
+                            onChange={e => setContaSelecionada(e.target.value)}
+                        >
+                            <option value="">Sem vínculo</option>
+                            {contas.map(c => (
+                                <option key={c.id} value={c.id}>{c.banco} — {c.nome}</option>
+                            ))}
+                        </select>
                     </div>
-                </div>
+                )}
 
-                <div className="flex gap-3 mt-6">
-                    <button className="btn btn-ghost flex-1" onClick={onClose}>Cancelar</button>
+                <div className="flex gap-3">
+                    <button className="btn btn-ghost flex-1 text-xs" onClick={() => setPreview(null)}>
+                        Cancelar
+                    </button>
                     <button
-                        className="btn btn-primary flex-1"
-                        onClick={handleSalvar}
-                        disabled={saving || !contaId}
+                        className="btn btn-primary flex-1 text-xs"
+                        onClick={confirmarImport}
+                        disabled={processando}
                     >
-                        {saving ? <Loader2 size={14} className="animate-spin" /> : <ArrowRightLeft size={14} />}
-                        Conciliar
+                        {processando ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                        Importar {preview.transacoes.length} transações
                     </button>
                 </div>
             </div>
+        );
+    }
+
+    return (
+        <div
+            className={`card p-6 border-2 border-dashed transition-colors cursor-pointer ${dragging ? 'border-primary/50 bg-primary/5' : 'border-white/10 hover:border-white/20'}`}
+            onDragOver={e => { e.preventDefault(); setDragging(true); }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={onDrop}
+            onClick={() => fileRef.current?.click()}
+        >
+            <input ref={fileRef} type="file" accept=".ofx,.OFX" className="hidden" onChange={onFileChange} />
+            <div className="flex flex-col items-center text-center gap-3">
+                {processando
+                    ? <Loader2 size={28} className="animate-spin text-muted" />
+                    : <Upload size={28} className="text-muted" />
+                }
+                <div>
+                    <p className="text-sm font-semibold">
+                        {processando ? 'Processando arquivo...' : 'Arraste o arquivo OFX aqui'}
+                    </p>
+                    <p className="text-xs text-muted mt-1">ou clique para selecionar — formato .OFX do banco</p>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ─── Resultado de Conciliação ─────────────────────────────────────────────────
+
+function ResultadoConciliacaoPanel({ resultado, onFechar }: {
+    resultado: ResultadoConciliacao;
+    onFechar: () => void;
+}) {
+    const total = resultado.total_ofx;
+    const conciliados = resultado.pix_conciliados + resultado.depositos_conciliados;
+    const percentual = total > 0 ? Math.round((conciliados / total) * 100) : 0;
+
+    return (
+        <div className="card p-5 space-y-5">
+            <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold">Resultado da Conciliação</h3>
+                <button className="btn btn-ghost p-1.5" onClick={onFechar}><X size={14} /></button>
+            </div>
+
+            {/* KPIs */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="rounded-xl border border-white/5 bg-white/2 p-3 text-center">
+                    <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Trans. OFX</p>
+                    <p className="text-2xl font-bold">{resultado.total_ofx}</p>
+                </div>
+                <div className="rounded-xl border border-success/20 bg-success/5 p-3 text-center">
+                    <p className="text-[10px] text-success uppercase tracking-wider mb-1">Conciliados</p>
+                    <p className="text-2xl font-bold text-success">{conciliados}</p>
+                </div>
+                <div className="rounded-xl border border-warning/20 bg-warning/5 p-3 text-center">
+                    <p className="text-[10px] text-warning uppercase tracking-wider mb-1">Sem Match</p>
+                    <p className="text-2xl font-bold text-warning">{resultado.pix_nao_encontrados.length}</p>
+                </div>
+                <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-3 text-center">
+                    <p className="text-[10px] text-blue-400 uppercase tracking-wider mb-1">% Conciliado</p>
+                    <p className="text-2xl font-bold text-blue-400">{percentual}%</p>
+                </div>
+            </div>
+
+            {/* Barra de progresso */}
+            <div className="space-y-1">
+                <div className="h-2 bg-white/5 rounded-full overflow-hidden">
+                    <div
+                        className="h-full bg-success rounded-full transition-all duration-700"
+                        style={{ width: `${percentual}%` }}
+                    />
+                </div>
+                <p className="text-[10px] text-muted text-right">{conciliados} de {total} transações conciliadas</p>
+            </div>
+
+            {/* Transações sem correspondência */}
+            {resultado.pix_nao_encontrados.length > 0 && (
+                <div>
+                    <div className="flex items-center gap-2 mb-3">
+                        <CircleAlert size={13} className="text-warning" />
+                        <p className="text-xs font-bold text-warning">Créditos no extrato sem PIX registrado</p>
+                    </div>
+                    <div className="rounded-xl border border-warning/10 overflow-hidden">
+                        <table className="w-full text-xs">
+                            <thead>
+                                <tr className="border-b border-white/5 bg-warning/5">
+                                    <th className="text-left px-3 py-2 text-[10px] font-bold text-muted uppercase">Data</th>
+                                    <th className="text-left px-3 py-2 text-[10px] font-bold text-muted uppercase">Descrição</th>
+                                    <th className="text-right px-3 py-2 text-[10px] font-bold text-muted uppercase">Valor</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {resultado.pix_nao_encontrados.map((t, i) => (
+                                    <tr key={i} className="border-b border-white/3">
+                                        <td className="px-3 py-2">{fmtData(t.data)}</td>
+                                        <td className="px-3 py-2 text-muted max-w-[200px] truncate">{t.memo || t.fitid}</td>
+                                        <td className="px-3 py-2 text-right font-mono font-semibold text-warning">{fmt(t.valor)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
+            {/* PIX extras no sistema */}
+            {resultado.pix_extras_sistema.length > 0 && (
+                <div>
+                    <div className="flex items-center gap-2 mb-3">
+                        <Info size={13} className="text-blue-400" />
+                        <p className="text-xs font-bold text-blue-400">PIX registrados sem correspondência no extrato</p>
+                    </div>
+                    <div className="rounded-xl border border-blue-500/10 overflow-hidden">
+                        <table className="w-full text-xs">
+                            <thead>
+                                <tr className="border-b border-white/5 bg-blue-500/5">
+                                    <th className="text-left px-3 py-2 text-[10px] font-bold text-muted uppercase">Data</th>
+                                    <th className="text-left px-3 py-2 text-[10px] font-bold text-muted uppercase">Descrição</th>
+                                    <th className="text-right px-3 py-2 text-[10px] font-bold text-muted uppercase">Valor</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {resultado.pix_extras_sistema.map((p, i) => (
+                                    <tr key={i} className="border-b border-white/3">
+                                        <td className="px-3 py-2">{fmtData(p.data_pix)}</td>
+                                        <td className="px-3 py-2 text-muted">{p.descricao || '—'}</td>
+                                        <td className="px-3 py-2 text-right font-mono font-semibold">{fmt(p.valor)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
+            {/* Divergências de depósitos */}
+            {resultado.depositos_divergentes.length > 0 && (
+                <div>
+                    <div className="flex items-center gap-2 mb-3">
+                        <AlertTriangle size={13} className="text-error" />
+                        <p className="text-xs font-bold text-error">Divergências em depósitos do cofre</p>
+                    </div>
+                    <div className="rounded-xl border border-error/10 overflow-hidden">
+                        <table className="w-full text-xs">
+                            <thead>
+                                <tr className="border-b border-white/5 bg-error/5">
+                                    <th className="text-left px-3 py-2 text-[10px] font-bold text-muted uppercase">Data</th>
+                                    <th className="text-right px-3 py-2 text-[10px] font-bold text-muted uppercase">Valor Cofre</th>
+                                    <th className="text-right px-3 py-2 text-[10px] font-bold text-muted uppercase">Valor OFX</th>
+                                    <th className="text-right px-3 py-2 text-[10px] font-bold text-muted uppercase">Diferença</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {resultado.depositos_divergentes.map((d, i) => (
+                                    <tr key={i} className="border-b border-white/3">
+                                        <td className="px-3 py-2">{fmtData(d.data)}</td>
+                                        <td className="px-3 py-2 text-right font-mono">{fmt(d.valor_cofre)}</td>
+                                        <td className="px-3 py-2 text-right font-mono">{fmt(d.valor_ofx)}</td>
+                                        <td className="px-3 py-2 text-right font-mono font-bold text-error">
+                                            {fmt(Math.abs(d.valor_cofre - d.valor_ofx))}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
+            {conciliados === total && total > 0 && (
+                <div className="flex items-center justify-center gap-3 py-4 rounded-xl bg-success/5 border border-success/20">
+                    <CheckCircle2 size={20} className="text-success" />
+                    <p className="text-sm font-bold text-success">Conciliação 100% completa!</p>
+                </div>
+            )}
+        </div>
+    );
+}
+
+// ─── Tabela de transações OFX importadas ──────────────────────────────────────
+
+function TabelaOFX({ transacoes }: { transacoes: OFXTransacaoSalva[] }) {
+    const [filtro, setFiltro] = useState<'todos' | 'CREDIT' | 'DEBIT' | 'sem_match'>('todos');
+
+    const filtradas = transacoes.filter(t => {
+        if (filtro === 'CREDIT') return t.tipo === 'CREDIT';
+        if (filtro === 'DEBIT') return t.tipo === 'DEBIT';
+        if (filtro === 'sem_match') return !t.conciliado;
+        return true;
+    });
+
+    if (transacoes.length === 0) return null;
+
+    return (
+        <div className="card overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
+                <div className="flex items-center gap-2">
+                    <FileText size={14} className="text-muted" />
+                    <span className="text-xs font-bold">Transações Importadas ({transacoes.length})</span>
+                </div>
+                <div className="flex gap-1">
+                    {(['todos', 'CREDIT', 'DEBIT', 'sem_match'] as const).map(f => (
+                        <button
+                            key={f}
+                            onClick={() => setFiltro(f)}
+                            className={`text-[10px] px-2 py-1 rounded font-bold transition-colors ${filtro === f ? 'bg-primary/20 text-primary' : 'text-muted hover:text-foreground'}`}
+                        >
+                            {f === 'todos' ? 'Todos' : f === 'CREDIT' ? 'Créditos' : f === 'DEBIT' ? 'Débitos' : 'Sem Match'}
+                        </button>
+                    ))}
+                </div>
+            </div>
+            <div className="overflow-y-auto max-h-80">
+                <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-[var(--card-bg)]">
+                        <tr className="border-b border-white/5">
+                            <th className="text-left px-4 py-2 text-[10px] font-bold text-muted uppercase">Data</th>
+                            <th className="text-left px-4 py-2 text-[10px] font-bold text-muted uppercase">Descrição</th>
+                            <th className="text-right px-4 py-2 text-[10px] font-bold text-muted uppercase">Valor</th>
+                            <th className="text-center px-4 py-2 text-[10px] font-bold text-muted uppercase">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {filtradas.map(t => (
+                            <tr key={t.id} className="border-b border-white/3 hover:bg-white/2">
+                                <td className="px-4 py-2">{fmtData(t.data)}</td>
+                                <td className="px-4 py-2 text-muted max-w-[260px] truncate">{t.memo || t.fitid}</td>
+                                <td className={`px-4 py-2 text-right font-mono font-semibold ${t.tipo === 'CREDIT' ? 'text-success' : 'text-error'}`}>
+                                    {t.tipo === 'CREDIT' ? '+' : '-'}{fmt(t.valor)}
+                                </td>
+                                <td className="px-4 py-2 text-center">
+                                    {t.conciliado ? (
+                                        <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded bg-success/10 text-success">
+                                            <Check size={9} /> OK
+                                        </span>
+                                    ) : (
+                                        <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded bg-muted/10 text-muted">
+                                            <Clock size={9} /> Pendente
+                                        </span>
+                                    )}
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+}
+
+// ─── Tabela de fechamentos ────────────────────────────────────────────────────
+
+function TabelaFechamentos({
+    fechamentos,
+}: {
+    fechamentos: FechamentoPendente[];
+}) {
+    const [aberto, setAberto] = useState<number | null>(null);
+
+    if (fechamentos.length === 0) return (
+        <div className="card p-12 text-center">
+            <CheckCircle2 size={32} className="mx-auto mb-3 text-success opacity-50" />
+            <p className="text-sm font-semibold">Nenhum fechamento pendente</p>
+            <p className="text-xs text-muted mt-1">Todos os fechamentos foram conciliados.</p>
+        </div>
+    );
+
+    const totalPix = fechamentos.reduce((a, f) => a + (f.resumo_entradas_pix ?? 0), 0);
+    const totalDepositos = fechamentos.reduce((a, f) => a + (f.resumo_saidas_deposito ?? 0), 0);
+    const totalEntradas = fechamentos.reduce((a, f) => a + (f.resumo_total_entradas ?? 0), 0);
+
+    return (
+        <div className="card overflow-hidden">
+            <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                    <Search size={13} className="text-muted" />
+                    <span className="text-xs font-bold">Fechamentos Pendentes ({fechamentos.length})</span>
+                </div>
+                <div className="flex gap-4 text-[10px] text-muted">
+                    <span>PIX: <span className="font-bold text-foreground">{fmt(totalPix)}</span></span>
+                    <span>Depósitos: <span className="font-bold text-foreground">{fmt(totalDepositos)}</span></span>
+                    <span>Total: <span className="font-bold text-foreground">{fmt(totalEntradas)}</span></span>
+                </div>
+            </div>
+            <table className="w-full text-xs">
+                <thead>
+                    <tr className="border-b border-white/5">
+                        <th className="text-left px-4 py-3 text-[10px] font-bold text-muted uppercase">Data / Terminal</th>
+                        <th className="text-left px-4 py-3 text-[10px] font-bold text-muted uppercase">Operador</th>
+                        <th className="text-right px-4 py-3 text-[10px] font-bold text-muted uppercase">PIX Entradas</th>
+                        <th className="text-right px-4 py-3 text-[10px] font-bold text-muted uppercase">PIX Externo</th>
+                        <th className="text-right px-4 py-3 text-[10px] font-bold text-muted uppercase">Depósito Cofre</th>
+                        <th className="text-right px-4 py-3 text-[10px] font-bold text-muted uppercase">Total Entradas</th>
+                        <th className="px-4 py-3" />
+                    </tr>
+                </thead>
+                <tbody>
+                    {fechamentos.map(f => {
+                        const isOpen = aberto === f.id;
+                        return (
+                            <>
+                                <tr
+                                    key={f.id}
+                                    className="border-b border-white/3 hover:bg-white/2 cursor-pointer transition-colors"
+                                    onClick={() => setAberto(isOpen ? null : f.id)}
+                                >
+                                    <td className="px-4 py-3">
+                                        <div className="flex items-center gap-2">
+                                            <Calendar size={11} className="text-muted" />
+                                            <div>
+                                                <p className="font-semibold">{fmtData(f.data_turno)}</p>
+                                                <p className="text-muted text-[10px]">{f.terminal_id}</p>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td className="px-4 py-3 text-muted">{f.operador_nome || '—'}</td>
+                                    <td className="px-4 py-3 text-right font-mono">{fmt(f.resumo_entradas_pix)}</td>
+                                    <td className="px-4 py-3 text-right font-mono">
+                                        <span className={f.pix_externo_informado > 0 ? 'text-blue-400 font-semibold' : 'text-muted'}>
+                                            {fmt(f.pix_externo_informado)}
+                                        </span>
+                                    </td>
+                                    <td className="px-4 py-3 text-right font-mono">
+                                        <span className={f.valor_enviado_cofre > 0 ? 'text-warning font-semibold' : 'text-muted'}>
+                                            {fmt(f.valor_enviado_cofre)}
+                                        </span>
+                                    </td>
+                                    <td className="px-4 py-3 text-right font-mono font-semibold">{fmt(f.resumo_total_entradas)}</td>
+                                    <td className="px-4 py-3">
+                                        <ChevronRight size={13} className={`text-muted transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+                                    </td>
+                                </tr>
+                                {isOpen && (
+                                    <tr key={`d-${f.id}`} className="bg-white/1">
+                                        <td colSpan={7} className="px-6 py-4">
+                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                                <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                                                    <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Dinheiro</p>
+                                                    <p className="text-sm font-bold">{fmt(f.resumo_entradas_dinheiro)}</p>
+                                                </div>
+                                                <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                                                    <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Sangrias</p>
+                                                    <p className="text-sm font-bold">{fmt(f.resumo_saidas_sangria)}</p>
+                                                </div>
+                                                <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                                                    <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Val. Declarado</p>
+                                                    <p className="text-sm font-bold">{fmt(f.valor_final_declarado)}</p>
+                                                </div>
+                                                <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                                                    <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Diferença Caixa</p>
+                                                    <p className={`text-sm font-bold ${(f.diferenca_caixa ?? 0) !== 0 ? 'text-warning' : 'text-success'}`}>
+                                                        {fmt(f.diferenca_caixa)}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                )}
+                            </>
+                        );
+                    })}
+                </tbody>
+            </table>
         </div>
     );
 }
@@ -248,14 +624,16 @@ function ModalConciliarItem({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function ExtratosConciliacao() {
+    const { lojaAtual } = useLoja();
+    const lojaId = lojaAtual?.id ?? '';
+
     const [fechamentos, setFechamentos] = useState<FechamentoPendente[]>([]);
-    const [itens, setItens] = useState<ConciliacaoItem[]>([]);
+    const [transacoesOFX, setTransacoesOFX] = useState<OFXTransacaoSalva[]>([]);
     const [contas, setContas] = useState<ContaBancaria[]>([]);
     const [loading, setLoading] = useState(true);
     const [processando, setProcessando] = useState(false);
-    const [itemSelecionado, setItemSelecionado] = useState<ConciliacaoItem | null>(null);
-    const [detalheAberto, setDetalheAberto] = useState<number | null>(null);
-    const { toast: addToast } = useToast();
+    const [resultado, setResultado] = useState<ResultadoConciliacao | null>(null);
+    const { toast } = useToast();
     const supabase = createBrowserSupabaseClient();
 
     const carregarDados = useCallback(async () => {
@@ -266,373 +644,162 @@ export function ExtratosConciliacao() {
                 supabase.from('financeiro_contas_bancarias').select('id, nome, banco, agencia, conta').eq('ativo', true),
             ]);
 
-            const pendentes = raw as FechamentoPendente[];
-            setFechamentos(pendentes);
+            setFechamentos(raw as FechamentoPendente[]);
             setContas((contasData ?? []) as ContaBancaria[]);
 
-            // Para cada fechamento, verificar se já existe extrato registrado
-            const itensCalculados: ConciliacaoItem[] = await Promise.all(
-                pendentes.map(async (f) => {
-                    const { data: extrato } = await supabase
-                        .from('conciliacao_extratos')
-                        .select('depositos_confirmados, pix_ted_recebidos, saldo_extrato, status, diferenca_depositos, diferenca_pix')
-                        .eq('data_extrato', f.data_turno)
-                        .maybeSingle();
-
-                    const diferencaDepositos = extrato
-                        ? Math.abs(extrato.depositos_confirmados - (f.resumo_saidas_deposito ?? 0))
-                        : 0;
-                    const diferencaPix = extrato
-                        ? Math.abs(extrato.pix_ted_recebidos - (f.resumo_entradas_pix ?? 0))
-                        : 0;
-
-                    let status: ConciliacaoItem['status'] = 'pendente';
-                    if (extrato) {
-                        status = (extrato.status === 'conciliado' || (diferencaDepositos < 0.01 && diferencaPix < 0.01))
-                            ? 'conciliado'
-                            : 'divergente';
-                    }
-
-                    return {
-                        fechamento: f,
-                        extrato: extrato ? {
-                            depositos_confirmados: extrato.depositos_confirmados,
-                            pix_ted_recebidos: extrato.pix_ted_recebidos,
-                            saldo_extrato: extrato.saldo_extrato,
-                        } : undefined,
-                        status,
-                        diferencaDepositos,
-                        diferencaPix,
-                    };
-                })
-            );
-
-            setItens(itensCalculados);
+            if (raw.length > 0 && lojaId) {
+                const datas = (raw as FechamentoPendente[]).map(f => f.data_turno).sort();
+                const transacoes = await getTransacoesOFX(lojaId, datas[0], datas[datas.length - 1]);
+                setTransacoesOFX(transacoes);
+            }
         } catch (err) {
-            addToast({ type: 'error', message: 'Erro ao carregar fechamentos pendentes.' });
+            toast({ type: 'error', message: 'Erro ao carregar dados.' });
             console.error(err);
         } finally {
             setLoading(false);
         }
-    }, [supabase, addToast]);
+    }, [supabase, toast, lojaId]);
 
     useEffect(() => { carregarDados(); }, [carregarDados]);
 
-    async function fazerConciliacaoGeral() {
-        const itensPendentes = itens.filter(i => i.status === 'pendente');
-        if (itensPendentes.length === 0) {
-            addToast({ type: 'info', message: 'Não há fechamentos pendentes de conciliação.' });
+    async function fazerConciliacao() {
+        if (!lojaId) {
+            toast({ type: 'error', message: 'Selecione uma loja para continuar.' });
             return;
         }
-
-        if (contas.length === 0) {
-            addToast({ type: 'error', message: 'Nenhuma conta bancária cadastrada para conciliação.' });
+        if (transacoesOFX.length === 0) {
+            toast({ type: 'warning', message: 'Importe um extrato OFX antes de conciliar.' });
+            return;
+        }
+        if (fechamentos.length === 0) {
+            toast({ type: 'info', message: 'Não há fechamentos pendentes.' });
             return;
         }
 
         setProcessando(true);
-        let conciliados = 0;
-        let divergentes = 0;
-
         try {
-            for (const item of itensPendentes) {
-                try {
-                    await registrarExtratoDiario({
-                        conta_id: contas[0].id,
-                        data_extrato: item.fechamento.data_turno,
-                        depositos_confirmados: item.fechamento.resumo_saidas_deposito ?? 0,
-                        pix_ted_recebidos: item.fechamento.resumo_entradas_pix ?? 0,
-                        debitos_pagamentos: 0,
-                        tarifas_bancarias: 0,
-                        outros_creditos: item.fechamento.pix_externo_informado ?? 0,
-                        saldo_extrato: item.fechamento.valor_final_declarado ?? 0,
-                    });
-                    conciliados++;
-                } catch {
-                    divergentes++;
-                }
-            }
-
-            addToast({
-                type: conciliados > 0 ? 'success' : 'error',
-                message: `Conciliação concluída: ${conciliados} registrado(s)${divergentes > 0 ? `, ${divergentes} com erro` : ''}.`,
-            });
-
+            const datas = fechamentos.map(f => f.data_turno).sort();
+            const res = await executarConciliacaoDetalhada(lojaId, datas[0], datas[datas.length - 1]);
+            setResultado(res);
             await carregarDados();
+            toast({
+                type: res.pix_nao_encontrados.length === 0 ? 'success' : 'warning',
+                message: `Conciliação concluída: ${res.pix_conciliados + res.depositos_conciliados} match(es) encontrado(s).`,
+            });
+        } catch (err) {
+            toast({ type: 'error', message: 'Erro ao executar conciliação.' });
+            console.error(err);
         } finally {
             setProcessando(false);
         }
     }
 
-    async function conciliarItem(item: ConciliacaoItem, dados: {
-        conta_id: string;
-        depositos_confirmados: number;
-        pix_ted_recebidos: number;
-        debitos_pagamentos: number;
-        tarifas_bancarias: number;
-        saldo_extrato: number;
-    }) {
-        await registrarExtratoDiario({
-            conta_id: dados.conta_id,
-            data_extrato: item.fechamento.data_turno,
-            depositos_confirmados: dados.depositos_confirmados,
-            pix_ted_recebidos: dados.pix_ted_recebidos,
-            debitos_pagamentos: dados.debitos_pagamentos,
-            tarifas_bancarias: dados.tarifas_bancarias,
-            saldo_extrato: dados.saldo_extrato,
-        });
+    // KPIs
+    const totalPendentes = fechamentos.length;
+    const totalOFX = transacoesOFX.length;
+    const ofxConciliados = transacoesOFX.filter(t => t.conciliado).length;
+    const totalCreditosOFX = transacoesOFX.filter(t => t.tipo === 'CREDIT').reduce((a, t) => a + t.valor, 0);
 
-        addToast({ type: 'success', message: 'Extrato registrado e conciliação realizada.' });
-        await carregarDados();
-    }
-
-    // ─── KPIs ─────────────────────────────────────────────────────────────────
-    const totalPendentes = itens.filter(i => i.status === 'pendente').length;
-    const totalConciliados = itens.filter(i => i.status === 'conciliado').length;
-    const totalDivergentes = itens.filter(i => i.status === 'divergente').length;
-    const totalDepositos = itens.reduce((acc, i) => acc + (i.fechamento.resumo_saidas_deposito ?? 0), 0);
-    const totalPix = itens.reduce((acc, i) => acc + (i.fechamento.resumo_entradas_pix ?? 0), 0);
-
-    if (loading) {
-        return (
-            <div className="flex items-center justify-center py-20">
-                <Loader2 size={24} className="animate-spin text-muted" />
-            </div>
-        );
-    }
+    if (loading) return (
+        <div className="flex items-center justify-center py-20">
+            <Loader2 size={24} className="animate-spin text-muted" />
+        </div>
+    );
 
     return (
         <div className="space-y-6">
-            {/* Header actions */}
+            {/* Header */}
             <div className="flex items-center justify-between">
                 <div>
-                    <h2 className="text-sm font-bold">Extratos & Conciliação</h2>
+                    <h2 className="text-sm font-bold">Extratos & Conciliação Bancária</h2>
                     <p className="text-xs text-muted mt-0.5">
-                        Fechamentos pendentes aguardando cruzamento com o extrato bancário
+                        Importe o extrato OFX e cruze com fechamentos de caixa, PIX externos e depósitos do cofre
                     </p>
                 </div>
                 <div className="flex gap-2">
-                    <button
-                        className="btn btn-ghost text-xs"
-                        onClick={carregarDados}
-                        disabled={loading}
-                    >
-                        <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
-                        Atualizar
+                    <button className="btn btn-ghost text-xs" onClick={carregarDados} disabled={loading}>
+                        <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Atualizar
                     </button>
                     <button
                         className="btn btn-primary text-xs"
-                        onClick={fazerConciliacaoGeral}
-                        disabled={processando || totalPendentes === 0}
+                        onClick={fazerConciliacao}
+                        disabled={processando || totalOFX === 0 || totalPendentes === 0}
                     >
-                        {processando
-                            ? <Loader2 size={13} className="animate-spin" />
-                            : <ArrowRightLeft size={13} />
-                        }
+                        {processando ? <Loader2 size={13} className="animate-spin" /> : <ArrowRightLeft size={13} />}
                         Fazer Conciliação
-                        {totalPendentes > 0 && (
-                            <span className="ml-1 bg-white/20 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
-                                {totalPendentes}
-                            </span>
-                        )}
                     </button>
                 </div>
             </div>
 
-            {/* KPI Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            {/* KPIs */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="card p-4">
                     <div className="flex items-center gap-2 mb-2">
                         <div className="w-7 h-7 rounded-lg bg-muted/10 flex items-center justify-center">
                             <Clock size={13} className="text-muted" />
                         </div>
-                        <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Pendentes</span>
+                        <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Fechamentos Pend.</span>
                     </div>
                     <p className="text-2xl font-bold">{totalPendentes}</p>
                 </div>
                 <div className="card p-4">
                     <div className="flex items-center gap-2 mb-2">
-                        <div className="w-7 h-7 rounded-lg bg-success/10 flex items-center justify-center">
-                            <CheckCircle2 size={13} className="text-success" />
+                        <div className="w-7 h-7 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                            <FileText size={13} className="text-blue-400" />
                         </div>
-                        <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Conciliados</span>
+                        <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Transações OFX</span>
                     </div>
-                    <p className="text-2xl font-bold text-success">{totalConciliados}</p>
+                    <p className="text-2xl font-bold">{totalOFX}</p>
+                    {ofxConciliados > 0 && <p className="text-[10px] text-success mt-0.5">{ofxConciliados} conciliadas</p>}
+                </div>
+                <div className="card p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                        <div className="w-7 h-7 rounded-lg bg-success/10 flex items-center justify-center">
+                            <TrendingUp size={13} className="text-success" />
+                        </div>
+                        <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Total Créditos OFX</span>
+                    </div>
+                    <p className="text-sm font-bold">{fmt(totalCreditosOFX)}</p>
                 </div>
                 <div className="card p-4">
                     <div className="flex items-center gap-2 mb-2">
                         <div className="w-7 h-7 rounded-lg bg-warning/10 flex items-center justify-center">
-                            <AlertTriangle size={13} className="text-warning" />
+                            <Landmark size={13} className="text-warning" />
                         </div>
-                        <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Divergentes</span>
+                        <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Depósitos Cofre</span>
                     </div>
-                    <p className="text-2xl font-bold text-warning">{totalDivergentes}</p>
-                </div>
-                <div className="card p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                        <div className="w-7 h-7 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                            <Banknote size={13} className="text-blue-400" />
-                        </div>
-                        <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Total Depósitos</span>
-                    </div>
-                    <p className="text-sm font-bold">{fmt(totalDepositos)}</p>
-                </div>
-                <div className="card p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                        <div className="w-7 h-7 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                            <CreditCard size={13} className="text-blue-400" />
-                        </div>
-                        <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Total PIX</span>
-                    </div>
-                    <p className="text-sm font-bold">{fmt(totalPix)}</p>
+                    <p className="text-sm font-bold">
+                        {fmt(fechamentos.reduce((a, f) => a + (f.valor_enviado_cofre ?? 0), 0))}
+                    </p>
                 </div>
             </div>
 
-            {/* Lista de fechamentos */}
-            {itens.length === 0 ? (
-                <div className="card p-12 text-center">
-                    <CheckCircle2 size={32} className="mx-auto mb-3 text-success opacity-50" />
-                    <p className="text-sm font-semibold">Nenhum fechamento pendente</p>
-                    <p className="text-xs text-muted mt-1">Todos os fechamentos foram conciliados.</p>
-                </div>
+            {/* Upload OFX */}
+            {lojaId ? (
+                <OFXUploadPanel
+                    lojaId={lojaId}
+                    contas={contas}
+                    onImportado={async () => { await carregarDados(); }}
+                />
             ) : (
-                <div className="card overflow-hidden">
-                    <table className="w-full text-xs">
-                        <thead>
-                            <tr className="border-b border-white/5">
-                                <th className="text-left px-4 py-3 text-[10px] font-bold text-muted uppercase tracking-wider">Data / Terminal</th>
-                                <th className="text-left px-4 py-3 text-[10px] font-bold text-muted uppercase tracking-wider">Operador</th>
-                                <th className="text-right px-4 py-3 text-[10px] font-bold text-muted uppercase tracking-wider">
-                                    <span className="flex items-center justify-end gap-1"><TrendingUp size={10} /> Entradas PIX</span>
-                                </th>
-                                <th className="text-right px-4 py-3 text-[10px] font-bold text-muted uppercase tracking-wider">
-                                    <span className="flex items-center justify-end gap-1"><Landmark size={10} /> Depósitos</span>
-                                </th>
-                                <th className="text-right px-4 py-3 text-[10px] font-bold text-muted uppercase tracking-wider">
-                                    <span className="flex items-center justify-end gap-1"><TrendingDown size={10} /> Total Entradas</span>
-                                </th>
-                                <th className="text-center px-4 py-3 text-[10px] font-bold text-muted uppercase tracking-wider">Status</th>
-                                <th className="px-4 py-3" />
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {itens.map((item) => {
-                                const isOpen = detalheAberto === item.fechamento.id;
-                                return (
-                                    <>
-                                        <tr
-                                            key={item.fechamento.id}
-                                            className="border-b border-white/3 hover:bg-white/2 transition-colors cursor-pointer"
-                                            onClick={() => setDetalheAberto(isOpen ? null : item.fechamento.id)}
-                                        >
-                                            <td className="px-4 py-3">
-                                                <div className="flex items-center gap-2">
-                                                    <Calendar size={12} className="text-muted flex-shrink-0" />
-                                                    <div>
-                                                        <p className="font-semibold">{fmtData(item.fechamento.data_turno)}</p>
-                                                        <p className="text-muted">{item.fechamento.terminal_id}</p>
-                                                    </div>
-                                                </div>
-                                            </td>
-                                            <td className="px-4 py-3 text-muted">{item.fechamento.operador_nome || '—'}</td>
-                                            <td className="px-4 py-3 text-right font-mono">{fmt(item.fechamento.resumo_entradas_pix)}</td>
-                                            <td className="px-4 py-3 text-right font-mono">{fmt(item.fechamento.resumo_saidas_deposito)}</td>
-                                            <td className="px-4 py-3 text-right font-mono font-semibold">{fmt(item.fechamento.resumo_total_entradas)}</td>
-                                            <td className="px-4 py-3 text-center">{statusBadge(item.status)}</td>
-                                            <td className="px-4 py-3">
-                                                <div className="flex items-center justify-end gap-2">
-                                                    {item.status === 'pendente' && (
-                                                        <button
-                                                            className="btn btn-ghost text-[10px] h-7 px-2"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                setItemSelecionado(item);
-                                                            }}
-                                                        >
-                                                            <ArrowRightLeft size={11} />
-                                                            Conciliar
-                                                        </button>
-                                                    )}
-                                                    <ChevronRight
-                                                        size={14}
-                                                        className={`text-muted transition-transform ${isOpen ? 'rotate-90' : ''}`}
-                                                    />
-                                                </div>
-                                            </td>
-                                        </tr>
-
-                                        {isOpen && (
-                                            <tr key={`detail-${item.fechamento.id}`} className="bg-white/1">
-                                                <td colSpan={7} className="px-6 py-4">
-                                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                                        <div className="rounded-xl border border-white/5 bg-white/2 p-3">
-                                                            <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Entradas Dinheiro</p>
-                                                            <p className="text-sm font-bold">{fmt(item.fechamento.resumo_entradas_dinheiro)}</p>
-                                                        </div>
-                                                        <div className="rounded-xl border border-white/5 bg-white/2 p-3">
-                                                            <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Sangrias</p>
-                                                            <p className="text-sm font-bold">{fmt(item.fechamento.resumo_saidas_sangria)}</p>
-                                                        </div>
-                                                        <div className="rounded-xl border border-white/5 bg-white/2 p-3">
-                                                            <p className="text-[10px] text-muted uppercase tracking-wider mb-1">PIX Externo</p>
-                                                            <p className="text-sm font-bold">{fmt(item.fechamento.pix_externo_informado)}</p>
-                                                        </div>
-                                                        <div className="rounded-xl border border-white/5 bg-white/2 p-3">
-                                                            <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Diferença Caixa</p>
-                                                            <p className={`text-sm font-bold ${(item.fechamento.diferenca_caixa ?? 0) !== 0 ? 'text-warning' : 'text-success'}`}>
-                                                                {fmt(item.fechamento.diferenca_caixa)}
-                                                            </p>
-                                                        </div>
-
-                                                        {item.extrato && (
-                                                            <>
-                                                                <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-3">
-                                                                    <p className="text-[10px] text-blue-400 uppercase tracking-wider mb-1 flex items-center gap-1">
-                                                                        <FileText size={9} /> Depósitos Extrato
-                                                                    </p>
-                                                                    <p className="text-sm font-bold">{fmt(item.extrato.depositos_confirmados)}</p>
-                                                                    {item.diferencaDepositos > 0.01 && (
-                                                                        <p className="text-[10px] text-warning mt-0.5">Dif: {fmt(item.diferencaDepositos)}</p>
-                                                                    )}
-                                                                </div>
-                                                                <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-3">
-                                                                    <p className="text-[10px] text-blue-400 uppercase tracking-wider mb-1 flex items-center gap-1">
-                                                                        <FileText size={9} /> PIX Extrato
-                                                                    </p>
-                                                                    <p className="text-sm font-bold">{fmt(item.extrato.pix_ted_recebidos)}</p>
-                                                                    {item.diferencaPix > 0.01 && (
-                                                                        <p className="text-[10px] text-warning mt-0.5">Dif: {fmt(item.diferencaPix)}</p>
-                                                                    )}
-                                                                </div>
-                                                                <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-3">
-                                                                    <p className="text-[10px] text-blue-400 uppercase tracking-wider mb-1 flex items-center gap-1">
-                                                                        <Landmark size={9} /> Saldo Extrato
-                                                                    </p>
-                                                                    <p className="text-sm font-bold">{fmt(item.extrato.saldo_extrato)}</p>
-                                                                </div>
-                                                            </>
-                                                        )}
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        )}
-                                    </>
-                                );
-                            })}
-                        </tbody>
-                    </table>
+                <div className="card p-6 text-center">
+                    <p className="text-xs text-muted">Selecione uma loja para importar o extrato OFX.</p>
                 </div>
             )}
 
-            {/* Modal conciliar item individual */}
-            {itemSelecionado && (
-                <ModalConciliarItem
-                    item={itemSelecionado}
-                    contas={contas}
-                    onClose={() => setItemSelecionado(null)}
-                    onSalvar={(dados) => conciliarItem(itemSelecionado, dados)}
+            {/* Resultado da conciliação */}
+            {resultado && (
+                <ResultadoConciliacaoPanel
+                    resultado={resultado}
+                    onFechar={() => setResultado(null)}
                 />
             )}
+
+            {/* Transações OFX importadas */}
+            {transacoesOFX.length > 0 && <TabelaOFX transacoes={transacoesOFX} />}
+
+            {/* Fechamentos pendentes */}
+            <TabelaFechamentos fechamentos={fechamentos} />
         </div>
     );
 }
