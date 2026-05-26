@@ -805,6 +805,7 @@ export function AuditoriaFechamentos() {
     const [fechamentos, setFechamentos] = useState<Fechamento[]>([]);
     const [selectedFechamento, setSelectedFechamento] = useState<Fechamento | null>(null);
     const [showValidationModal, setShowValidationModal] = useState(false);
+    const [showAdicionaisModal, setShowAdicionaisModal] = useState(false);
     const [filtroStatus, setFiltroStatus] = useState<'todos' | 'pendente' | 'aprovado' | 'rejeitado'>('todos');
     const [filtroDataInicio, setFiltroDataInicio] = useState('');
     const [filtroDataFim, setFiltroDataFim] = useState('');
@@ -1317,7 +1318,16 @@ export function AuditoriaFechamentos() {
                         )}
 
                         {selectedFechamento.status_validacao === 'pendente' && (
-                            <div className="mt-5">
+                            <div className="mt-5 flex flex-col gap-2">
+                                {selectedFechamento.fonte === 'caixa_sessoes' && (
+                                    <button
+                                        className="btn btn-ghost w-full py-2 text-sm font-semibold border border-blue-500/20 text-blue-300 hover:bg-blue-500/10"
+                                        onClick={() => setShowAdicionaisModal(true)}
+                                    >
+                                        <Plus size={14} className="mr-1" />
+                                        Adicionais
+                                    </button>
+                                )}
                                 <button
                                     className="btn btn-primary w-full py-3 text-base font-bold"
                                     onClick={() => setShowValidationModal(true)}
@@ -1331,7 +1341,7 @@ export function AuditoriaFechamentos() {
                 )}
             </div>
 
-            {/* Modal */}
+            {/* Modal Auditoria */}
             {showValidationModal && selectedFechamento && (
                 <ModalAuditoria
                     fechamento={selectedFechamento}
@@ -1339,6 +1349,46 @@ export function AuditoriaFechamentos() {
                     onAprovar={(obs) => handleAprovar(selectedFechamento, obs)}
                     onRejeitar={({ justificativa }) => handleRejeitar(selectedFechamento, justificativa)}
                 />
+            )}
+
+            {/* Modal Adicionais */}
+            {showAdicionaisModal && selectedFechamento && selectedFechamento.fonte === 'caixa_sessoes' && (
+                <>
+                    <div className="fixed inset-0 bg-black/80 z-[9998]" onClick={() => setShowAdicionaisModal(false)} />
+                    <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-xl max-h-[90vh] overflow-y-auto bg-bg-card border border-border rounded-2xl z-[9999] p-6">
+                        <div className="flex justify-between items-center mb-5">
+                            <div>
+                                <h2 className="text-lg font-bold">Adicionais do Fechamento</h2>
+                                <p className="text-xs text-muted mt-0.5">
+                                    Terminal {selectedFechamento.terminal_id} &bull; {formatarDataLocal(selectedFechamento.data_turno)}
+                                </p>
+                            </div>
+                            <button onClick={() => setShowAdicionaisModal(false)} className="btn btn-ghost btn-sm">
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        <div className="space-y-4">
+                            <p className="text-[10px] font-bold text-muted uppercase tracking-wider">Dados para Conciliação Bancária</p>
+                            <PixExternosForm
+                                sessaoId={parseInt(selectedFechamento.id)}
+                                lojaId={selectedFechamento.loja_id ?? ''}
+                                dataTurno={selectedFechamento.data_turno}
+                            />
+                            <DepositoCofreForm
+                                sessaoId={parseInt(selectedFechamento.id)}
+                                lojaId={selectedFechamento.loja_id ?? ''}
+                                valorAtual={selectedFechamento.valor_cofre ?? 0}
+                            />
+                        </div>
+
+                        <div className="flex justify-end mt-5 pt-4 border-t border-border">
+                            <button className="btn btn-primary text-sm" onClick={() => setShowAdicionaisModal(false)}>
+                                Concluir
+                            </button>
+                        </div>
+                    </div>
+                </>
             )}
         </div>
     );
