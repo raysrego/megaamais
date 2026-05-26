@@ -17,11 +17,16 @@ import { useLoja } from '@/contexts/LojaContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+type FonteFechamento = 'caixa_sessoes' | 'fechamento_tfl';
+
 interface FechamentoPendente {
-    id: number;
+    uid: string; // fonte + id, unique key for rendering
+    id: string;
+    fonte: FonteFechamento;
     data_turno: string;
     terminal_id: string;
     operador_nome: string;
+    // caixa_sessoes fields
     resumo_entradas_pix: number;
     resumo_entradas_dinheiro: number;
     resumo_saidas_deposito: number;
@@ -31,6 +36,12 @@ interface FechamentoPendente {
     resumo_total_entradas: number;
     valor_final_declarado: number;
     diferenca_caixa: number;
+    // tfl fields
+    total_creditos: number;
+    total_debitos: number;
+    saldo_final: number;
+    arquivo_nome: string;
+    // shared
     auditoria_status: string;
     loja_id: string;
 }
@@ -506,60 +517,69 @@ function TabelaOFX({ transacoes }: { transacoes: OFXTransacaoSalva[] }) {
 
 // ─── Tabela de fechamentos ────────────────────────────────────────────────────
 
-function TabelaFechamentos({
-    fechamentos,
-}: {
-    fechamentos: FechamentoPendente[];
-}) {
-    const [aberto, setAberto] = useState<number | null>(null);
+function TabelaFechamentos({ fechamentos }: { fechamentos: FechamentoPendente[] }) {
+    const [aberto, setAberto] = useState<string | null>(null);
 
     if (fechamentos.length === 0) return (
         <div className="card p-12 text-center">
             <CheckCircle2 size={32} className="mx-auto mb-3 text-success opacity-50" />
-            <p className="text-sm font-semibold">Nenhum fechamento pendente</p>
-            <p className="text-xs text-muted mt-1">Todos os fechamentos foram conciliados.</p>
+            <p className="text-sm font-semibold">Nenhum fechamento pendente de auditoria</p>
+            <p className="text-xs text-muted mt-1">Todos os fechamentos foram auditados.</p>
         </div>
     );
 
-    const totalPix = fechamentos.reduce((a, f) => a + (f.resumo_entradas_pix ?? 0), 0);
-    const totalDepositos = fechamentos.reduce((a, f) => a + (f.resumo_saidas_deposito ?? 0), 0);
     const totalEntradas = fechamentos.reduce((a, f) => a + (f.resumo_total_entradas ?? 0), 0);
+    const totalCofre = fechamentos.reduce((a, f) => a + (f.valor_enviado_cofre ?? 0), 0);
+    const totalPix = fechamentos.reduce((a, f) => a + (f.pix_externo_informado ?? 0), 0);
 
     return (
         <div className="card overflow-hidden">
             <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                     <Search size={13} className="text-muted" />
-                    <span className="text-xs font-bold">Fechamentos Pendentes ({fechamentos.length})</span>
+                    <span className="text-xs font-bold">Fechamentos Pendentes de Auditoria ({fechamentos.length})</span>
                 </div>
                 <div className="flex gap-4 text-[10px] text-muted">
-                    <span>PIX: <span className="font-bold text-foreground">{fmt(totalPix)}</span></span>
-                    <span>Depósitos: <span className="font-bold text-foreground">{fmt(totalDepositos)}</span></span>
+                    <span>PIX Ext.: <span className="font-bold text-foreground">{fmt(totalPix)}</span></span>
+                    <span>Cofre: <span className="font-bold text-foreground">{fmt(totalCofre)}</span></span>
                     <span>Total: <span className="font-bold text-foreground">{fmt(totalEntradas)}</span></span>
                 </div>
             </div>
             <table className="w-full text-xs">
                 <thead>
                     <tr className="border-b border-white/5">
+                        <th className="text-left px-4 py-3 text-[10px] font-bold text-muted uppercase">Tipo</th>
                         <th className="text-left px-4 py-3 text-[10px] font-bold text-muted uppercase">Data / Terminal</th>
-                        <th className="text-left px-4 py-3 text-[10px] font-bold text-muted uppercase">Operador</th>
-                        <th className="text-right px-4 py-3 text-[10px] font-bold text-muted uppercase">PIX Entradas</th>
+                        <th className="text-left px-4 py-3 text-[10px] font-bold text-muted uppercase">Operador / Arquivo</th>
                         <th className="text-right px-4 py-3 text-[10px] font-bold text-muted uppercase">PIX Externo</th>
                         <th className="text-right px-4 py-3 text-[10px] font-bold text-muted uppercase">Depósito Cofre</th>
-                        <th className="text-right px-4 py-3 text-[10px] font-bold text-muted uppercase">Total Entradas</th>
+                        <th className="text-right px-4 py-3 text-[10px] font-bold text-muted uppercase">Total / Saldo</th>
                         <th className="px-4 py-3" />
                     </tr>
                 </thead>
                 <tbody>
                     {fechamentos.map(f => {
-                        const isOpen = aberto === f.id;
+                        const isTFL = f.fonte === 'fechamento_tfl';
+                        const isOpen = aberto === f.uid;
+                        const valorPrincipal = isTFL ? f.saldo_final : f.resumo_total_entradas;
                         return (
                             <>
                                 <tr
-                                    key={f.id}
+                                    key={f.uid}
                                     className="border-b border-white/3 hover:bg-white/2 cursor-pointer transition-colors"
-                                    onClick={() => setAberto(isOpen ? null : f.id)}
+                                    onClick={() => setAberto(isOpen ? null : f.uid)}
                                 >
+                                    <td className="px-4 py-3">
+                                        {isTFL ? (
+                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-primary/10 text-primary border border-primary/20">
+                                                <FileText size={9} /> TFL
+                                            </span>
+                                        ) : (
+                                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                                OP
+                                            </span>
+                                        )}
+                                    </td>
                                     <td className="px-4 py-3">
                                         <div className="flex items-center gap-2">
                                             <Calendar size={11} className="text-muted" />
@@ -569,46 +589,74 @@ function TabelaFechamentos({
                                             </div>
                                         </div>
                                     </td>
-                                    <td className="px-4 py-3 text-muted">{f.operador_nome || '—'}</td>
-                                    <td className="px-4 py-3 text-right font-mono">{fmt(f.resumo_entradas_pix)}</td>
-                                    <td className="px-4 py-3 text-right font-mono">
-                                        <span className={f.pix_externo_informado > 0 ? 'text-blue-400 font-semibold' : 'text-muted'}>
-                                            {fmt(f.pix_externo_informado)}
-                                        </span>
+                                    <td className="px-4 py-3 text-muted max-w-[160px] truncate">
+                                        {isTFL ? (f.arquivo_nome || '—') : (f.operador_nome || '—')}
                                     </td>
                                     <td className="px-4 py-3 text-right font-mono">
-                                        <span className={f.valor_enviado_cofre > 0 ? 'text-warning font-semibold' : 'text-muted'}>
-                                            {fmt(f.valor_enviado_cofre)}
-                                        </span>
+                                        {isTFL ? (
+                                            <span className="text-muted">—</span>
+                                        ) : (
+                                            <span className={f.pix_externo_informado > 0 ? 'text-blue-400 font-semibold' : 'text-muted'}>
+                                                {fmt(f.pix_externo_informado)}
+                                            </span>
+                                        )}
                                     </td>
-                                    <td className="px-4 py-3 text-right font-mono font-semibold">{fmt(f.resumo_total_entradas)}</td>
+                                    <td className="px-4 py-3 text-right font-mono">
+                                        {isTFL ? (
+                                            <span className="text-muted">—</span>
+                                        ) : (
+                                            <span className={f.valor_enviado_cofre > 0 ? 'text-warning font-semibold' : 'text-muted'}>
+                                                {fmt(f.valor_enviado_cofre)}
+                                            </span>
+                                        )}
+                                    </td>
+                                    <td className={`px-4 py-3 text-right font-mono font-semibold ${(valorPrincipal ?? 0) >= 0 ? 'text-success' : 'text-danger'}`}>
+                                        {fmt(valorPrincipal)}
+                                    </td>
                                     <td className="px-4 py-3">
                                         <ChevronRight size={13} className={`text-muted transition-transform ${isOpen ? 'rotate-90' : ''}`} />
                                     </td>
                                 </tr>
                                 {isOpen && (
-                                    <tr key={`d-${f.id}`} className="bg-white/1">
+                                    <tr key={`d-${f.uid}`} className="bg-white/1">
                                         <td colSpan={7} className="px-6 py-4">
-                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                                                <div className="rounded-xl border border-white/5 bg-white/2 p-3">
-                                                    <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Dinheiro</p>
-                                                    <p className="text-sm font-bold">{fmt(f.resumo_entradas_dinheiro)}</p>
+                                            {isTFL ? (
+                                                <div className="grid grid-cols-3 gap-3">
+                                                    <div className="rounded-xl border border-success/20 bg-success/5 p-3">
+                                                        <p className="text-[10px] text-success uppercase tracking-wider mb-1">Créditos TFL</p>
+                                                        <p className="text-sm font-bold text-success">{fmt(f.total_creditos)}</p>
+                                                    </div>
+                                                    <div className="rounded-xl border border-danger/20 bg-danger/5 p-3">
+                                                        <p className="text-[10px] text-danger uppercase tracking-wider mb-1">Débitos TFL</p>
+                                                        <p className="text-sm font-bold text-danger">{fmt(f.total_debitos)}</p>
+                                                    </div>
+                                                    <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                                                        <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Saldo Final</p>
+                                                        <p className="text-sm font-bold">{fmt(f.saldo_final)}</p>
+                                                    </div>
                                                 </div>
-                                                <div className="rounded-xl border border-white/5 bg-white/2 p-3">
-                                                    <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Sangrias</p>
-                                                    <p className="text-sm font-bold">{fmt(f.resumo_saidas_sangria)}</p>
+                                            ) : (
+                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                                    <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                                                        <p className="text-[10px] text-muted uppercase tracking-wider mb-1">PIX Entradas</p>
+                                                        <p className="text-sm font-bold">{fmt(f.resumo_entradas_pix)}</p>
+                                                    </div>
+                                                    <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                                                        <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Dinheiro</p>
+                                                        <p className="text-sm font-bold">{fmt(f.resumo_entradas_dinheiro)}</p>
+                                                    </div>
+                                                    <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                                                        <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Sangrias</p>
+                                                        <p className="text-sm font-bold">{fmt(f.resumo_saidas_sangria)}</p>
+                                                    </div>
+                                                    <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                                                        <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Diferença Caixa</p>
+                                                        <p className={`text-sm font-bold ${(f.diferenca_caixa ?? 0) !== 0 ? 'text-warning' : 'text-success'}`}>
+                                                            {fmt(f.diferenca_caixa)}
+                                                        </p>
+                                                    </div>
                                                 </div>
-                                                <div className="rounded-xl border border-white/5 bg-white/2 p-3">
-                                                    <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Val. Declarado</p>
-                                                    <p className="text-sm font-bold">{fmt(f.valor_final_declarado)}</p>
-                                                </div>
-                                                <div className="rounded-xl border border-white/5 bg-white/2 p-3">
-                                                    <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Diferença Caixa</p>
-                                                    <p className={`text-sm font-bold ${(f.diferenca_caixa ?? 0) !== 0 ? 'text-warning' : 'text-success'}`}>
-                                                        {fmt(f.diferenca_caixa)}
-                                                    </p>
-                                                </div>
-                                            </div>
+                                            )}
                                         </td>
                                     </tr>
                                 )}
@@ -639,16 +687,74 @@ export function ExtratosConciliacao() {
     const carregarDados = useCallback(async () => {
         setLoading(true);
         try {
-            const [raw, { data: contasData }] = await Promise.all([
+            const [sessoesRaw, { data: tflRaw }, { data: contasData }] = await Promise.all([
                 getFechamentosAuditoria({ status: 'pendente' }),
+                supabase
+                    .from('fechamento_tfl')
+                    .select('id, data_referencia, terminal, total_creditos, total_debitos, saldo_final, arquivo_nome, status_auditoria, loja_id')
+                    .eq('status_auditoria', 'pendente')
+                    .order('data_referencia', { ascending: false })
+                    .limit(100),
                 supabase.from('financeiro_contas_bancarias').select('id, nome, agencia, conta_numero').eq('ativo', true),
             ]);
 
-            setFechamentos(raw as FechamentoPendente[]);
+            const deSessoes: FechamentoPendente[] = (sessoesRaw as any[]).map(f => ({
+                uid: `sessao-${f.id}`,
+                id: String(f.id),
+                fonte: 'caixa_sessoes' as FonteFechamento,
+                data_turno: f.data_turno || '',
+                terminal_id: f.terminal_id || '—',
+                operador_nome: f.operador_nome || '—',
+                resumo_entradas_pix: f.resumo_entradas_pix || 0,
+                resumo_entradas_dinheiro: f.resumo_entradas_dinheiro || 0,
+                resumo_saidas_deposito: f.resumo_saidas_deposito || 0,
+                resumo_saidas_sangria: f.resumo_saidas_sangria || 0,
+                valor_enviado_cofre: f.valor_enviado_cofre || 0,
+                pix_externo_informado: f.pix_externo_informado || 0,
+                resumo_total_entradas: f.resumo_total_entradas || 0,
+                valor_final_declarado: f.valor_final_declarado || 0,
+                diferenca_caixa: f.diferenca_caixa || 0,
+                total_creditos: 0,
+                total_debitos: 0,
+                saldo_final: 0,
+                arquivo_nome: '',
+                auditoria_status: f.auditoria_status || 'pendente',
+                loja_id: f.loja_id || '',
+            }));
+
+            const deTFL: FechamentoPendente[] = (tflRaw ?? []).map((r: any) => ({
+                uid: `tfl-${r.id}`,
+                id: String(r.id),
+                fonte: 'fechamento_tfl' as FonteFechamento,
+                data_turno: r.data_referencia || '',
+                terminal_id: r.terminal || '—',
+                operador_nome: r.arquivo_nome || '—',
+                resumo_entradas_pix: 0,
+                resumo_entradas_dinheiro: 0,
+                resumo_saidas_deposito: 0,
+                resumo_saidas_sangria: 0,
+                valor_enviado_cofre: 0,
+                pix_externo_informado: 0,
+                resumo_total_entradas: r.total_creditos || 0,
+                valor_final_declarado: r.saldo_final || 0,
+                diferenca_caixa: 0,
+                total_creditos: r.total_creditos || 0,
+                total_debitos: r.total_debitos || 0,
+                saldo_final: r.saldo_final || 0,
+                arquivo_nome: r.arquivo_nome || '',
+                auditoria_status: r.status_auditoria || 'pendente',
+                loja_id: r.loja_id || '',
+            }));
+
+            const todos = [...deSessoes, ...deTFL].sort((a, b) =>
+                (b.data_turno || '').localeCompare(a.data_turno || '')
+            );
+
+            setFechamentos(todos);
             setContas((contasData ?? []) as ContaBancaria[]);
 
-            if (raw.length > 0 && lojaId) {
-                const datas = (raw as FechamentoPendente[]).map(f => f.data_turno).sort();
+            if (todos.length > 0 && lojaId) {
+                const datas = todos.map(f => f.data_turno).filter(Boolean).sort();
                 const transacoes = await getTransacoesOFX(lojaId, datas[0], datas[datas.length - 1]);
                 setTransacoesOFX(transacoes);
             }
