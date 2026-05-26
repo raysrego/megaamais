@@ -1,5 +1,3 @@
-// /api/caixa/conciliacao-ia/route.ts - versão corrigida
-
 import { NextRequest, NextResponse } from 'next/server';
 import { anthropic } from '@ai-sdk/anthropic';
 import { generateText } from 'ai';
@@ -82,145 +80,148 @@ export interface ConciliacaoIAResultado {
     conclusao: string;
 }
 
-// ─── Prompt (melhorado) ───────────────────────────────────────────────────────
+// ─── PROMPT SISTEMA (reformulado) ────────────────────────────────────────────
 
 const SYSTEM_PROMPT = `Você é um auditor fiscal especializado em casas lotéricas e terminais de loteria federal (TFL).
 Sua função é realizar a conciliação bancária completa entre o extrato OFX da conta corrente e os fechamentos operacionais (TFL e caixa de operador).
 
-## Suas responsabilidades como auditor:
+## Conceitos importantes
 
-## Entrada fornecida
-- **Relatório TFL**: contém data de fechamento, saldo final do período, lista de transações esperadas (créditos de vendas, débitos de repasse à CAIXA, pagamento de prêmios, etc.).
-- **Extrato OFX**: extrato bancário completo do mês, com transações contendo \`FITID\`, data, valor, descrição.
-- **Fechamentos de caixa**: informações de PIX recebido por operadores, depósitos de cofre, sangrias.
-- **PIX Externos Unitários** (individuais) e **Sangrias TFL** (quando fornecidos)
+### Sangria (retirada de caixa físico)
+- A **sangria** representa dinheiro em espécie retirado do caixa do terminal/lotérica.
+- Esse valor **deve ser depositado na conta bancária** da empresa (crédito no extrato OFX).
+- No extrato, aparecerá como uma transação do tipo **CREDIT**, normalmente com descrições como "DEPÓSITO EM ESPÉCIE", "DEPÓSITO BANCÁRIO", "CRÉDITO EM CONTA" ou similar.
+- **Portanto, a sangria é um crédito esperado no extrato** (aumenta o saldo bancário).
+
+### PIX Externos Unitários
+- São PIX recebidos individualmente (de clientes, terceiros) que devem constar no extrato como **CREDIT** na mesma data informada (ou D+1 por liquidação).
+- A soma de todos os PIX externos do período é parte dos créditos totais que devem ser conciliados.
+
+### Relação com os totais do TFL
+- O TFL informa **total_creditos** (valor total que deveria ter entrado na conta no período, considerando vendas + PIX + depósitos de cofre, etc.).
+- A soma de **todos os PIX externos unitários** + **todas as sangrias** representa uma parcela identificável desses créditos.
+- A outra parcela corresponde a vendas no terminal (débito/crédito) e outros recebíveis que também devem ser encontrados no extrato.
+- **A conciliação está correta quando a soma (PIX externos + sangrias) for encontrada no extrato e o restante dos créditos do TFL também estiver conciliado.**
 
 ## Regras fundamentais
-1. **Janela de conciliação**: para cada data de fechamento TFL (ex: \`D\`), a análise deve considerar transações no extrato bancário entre \`D\` e \`D+3\` dias (inclusive). Isto cobre liquidações de cartão de crédito e atrasos operacionais.
-2. **Direção da verificação**: parta sempre do TFL para o extrato. O que estiver no extrato mas não no TFL pode ser anotado como "outras origens", mas **não** é considerado inconsistência crítica.
-3. **Tolerância de valor**: considera‑se correspondência se a diferença for ≤ R$ 0,02 (arredondamentos e taxas bancárias).
-4. **Prioridade de alerta**: as anomalias mais importantes são:
-   - Crédito esperado no TFL (vendas, PIX, depósito de cofre) sem correspondência no extrato.
-   - Débito esperado no TFL (repasse à CAIXA, pagamento de prêmios) sem correspondência no extrato.
-   - Divergência de valor > R$ 0,02 entre TFL e extrato para a mesma transação identificada.
-   - PIX externo unitário não encontrado no extrato na mesma data (±1 dia).
+
+1. **Janela de conciliação**: para cada data de fechamento TFL (D), considerar transações no extrato entre D e D+3 dias (inclusive). Para PIX externos, priorizar a data exata (tolerância de 1 dia).
+
+2. **Direção da verificação**: partir sempre do TFL para o extrato. Transações no extrato sem correspondência no TFL são apenas anotadas como "outras origens", sem gerar alerta crítico.
+
+3. **Tolerância de valor**: diferença ≤ R$ 0,02 é considerada conciliada.
+
+4. **Regra específica para sangria**:
+   - Cada sangria informada (valor, data) deve encontrar uma transação **CREDIT** no extrato dentro da janela D a D+3.
+   - O valor deve ser compatível (± R$ 0,02).
+   - Se não encontrada, gerar alerta crítico: "Sangria de R$ X em YYYY-MM-DD não localizada no extrato como depósito."
+
+5. **Regra para PIX externos**:
+   - Cada PIX externo (data, valor) deve encontrar uma transação **CREDIT** no extrato na mesma data (ou D+1, justificando na observação).
+   - Se não encontrado, alerta crítico.
+
+6. **Verificação de consistência global**:
+   - Calcular a soma de todos os PIX externos + soma de todas as sangrias do período.
+   - Comparar com os valores de créditos totais do TFL (total_creditos de todos os fechamentos).
+   - Se houver diferença significativa (>0,1% ou valor absoluto > R$ 10), emitir alerta de "inconsistência entre créditos totais do TFL e a soma dos itens identificáveis".
 
 ## Etapas da conciliação
 
-### 1. Extrair transações esperadas do TFL
-Para cada data de fechamento fornecida, liste:
-- **Créditos esperados** (vendas totais, PIX de operadores, depósitos de cofre, e cada PIX externo unitário da sessão).
-- **Débitos esperados** (repasse à CAIXA, prêmios pagos, tarifas, sangrias - incluindo sangria_valor do TFL).
-- Saldo final informado pelo TFL.
+1. Extrair do TFL os totais de créditos esperados por data/período.
+2. Listar todas as transações esperadas:
+   - Cada PIX externo (operador e TFL) → tipo CREDIT.
+   - Cada sangria (TFL) → tipo CREDIT (depósito).
+   - Outros créditos (vendas, etc.) → inferir do total_creditos menos (soma PIX + sangrias).
+3. Para cada item esperado, buscar correspondência no extrato OFX (CREDIT) na janela adequada.
+4. Classificar status: conciliado, divergente, pendente, não conciliado.
+5. Gerar JSON final com alertas específicos.
 
-### 2. Buscar correspondências no extrato OFX (janela D a D+3)
-- Para cada transação esperada, procure no extrato transações do mesmo tipo (crédito/débito) com:
-  - Data dentro da janela (permita diferença de 1 dia para feriados bancários).
-  - Valor compatível (± R$ 0,02).
-  - Descrição que faça sentido (ex: "PIX", "DEPÓSITO", "REPASSE", "PRÊMIO").
-- Use o \`FITID\` para evitar duplicação no relatório.
+## Formato de saída
+Retorne APENAS JSON, sem markdown, seguindo o schema exato fornecido.
+Cada alerta deve mencionar valores e datas.`;
 
-### 3. Classificar o status de cada transação esperada
-- **Conciliado**: encontrou correspondência exata (valor e data na janela, mesmo tipo).
-- **Divergente**: encontrou correspondência de data/tipo, mas valor difere > R$ 0,02.
-- **Pendente**: não encontrou correspondência, mas a data do extrato ainda pode vir (se hoje < D+3, por exemplo) – apenas se a análise for em tempo real; se o extrato já cobre todo o mês, "pendente" equivale a "não conciliado".
-- **Não conciliado** (crítico): não encontrou nenhuma transação compatível no extrato dentro da janela, mesmo com extrato completo.
-
-### 4. Identificar anomalias secundárias
-- Estornos/chargebacks no extrato que anulem um crédito conciliado.
-- Débitos suspeitos no extrato (ex: tarifas não previstas, saques não autorizados).
-- Sangria no caixa sem depósito correspondente no extrato (crédito ausente).
-
-### 5. Gerar resumo com foco nas inconsistências
-- Liste apenas as transações do TFL que **não** estão conciliadas ou que estão divergentes.
-- Para cada uma, informe: data TFL, valor esperado, tipo, e no extrato qual transação mais próxima (se houver) com data, valor, FITID.
-- Se o extrato tiver créditos/débitos relevantes sem relação com o TFL, inclua uma seção "Outras movimentações no extrato" (sem gerar alarme).
-
-### 6. Formato de resposta
-Retorne APENAS JSON válido sem markdown, seguindo exatamente o schema fornecido.
-Seja específico: cite valores, datas e fitids ao descrever anomalias.
-Não invente dados — baseie-se exclusivamente nos dados fornecidos.`;
+// ─── Função para construir o prompt do usuário ───────────────────────────────
 
 function construirPrompt(dados: ConciliacaoIAPayload): string {
-    // Extrai PIX externos unitários de operadores
-    const pixExternosOperador = dados.fechamentosCaixa.flatMap(f => 
+    // PIX externos de operador
+    const pixExternosOperador = dados.fechamentosCaixa.flatMap(f =>
         (f.pix_externos_unitarios || []).map(p => ({
-            ...p,
             data: p.data_pix,
+            valor: p.valor,
+            descricao: p.descricao || `PIX operador ${f.operador_nome}`,
             origem: `operador_${f.operador_nome}`,
             sessao_id: f.id
         }))
     );
-    
-    // Extrai PIX externos de TFL (se houver)
-    const pixExternosTFL = dados.fechamentosTFL.flatMap(f => 
+
+    // PIX externos de TFL
+    const pixExternosTFL = dados.fechamentosTFL.flatMap(f =>
         (f.pix_externos || []).map(p => ({
-            ...p,
+            data: p.data,
+            valor: p.valor,
+            descricao: p.descricao || `PIX externo TFL ${f.terminal}`,
             origem: `tfl_${f.terminal}`,
             tfl_id: f.id
         }))
     );
-    
+
     const todosPixExternos = [...pixExternosOperador, ...pixExternosTFL];
-    
+    const somaPixExternos = todosPixExternos.reduce((acc, p) => acc + p.valor, 0);
+
+    // Sangrias (retirada de caixa físico que deve aparecer como crédito no extrato)
     const sangrias = dados.fechamentosTFL
         .filter(f => f.sangria_valor && f.sangria_valor > 0)
-        .map(f => ({ tfl_id: f.id, data: f.data_referencia, valor: f.sangria_valor }));
+        .map(f => ({
+            data: f.data_referencia,
+            valor: f.sangria_valor!,
+            descricao: `Sangria TFL ${f.terminal}`,
+            tfl_id: f.id
+        }));
+
+    const somaSangrias = sangrias.reduce((acc, s) => acc + s.valor, 0);
+    const somaPixMaisSangrias = somaPixExternos + somaSangrias;
+
+    // Totais de créditos do TFL no período
+    const totalCreditosTFL = dados.fechamentosTFL.reduce((acc, f) => acc + (f.total_creditos || 0), 0);
 
     return `
 Realize a conciliação bancária fiscal do período ${dados.periodo.inicio} a ${dados.periodo.fim}.
 
-## Extrato OFX (${dados.transacoesOFX.length} transações)
+## 1. Extrato OFX (${dados.transacoesOFX.length} transações)
 ${JSON.stringify(dados.transacoesOFX, null, 2)}
 
-## Fechamentos TFL (${dados.fechamentosTFL.length} registros)
+## 2. Fechamentos TFL (${dados.fechamentosTFL.length} registros)
 ${JSON.stringify(dados.fechamentosTFL, null, 2)}
 
-## PIX Externos Unitários (individuais) - DEVEM SER CRUZADOS COM O EXTRATO NA MESMA DATA:
+## 3. PIX Externos Unitários (individuais) - DEVEM SER CRUZADOS COMO CRÉDITOS NO EXTRATO
+Total: ${somaPixExternos.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
 ${todosPixExternos.length > 0 ? JSON.stringify(todosPixExternos, null, 2) : 'Nenhum PIX externo unitário informado.'}
 
-## Sangrias informadas (valores retirados do caixa físico que devem aparecer como débito no extrato):
+## 4. Sangrias (retiradas de caixa físico que devem aparecer como DEPÓSITO/CRÉDITO no extrato)
+Total: ${somaSangrias.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
 ${sangrias.length > 0 ? JSON.stringify(sangrias, null, 2) : 'Nenhuma sangria informada.'}
 
-## Fechamentos de Caixa Operador (totais agregados para referência):
+## 5. Soma dos itens identificáveis (PIX externos + Sangrias)
+Total = ${somaPixMaisSangrias.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+
+## 6. Total de créditos esperados segundo TFL no período
+Total = ${totalCreditosTFL.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+
+## 7. Fechamentos de Caixa Operador (totais agregados para referência)
 ${JSON.stringify(dados.fechamentosCaixa, null, 2)}
 
-Retorne APENAS o JSON no seguinte schema, sem nenhum texto adicional:
-{
-  "parecer_geral": "string com parecer objetivo de 2-3 frases citando valores relevantes",
-  "status_geral": "aprovado" | "aprovado_com_ressalvas" | "rejeitado",
-  "risco": "baixo" | "medio" | "alto",
-  "resumo_financeiro": {
-    "total_creditos_ofx": number,
-    "total_debitos_ofx": number,
-    "total_pix_externos": number,
-    "total_depositos_cofre": number,
-    "total_estornos": number,
-    "saldo_tfl_periodo": number,
-    "diferenca_apurada": number
-  },
-  "itens_conciliados": [
-    {
-      "tipo": "pix" | "deposito" | "estorno" | "debito" | "outros",
-      "data": "YYYY-MM-DD",
-      "valor": number,
-      "descricao_ofx": "string",
-      "fitid": "string",
-      "status": "conciliado" | "pendente" | "divergente" | "suspeito",
-      "referencia": "id do fechamento relacionado ou null",
-      "observacao": "motivo específico quando status != conciliado"
-    }
-  ],
-  "alertas": [
-    { "nivel": "info" | "aviso" | "critico", "mensagem": "string específica com valor e data" }
-  ],
-  "recomendacoes": ["string"],
-  "conclusao": "string resumo final de 1 frase"
-}
+**Instruções específicas para esta análise:**
+- Para **cada PIX externo**, localize no extrato uma transação CREDIT com mesmo valor (±0,02) e data igual ou até 1 dia após.
+- Para **cada sangria**, localize no extrato uma transação CREDIT (depósito em espécie) com mesmo valor (±0,02) na janela D a D+3.
+- Verifique se a soma (PIX + sangrias) está consistente com os créditos totais do TFL. Se houver diferença relevante, emita alerta.
+- Classifique cada item como "conciliado", "divergente" ou "pendente". Se não encontrado, justifique.
+- No JSON final, inclua todos os itens (PIX e sangrias) no array "itens_conciliados" com status adequado.
+
+Retorne APENAS o JSON no schema abaixo, sem texto adicional.
 `;
 }
 
-// ─── Route Handler (corrigido para usar modelo válido) ───────────────────────
+// ─── Route Handler ────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
     try {
@@ -235,19 +236,13 @@ export async function POST(request: NextRequest) {
 
         const userPrompt = construirPrompt(payload);
 
-        // CORREÇÃO: usar modelo disponível. 'claude-3-5-sonnet-20241022' não existe; usar 'claude-3-5-sonnet-20240620' ou 'claude-3-sonnet-20240229'
-        // Se ainda falhar, tente 'claude-3-haiku-20240307' (mais barato e rápido)
-        const model = anthropic('claude-opus-4-5'); // modelo correto para out/2024
+        // Use um modelo válido (verifique os disponíveis no seu plano)
+        const model = anthropic('claude-3-5-sonnet-20241022'); // ou claude-opus-4-5
 
         const { text } = await generateText({
             model,
             system: SYSTEM_PROMPT,
-            messages: [
-                {
-                    role: 'user',
-                    content: userPrompt,
-                },
-            ],
+            messages: [{ role: 'user', content: userPrompt }],
             maxOutputTokens: 8000,
         });
 
