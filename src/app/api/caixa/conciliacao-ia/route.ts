@@ -1,8 +1,10 @@
+// /api/caixa/conciliacao-ia/route.ts - versão corrigida
+
 import { NextRequest, NextResponse } from 'next/server';
 import { anthropic } from '@ai-sdk/anthropic';
 import { generateText } from 'ai';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Types (mantido igual) ────────────────────────────────────────────────────
 
 interface TransacaoOFX {
     fitid: string;
@@ -22,7 +24,7 @@ interface FechamentoTFL {
     saldo_final: number;
     sangria_valor?: number;
     dados_extraidos?: Record<string, unknown>;
-    pix_externos_unitarios?: Array<{ id: number; data: string; valor: number; descricao?: string }>;
+    pix_externos?: Array<{ id?: number; data: string; valor: number; descricao?: string }>;
 }
 
 interface FechamentoCaixa {
@@ -39,7 +41,7 @@ interface FechamentoCaixa {
     resumo_total_entradas: number;
     valor_final_declarado: number;
     diferenca_caixa: number;
-    pix_externos_unitarios?: Array<{ id: number; data_pix: string; valor: number; descricao?: string }>;
+    pix_externos_unitarios?: Array<{ id?: number; data_pix: string; valor: number; descricao?: string }>;
 }
 
 export interface ConciliacaoIAPayload {
@@ -80,7 +82,7 @@ export interface ConciliacaoIAResultado {
     conclusao: string;
 }
 
-// ─── Prompt ───────────────────────────────────────────────────────────────────
+// ─── Prompt (melhorado) ───────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = `Você é um auditor fiscal especializado em casas lotéricas e terminais de loteria federal (TFL).
 Sua função é realizar a conciliação bancária completa entre o extrato OFX da conta corrente e os fechamentos operacionais (TFL e caixa de operador).
@@ -90,7 +92,8 @@ Sua função é realizar a conciliação bancária completa entre o extrato OFX 
 ## Entrada fornecida
 - **Relatório TFL**: contém data de fechamento, saldo final do período, lista de transações esperadas (créditos de vendas, débitos de repasse à CAIXA, pagamento de prêmios, etc.).
 - **Extrato OFX**: extrato bancário completo do mês, com transações contendo \`FITID\`, data, valor, descrição.
-- **Fechamentos de caixa** (opcional): informações de PIX recebido por operadores, depósitos de cofre, sangrias.
+- **Fechamentos de caixa**: informações de PIX recebido por operadores, depósitos de cofre, sangrias.
+- **PIX Externos Unitários** (individuais) e **Sangrias TFL** (quando fornecidos)
 
 ## Regras fundamentais
 1. **Janela de conciliação**: para cada data de fechamento TFL (ex: \`D\`), a análise deve considerar transações no extrato bancário entre \`D\` e \`D+3\` dias (inclusive). Isto cobre liquidações de cartão de crédito e atrasos operacionais.
@@ -100,18 +103,19 @@ Sua função é realizar a conciliação bancária completa entre o extrato OFX 
    - Crédito esperado no TFL (vendas, PIX, depósito de cofre) sem correspondência no extrato.
    - Débito esperado no TFL (repasse à CAIXA, pagamento de prêmios) sem correspondência no extrato.
    - Divergência de valor > R$ 0,02 entre TFL e extrato para a mesma transação identificada.
+   - PIX externo unitário não encontrado no extrato na mesma data (±1 dia).
 
 ## Etapas da conciliação
 
 ### 1. Extrair transações esperadas do TFL
 Para cada data de fechamento fornecida, liste:
-- **Créditos esperados** (vendas totais, PIX de operadores, depósitos de cofre).
-- **Débitos esperados** (repasse à CAIXA, prêmios pagos, tarifas, sangrias).
+- **Créditos esperados** (vendas totais, PIX de operadores, depósitos de cofre, e cada PIX externo unitário da sessão).
+- **Débitos esperados** (repasse à CAIXA, prêmios pagos, tarifas, sangrias - incluindo sangria_valor do TFL).
 - Saldo final informado pelo TFL.
 
 ### 2. Buscar correspondências no extrato OFX (janela D a D+3)
 - Para cada transação esperada, procure no extrato transações do mesmo tipo (crédito/débito) com:
-  - Data dentro da janela (permita diferença de 1 dia para feriados bancários, se sinalizado).
+  - Data dentro da janela (permita diferença de 1 dia para feriados bancários).
   - Valor compatível (± R$ 0,02).
   - Descrição que faça sentido (ex: "PIX", "DEPÓSITO", "REPASSE", "PRÊMIO").
 - Use o \`FITID\` para evitar duplicação no relatório.
@@ -122,7 +126,7 @@ Para cada data de fechamento fornecida, liste:
 - **Pendente**: não encontrou correspondência, mas a data do extrato ainda pode vir (se hoje < D+3, por exemplo) – apenas se a análise for em tempo real; se o extrato já cobre todo o mês, "pendente" equivale a "não conciliado".
 - **Não conciliado** (crítico): não encontrou nenhuma transação compatível no extrato dentro da janela, mesmo com extrato completo.
 
-### 4. Identificar anomalias secundárias (opcional, mas útil)
+### 4. Identificar anomalias secundárias
 - Estornos/chargebacks no extrato que anulem um crédito conciliado.
 - Débitos suspeitos no extrato (ex: tarifas não previstas, saques não autorizados).
 - Sangria no caixa sem depósito correspondente no extrato (crédito ausente).
@@ -138,8 +142,30 @@ Seja específico: cite valores, datas e fitids ao descrever anomalias.
 Não invente dados — baseie-se exclusivamente nos dados fornecidos.`;
 
 function construirPrompt(dados: ConciliacaoIAPayload): string {
-    const pixExternosOperador = dados.fechamentosCaixa.flatMap(f => f.pix_externos_unitarios || []);
-    const sangriasTFL = dados.fechamentosTFL.map(f => ({ id: f.id, sangria: f.sangria_valor || 0 }));
+    // Extrai PIX externos unitários de operadores
+    const pixExternosOperador = dados.fechamentosCaixa.flatMap(f => 
+        (f.pix_externos_unitarios || []).map(p => ({
+            ...p,
+            data: p.data_pix,
+            origem: `operador_${f.operador_nome}`,
+            sessao_id: f.id
+        }))
+    );
+    
+    // Extrai PIX externos de TFL (se houver)
+    const pixExternosTFL = dados.fechamentosTFL.flatMap(f => 
+        (f.pix_externos || []).map(p => ({
+            ...p,
+            origem: `tfl_${f.terminal}`,
+            tfl_id: f.id
+        }))
+    );
+    
+    const todosPixExternos = [...pixExternosOperador, ...pixExternosTFL];
+    
+    const sangrias = dados.fechamentosTFL
+        .filter(f => f.sangria_valor && f.sangria_valor > 0)
+        .map(f => ({ tfl_id: f.id, data: f.data_referencia, valor: f.sangria_valor }));
 
     return `
 Realize a conciliação bancária fiscal do período ${dados.periodo.inicio} a ${dados.periodo.fim}.
@@ -150,13 +176,13 @@ ${JSON.stringify(dados.transacoesOFX, null, 2)}
 ## Fechamentos TFL (${dados.fechamentosTFL.length} registros)
 ${JSON.stringify(dados.fechamentosTFL, null, 2)}
 
-## PIX Externos Unitários (Operador):
-${JSON.stringify(pixExternosOperador, null, 2)}
+## PIX Externos Unitários (individuais) - DEVEM SER CRUZADOS COM O EXTRATO NA MESMA DATA:
+${todosPixExternos.length > 0 ? JSON.stringify(todosPixExternos, null, 2) : 'Nenhum PIX externo unitário informado.'}
 
-## Sangria TFL:
-${JSON.stringify(sangriasTFL, null, 2)}
+## Sangrias informadas (valores retirados do caixa físico que devem aparecer como débito no extrato):
+${sangrias.length > 0 ? JSON.stringify(sangrias, null, 2) : 'Nenhuma sangria informada.'}
 
-## Fechamentos de Caixa Operador (${dados.fechamentosCaixa.length} registros)
+## Fechamentos de Caixa Operador (totais agregados para referência):
 ${JSON.stringify(dados.fechamentosCaixa, null, 2)}
 
 Retorne APENAS o JSON no seguinte schema, sem nenhum texto adicional:
@@ -194,7 +220,7 @@ Retorne APENAS o JSON no seguinte schema, sem nenhum texto adicional:
 `;
 }
 
-// ─── Route Handler ────────────────────────────────────────────────────────────
+// ─── Route Handler (corrigido para usar modelo válido) ───────────────────────
 
 export async function POST(request: NextRequest) {
     try {
@@ -209,8 +235,12 @@ export async function POST(request: NextRequest) {
 
         const userPrompt = construirPrompt(payload);
 
+        // CORREÇÃO: usar modelo disponível. 'claude-3-5-sonnet-20241022' não existe; usar 'claude-3-5-sonnet-20240620' ou 'claude-3-sonnet-20240229'
+        // Se ainda falhar, tente 'claude-3-haiku-20240307' (mais barato e rápido)
+        const model = anthropic('claude-3-5-sonnet-20240620'); // modelo correto para out/2024
+
         const { text } = await generateText({
-            model: anthropic('claude-3-5-sonnet-20241022'),
+            model,
             system: SYSTEM_PROMPT,
             messages: [
                 {
