@@ -12,7 +12,7 @@ import {
     type OFXTransacaoSalva,
     type ResultadoConciliacao,
 } from '@/actions/extrato-conciliacao';
-import { parseOFX, type OFXDados } from '@/lib/ofx-parser';
+import type { OFXDados } from '@/lib/ofx-parser';
 import { useLoja } from '@/contexts/LojaContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -98,6 +98,7 @@ function OFXUploadPanel({
         setProcessando(true);
         try {
             const text = await file.text();
+            const { parseOFX } = await import('@/lib/ofx-parser');
             const dados = parseOFX(text);
             setPreview(dados);
             setArquivoNome(file.name);
