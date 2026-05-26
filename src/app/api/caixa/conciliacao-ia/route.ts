@@ -237,7 +237,7 @@ export async function POST(request: NextRequest) {
 
         // CORREÇÃO: usar modelo disponível. 'claude-3-5-sonnet-20241022' não existe; usar 'claude-3-5-sonnet-20240620' ou 'claude-3-sonnet-20240229'
         // Se ainda falhar, tente 'claude-3-haiku-20240307' (mais barato e rápido)
-        const model = anthropic('claude-3-5-sonnet-20240620'); // modelo correto para out/2024
+        const model = anthropic('claude-opus-4-5'); // modelo correto para out/2024
 
         const { text } = await generateText({
             model,
