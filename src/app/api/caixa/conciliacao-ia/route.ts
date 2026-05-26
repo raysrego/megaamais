@@ -20,7 +20,9 @@ interface FechamentoTFL {
     total_creditos: number;
     total_debitos: number;
     saldo_final: number;
+    sangria_valor?: number;
     dados_extraidos?: Record<string, unknown>;
+    pix_externos_unitarios?: Array<{ id: number; data: string; valor: number; descricao?: string }>;
 }
 
 interface FechamentoCaixa {
@@ -37,6 +39,7 @@ interface FechamentoCaixa {
     resumo_total_entradas: number;
     valor_final_declarado: number;
     diferenca_caixa: number;
+    pix_externos_unitarios?: Array<{ id: number; data_pix: string; valor: number; descricao?: string }>;
 }
 
 export interface ConciliacaoIAPayload {
@@ -54,7 +57,7 @@ export interface ItemConciliado {
     descricao_ofx: string;
     fitid: string;
     status: 'conciliado' | 'pendente' | 'divergente' | 'suspeito';
-    referencia?: string; // id do fechamento correspondente
+    referencia?: string;
     observacao?: string;
 }
 
@@ -129,12 +132,16 @@ Para cada data de fechamento fornecida, liste:
 - Para cada uma, informe: data TFL, valor esperado, tipo, e no extrato qual transação mais próxima (se houver) com data, valor, FITID.
 - Se o extrato tiver créditos/débitos relevantes sem relação com o TFL, inclua uma seção "Outras movimentações no extrato" (sem gerar alarme).
 
-### 5. Formato de resposta
+### 6. Formato de resposta
 Retorne APENAS JSON válido sem markdown, seguindo exatamente o schema fornecido.
 Seja específico: cite valores, datas e fitids ao descrever anomalias.
 Não invente dados — baseie-se exclusivamente nos dados fornecidos.`;
 
-const USER_PROMPT_TEMPLATE = (dados: ConciliacaoIAPayload) => `
+function construirPrompt(dados: ConciliacaoIAPayload): string {
+    const pixExternosOperador = dados.fechamentosCaixa.flatMap(f => f.pix_externos_unitarios || []);
+    const sangriasTFL = dados.fechamentosTFL.map(f => ({ id: f.id, sangria: f.sangria_valor || 0 }));
+
+    return `
 Realize a conciliação bancária fiscal do período ${dados.periodo.inicio} a ${dados.periodo.fim}.
 
 ## Extrato OFX (${dados.transacoesOFX.length} transações)
@@ -144,10 +151,10 @@ ${JSON.stringify(dados.transacoesOFX, null, 2)}
 ${JSON.stringify(dados.fechamentosTFL, null, 2)}
 
 ## PIX Externos Unitários (Operador):
-${JSON.stringify(fechamentosCaixa.flatMap(f => f.pix_externos_unitarios), null, 2)}
+${JSON.stringify(pixExternosOperador, null, 2)}
 
 ## Sangria TFL:
-${JSON.stringify(fechamentosTFL.map(f => ({ id: f.id, sangria: f.sangria_valor })), null, 2)}
+${JSON.stringify(sangriasTFL, null, 2)}
 
 ## Fechamentos de Caixa Operador (${dados.fechamentosCaixa.length} registros)
 ${JSON.stringify(dados.fechamentosCaixa, null, 2)}
@@ -183,7 +190,9 @@ Retorne APENAS o JSON no seguinte schema, sem nenhum texto adicional:
   ],
   "recomendacoes": ["string"],
   "conclusao": "string resumo final de 1 frase"
-}`;
+}
+`;
+}
 
 // ─── Route Handler ────────────────────────────────────────────────────────────
 
@@ -198,13 +207,15 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        const userPrompt = construirPrompt(payload);
+
         const { text } = await generateText({
-            model: anthropic('claude-opus-4-5'),
+            model: anthropic('claude-3-5-sonnet-20241022'),
             system: SYSTEM_PROMPT,
             messages: [
                 {
                     role: 'user',
-                    content: USER_PROMPT_TEMPLATE(payload),
+                    content: userPrompt,
                 },
             ],
             maxOutputTokens: 8000,
