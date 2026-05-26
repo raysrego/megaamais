@@ -15,6 +15,15 @@ CREATE TABLE public.audit_logs (
   CONSTRAINT audit_logs_pkey PRIMARY KEY (id),
   CONSTRAINT audit_logs_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES auth.users(id)
 );
+CREATE TABLE public.bolao_jogos (
+  id bigint NOT NULL DEFAULT nextval('bolao_jogos_id_seq'::regclass),
+  bolao_id bigint NOT NULL,
+  jogo_numero integer NOT NULL,
+  dezenas ARRAY NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT bolao_jogos_pkey PRIMARY KEY (id),
+  CONSTRAINT bolao_jogos_bolao_id_fkey FOREIGN KEY (bolao_id) REFERENCES public.boloes(id)
+);
 CREATE TABLE public.boloes (
   id bigint NOT NULL DEFAULT nextval('boloes_id_seq'::regclass),
   produto_id bigint,
@@ -52,7 +61,7 @@ CREATE TABLE public.boloes_prestacao_contas (
 CREATE TABLE public.caixa_bolao_sessoes (
   id integer NOT NULL DEFAULT nextval('caixa_bolao_sessoes_id_seq'::regclass),
   responsavel_id uuid NOT NULL,
-  tipo_responsavel text NOT NULL CHECK (tipo_responsavel = ANY (ARRAY['op_admin'::text, 'gerente'::text])),
+  tipo_responsavel text NOT NULL CHECK (tipo_responsavel = ANY (ARRAY['op_admin'::text, 'gerente'::text, 'operador'::text])),
   data_abertura timestamp with time zone DEFAULT now(),
   data_fechamento timestamp with time zone,
   total_vendido numeric DEFAULT 0,
@@ -217,13 +226,15 @@ CREATE TABLE public.cofre_movimentacoes (
   conta_bancaria_id uuid,
   conta_bancaria_destino_id uuid,
   data_deposito timestamp with time zone,
+  usuario_id uuid,
   CONSTRAINT cofre_movimentacoes_pkey PRIMARY KEY (id),
   CONSTRAINT cofre_movimentacoes_operador_id_fkey FOREIGN KEY (operador_id) REFERENCES auth.users(id),
   CONSTRAINT cofre_movimentacoes_origem_sangria_id_fkey FOREIGN KEY (origem_sangria_id) REFERENCES public.caixa_movimentacoes(id),
   CONSTRAINT cofre_movimentacoes_loja_id_fkey FOREIGN KEY (loja_id) REFERENCES public.empresas(id),
   CONSTRAINT cofre_movimentacoes_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES auth.users(id),
   CONSTRAINT cofre_movimentacoes_deleted_by_fkey FOREIGN KEY (deleted_by) REFERENCES auth.users(id),
-  CONSTRAINT cofre_movimentacoes_conta_bancaria_destino_id_fkey FOREIGN KEY (conta_bancaria_destino_id) REFERENCES public.financeiro_contas_bancarias(id)
+  CONSTRAINT cofre_movimentacoes_conta_bancaria_destino_id_fkey FOREIGN KEY (conta_bancaria_destino_id) REFERENCES public.financeiro_contas_bancarias(id),
+  CONSTRAINT cofre_movimentacoes_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES auth.users(id)
 );
 CREATE TABLE public.conciliacao_extratos (
   id integer NOT NULL DEFAULT nextval('conciliacao_extratos_id_seq'::regclass),
@@ -313,6 +324,41 @@ CREATE TABLE public.empresas (
   CONSTRAINT empresas_pkey PRIMARY KEY (id),
   CONSTRAINT empresas_grupo_id_fkey FOREIGN KEY (grupo_id) REFERENCES public.grupos(id)
 );
+CREATE TABLE public.fechamento_caixa_ia (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  loja_id uuid,
+  user_id uuid,
+  tipo_documento text NOT NULL DEFAULT 'DESCONHECIDO'::text,
+  data_documento date,
+  terminal text,
+  dados_extraidos jsonb DEFAULT '{}'::jsonb,
+  imagem_url text,
+  status_processamento text NOT NULL DEFAULT 'processado'::text,
+  erro_mensagem text,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT fechamento_caixa_ia_pkey PRIMARY KEY (id),
+  CONSTRAINT fechamento_caixa_ia_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.fechamento_tfl (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  loja_id uuid,
+  user_id uuid,
+  data_referencia date,
+  terminal text,
+  total_creditos numeric DEFAULT 0,
+  total_debitos numeric DEFAULT 0,
+  saldo_final numeric DEFAULT 0,
+  dados_extraidos jsonb DEFAULT '{}'::jsonb,
+  arquivo_nome text,
+  status_auditoria text NOT NULL DEFAULT 'pendente'::text,
+  observacoes_auditoria text,
+  auditado_por uuid,
+  auditado_em timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT fechamento_tfl_pkey PRIMARY KEY (id),
+  CONSTRAINT fechamento_tfl_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT fechamento_tfl_auditado_por_fkey FOREIGN KEY (auditado_por) REFERENCES auth.users(id)
+);
 CREATE TABLE public.financeiro_bancos (
   id integer NOT NULL DEFAULT nextval('financeiro_bancos_id_seq'::regclass),
   codigo text UNIQUE,
@@ -385,8 +431,10 @@ CREATE TABLE public.financeiro_itens_plano (
   arquivado boolean DEFAULT false,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
+  parent_id integer,
   CONSTRAINT financeiro_itens_plano_pkey PRIMARY KEY (id),
-  CONSTRAINT financeiro_itens_plano_loja_id_fkey FOREIGN KEY (loja_id) REFERENCES public.empresas(id)
+  CONSTRAINT financeiro_itens_plano_loja_id_fkey FOREIGN KEY (loja_id) REFERENCES public.empresas(id),
+  CONSTRAINT financeiro_itens_plano_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES public.financeiro_itens_plano(id)
 );
 CREATE TABLE public.financeiro_parametros (
   chave text NOT NULL,
@@ -456,6 +504,25 @@ CREATE TABLE public.loja_produtos (
   CONSTRAINT loja_produtos_loja_id_fkey FOREIGN KEY (loja_id) REFERENCES public.empresas(id),
   CONSTRAINT loja_produtos_produto_id_fkey FOREIGN KEY (produto_id) REFERENCES public.produtos(id)
 );
+CREATE TABLE public.ofx_transacoes (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  loja_id uuid NOT NULL,
+  conta_id uuid,
+  fitid text NOT NULL,
+  tipo text NOT NULL CHECK (tipo = ANY (ARRAY['CREDIT'::text, 'DEBIT'::text])),
+  data date NOT NULL,
+  valor numeric NOT NULL CHECK (valor >= 0::numeric),
+  memo text DEFAULT ''::text,
+  checknum text DEFAULT ''::text,
+  conciliado boolean DEFAULT false,
+  matched_tipo text CHECK (matched_tipo IS NULL OR (matched_tipo = ANY (ARRAY['pix_externo'::text, 'deposito_cofre'::text, 'sangria'::text, 'pagamento'::text, 'outros'::text]))),
+  matched_ref_id bigint,
+  arquivo_nome text DEFAULT ''::text,
+  importado_em timestamp with time zone DEFAULT now(),
+  importado_por uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT ofx_transacoes_pkey PRIMARY KEY (id)
+);
 CREATE TABLE public.perfis (
   id uuid NOT NULL,
   role USER-DEFINED DEFAULT 'operador'::user_role,
@@ -468,6 +535,19 @@ CREATE TABLE public.perfis (
   CONSTRAINT perfis_pkey PRIMARY KEY (id),
   CONSTRAINT perfis_loja_id_fkey FOREIGN KEY (loja_id) REFERENCES public.empresas(id),
   CONSTRAINT perfis_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.pix_externos_sessao (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  sessao_id bigint NOT NULL,
+  loja_id uuid NOT NULL,
+  valor numeric NOT NULL CHECK (valor > 0::numeric),
+  data_pix date NOT NULL,
+  descricao text DEFAULT ''::text,
+  fitid_ofx text,
+  conciliado boolean DEFAULT false,
+  created_by uuid NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT pix_externos_sessao_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.prestacoes_contas (
   id bigint NOT NULL DEFAULT nextval('prestacoes_contas_id_seq'::regclass),
