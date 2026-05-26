@@ -185,7 +185,7 @@ Retorne APENAS o JSON no seguinte schema, sem nenhum texto adicional:
   "alertas_adicionais": [
     "string (ex: 'Estorno detectado que anula crédito conciliado')"
   ]
-};
+}
 
 // ─── Route Handler ────────────────────────────────────────────────────────────
 
