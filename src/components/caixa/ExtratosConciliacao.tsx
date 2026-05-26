@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { RefreshCw, Loader as Loader2, ArrowRightLeft, CircleCheck as CheckCircle2, TriangleAlert as AlertTriangle, Clock, ChevronRight, X, Landmark, TrendingUp, Upload, FileText, Calendar, Check, Search, CircleAlert, Info, Sparkles, ShieldCheck, ShieldAlert, ShieldX, ChevronDown } from 'lucide-react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
+import React from 'react';
 import { useToast } from '@/contexts/ToastContext';
 import { getFechamentosAuditoria } from '@/actions/auditoria';
 import {
