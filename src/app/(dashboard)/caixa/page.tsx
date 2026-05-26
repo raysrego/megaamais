@@ -1,17 +1,18 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { LayoutDashboard, Calculator, ShieldCheck, Zap, ClipboardCheck } from 'lucide-react';
+import { LayoutDashboard, Calculator, ShieldCheck, Zap, ClipboardCheck, FileText } from 'lucide-react';
 import { VisaoGestorCaixa } from '@/components/caixa/VisaoGestorCaixa';
 import { VisaoOperadorCaixa } from '@/components/caixa/VisaoOperadorCaixa';
 import { AuditoriaFechamentos } from '@/components/caixa/AuditoriaFechamentos';
+import { ExtratosConciliacao } from '@/components/caixa/ExtratosConciliacao';
 import { ModalGestaoCaixa } from '@/components/ModalGestaoCaixa';
 import Link from 'next/link';
 import { usePerfil } from '@/hooks/usePerfil';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { LoadingState } from '@/components/ui/LoadingState';
 
-type AbaAtiva = 'gestor' | 'operador' | 'auditoria';
+type AbaAtiva = 'gestor' | 'operador' | 'auditoria' | 'extratos';
 
 export default function FluxoCaixaPage() {
     const { isAdmin, loading } = usePerfil();
@@ -76,6 +77,15 @@ export default function FluxoCaixaPage() {
                             <ClipboardCheck size={16} /> Auditoria
                         </button>
                     )}
+                    {isAdmin && (
+                        <button
+                            onClick={() => setAbaAtiva('extratos')}
+                            className={`btn ${abaAtiva === 'extratos' ? 'btn-primary' : 'btn-ghost'} h-[42px] px-6 text-xs font-bold`}
+                            style={{ borderRadius: '10px' }}
+                        >
+                            <FileText size={16} /> Extratos
+                        </button>
+                    )}
                 </div>
 
                 {abaAtiva === 'gestor' && (
@@ -91,6 +101,7 @@ export default function FluxoCaixaPage() {
                 {isAdmin && abaAtiva === 'gestor' && <VisaoGestorCaixa />}
                 {abaAtiva === 'operador' && <VisaoOperadorCaixa />}
                 {isAdmin && abaAtiva === 'auditoria' && <AuditoriaFechamentos />}
+                {isAdmin && abaAtiva === 'extratos' && <ExtratosConciliacao />}
             </div>
         </div>
     );
