@@ -87,12 +87,12 @@ onde algo registrado no TFL **não aparece** ou **aparece com divergência** no 
 
 ## Entrada fornecida
 - **Relatório TFL**: contém data de fechamento, saldo final do período, lista de transações esperadas (créditos de vendas, débitos de repasse à CAIXA, pagamento de prêmios, etc.).
-- **Extrato OFX**: extrato bancário completo do mês, com transações contendo `FITID`, data, valor, descrição.
+- **Extrato OFX**: extrato bancário completo do mês, com transações contendo \`FITID\`, data, valor, descrição.
 - **Fechamentos de caixa** (opcional): informações de PIX recebido por operadores, depósitos de cofre, sangrias.
 
 ## Regras fundamentais
-1. **Janela de conciliação**: para cada data de fechamento TFL (ex: `D`), a análise deve considerar transações no extrato bancário entre `D` e `D+3` dias (inclusive). Isto cobre liquidações de cartão de crédito e atrasos operacionais.
-2. **Direção da verificação**: parta sempre do TFL para o extrato. O que estiver no extrato mas não no TFL pode ser anotado como “outras origens”, mas **não** é considerado inconsistência crítica.
+1. **Janela de conciliação**: para cada data de fechamento TFL (ex: \`D\`), a análise deve considerar transações no extrato bancário entre \`D\` e \`D+3\` dias (inclusive). Isto cobre liquidações de cartão de crédito e atrasos operacionais.
+2. **Direção da verificação**: parta sempre do TFL para o extrato. O que estiver no extrato mas não no TFL pode ser anotado como "outras origens", mas **não** é considerado inconsistência crítica.
 3. **Tolerância de valor**: considera‑se correspondência se a diferença for ≤ R$ 0,02 (arredondamentos e taxas bancárias).
 4. **Prioridade de alerta**: as anomalias mais importantes são:
    - Crédito esperado no TFL (vendas, PIX, depósito de cofre) sem correspondência no extrato.
@@ -111,13 +111,13 @@ Para cada data de fechamento fornecida, liste:
 - Para cada transação esperada, procure no extrato transações do mesmo tipo (crédito/débito) com:
   - Data dentro da janela (permita diferença de 1 dia para feriados bancários, se sinalizado).
   - Valor compatível (± R$ 0,02).
-  - Descrição que faça sentido (ex: “PIX”, “DEPÓSITO”, “REPASSE”, “PRÊMIO”).
-- Use o `FITID` para evitar duplicação no relatório.
+  - Descrição que faça sentido (ex: "PIX", "DEPÓSITO", "REPASSE", "PRÊMIO").
+- Use o \`FITID\` para evitar duplicação no relatório.
 
 ### 3. Classificar o status de cada transação esperada
 - **Conciliado**: encontrou correspondência exata (valor e data na janela, mesmo tipo).
 - **Divergente**: encontrou correspondência de data/tipo, mas valor difere > R$ 0,02.
-- **Pendente**: não encontrou correspondência, mas a data do extrato ainda pode vir (se hoje < D+3, por exemplo) – apenas se a análise for em tempo real; se o extrato já cobre todo o mês, “pendente” equivale a “não conciliado”.
+- **Pendente**: não encontrou correspondência, mas a data do extrato ainda pode vir (se hoje < D+3, por exemplo) – apenas se a análise for em tempo real; se o extrato já cobre todo o mês, "pendente" equivale a "não conciliado".
 - **Não conciliado** (crítico): não encontrou nenhuma transação compatível no extrato dentro da janela, mesmo com extrato completo.
 
 ### 4. Identificar anomalias secundárias (opcional, mas útil)
@@ -128,8 +128,7 @@ Para cada data de fechamento fornecida, liste:
 ### 5. Gerar resumo com foco nas inconsistências
 - Liste apenas as transações do TFL que **não** estão conciliadas ou que estão divergentes.
 - Para cada uma, informe: data TFL, valor esperado, tipo, e no extrato qual transação mais próxima (se houver) com data, valor, FITID.
-- Se o extrato tiver créditos/débitos relevantes sem relação com o TFL, inclua uma seção “Outras movimentações no extrato” (sem gerar alarme).
-
+- Se o extrato tiver créditos/débitos relevantes sem relação com o TFL, inclua uma seção "Outras movimentações no extrato" (sem gerar alarme).`;
 
 const USER_PROMPT_TEMPLATE = (dados: ConciliacaoIAPayload) => `
 Realize a conciliação bancária fiscal do período ${dados.periodo.inicio} a ${dados.periodo.fim}.
@@ -170,7 +169,7 @@ Retorne APENAS o JSON no seguinte schema, sem nenhum texto adicional:
         "valor": 0.00,
         "descricao": "string"
       },
-      "motivo": "string (ex: 'Valor difere em R$ X', 'Nenhuma transacao encontrada na janela D a D+3')"
+      "motivo": "string"
     }
   ],
   "outras_movimentacoes_extrato": [
@@ -182,10 +181,8 @@ Retorne APENAS o JSON no seguinte schema, sem nenhum texto adicional:
       "observacao": "sem correspondencia no TFL (possivel outra origem)"
     }
   ],
-  "alertas_adicionais": [
-    "string (ex: 'Estorno detectado que anula crédito conciliado')"
-  ]
-}
+  "alertas_adicionais": ["string"]
+}`;
 
 // ─── Route Handler ────────────────────────────────────────────────────────────
 
