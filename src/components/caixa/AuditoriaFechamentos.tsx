@@ -1639,7 +1639,7 @@ export function AuditoriaFechamentos() {
                                                 <ChevronRight size={16} className="text-muted" />
                                             </td>
                                         </table>
-                                    ))}
+                                    )}
                                 </tbody>
                             </table>
                         </div>
