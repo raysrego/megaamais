@@ -38,9 +38,8 @@ interface FechamentoPendente {
 interface ContaBancaria {
     id: string;
     nome: string;
-    banco: string;
     agencia: string;
-    conta: string;
+    conta_numero: string;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -234,7 +233,7 @@ function OFXUploadPanel({
                         >
                             <option value="">Sem vínculo</option>
                             {contas.map(c => (
-                                <option key={c.id} value={c.id}>{c.banco} — {c.nome}</option>
+                                <option key={c.id} value={c.id}>{c.nome}{c.agencia ? ` — Ag. ${c.agencia}` : ''}</option>
                             ))}
                         </select>
                     </div>
@@ -642,7 +641,7 @@ export function ExtratosConciliacao() {
         try {
             const [raw, { data: contasData }] = await Promise.all([
                 getFechamentosAuditoria({ status: 'pendente' }),
-                supabase.from('financeiro_contas_bancarias').select('id, nome, banco, agencia, conta').eq('ativo', true),
+                supabase.from('financeiro_contas_bancarias').select('id, nome, agencia, conta_numero').eq('ativo', true),
             ]);
 
             setFechamentos(raw as FechamentoPendente[]);
