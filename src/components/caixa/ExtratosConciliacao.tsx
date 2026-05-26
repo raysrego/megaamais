@@ -19,7 +19,7 @@ import { useLoja } from '@/contexts/LojaContext';
 type FonteFechamento = 'caixa_sessoes' | 'fechamento_tfl';
 
 interface FechamentoPendente {
-    uid: string; // fonte + id, unique key for rendering
+    uid: string; // fonte + id
     id: string;
     fonte: FonteFechamento;
     data_turno: string;
@@ -183,7 +183,6 @@ function OFXUploadPanel({
                     </button>
                 </div>
 
-                {/* Resumo do arquivo */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div className="rounded-xl border border-white/5 bg-white/2 p-3">
                         <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Banco</p>
@@ -203,7 +202,6 @@ function OFXUploadPanel({
                     </div>
                 </div>
 
-                {/* Tabela de transações */}
                 <div className="rounded-xl border border-white/5 overflow-hidden max-h-64 overflow-y-auto">
                     <table className="w-full text-xs">
                         <thead className="sticky top-0 bg-[var(--card-bg)]">
@@ -419,7 +417,6 @@ function PainelConciliacaoIA({
 
     return (
         <div className="card p-5 space-y-5">
-            {/* Header */}
             <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
@@ -438,7 +435,6 @@ function PainelConciliacaoIA({
                 </div>
             </div>
 
-            {/* Status geral + Parecer */}
             <div className={`rounded-xl border p-4 ${statusColor}`}>
                 <div className="flex items-center gap-2 mb-2">
                     <StatusIcon size={16} />
@@ -451,7 +447,6 @@ function PainelConciliacaoIA({
                 <p className="text-xs leading-relaxed">{resultado.parecer_geral}</p>
             </div>
 
-            {/* Resumo financeiro */}
             <div>
                 <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">Resumo Financeiro</p>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -490,7 +485,6 @@ function PainelConciliacaoIA({
                 </div>
             </div>
 
-            {/* Alertas */}
             {resultado.alertas.length > 0 && (
                 <div className="space-y-2">
                     <p className="text-[10px] font-bold text-muted uppercase tracking-wider">Alertas</p>
@@ -505,7 +499,6 @@ function PainelConciliacaoIA({
                 </div>
             )}
 
-            {/* Itens conciliados — collapsible */}
             {resultado.itens_conciliados.length > 0 && (
                 <div>
                     <button
@@ -560,7 +553,6 @@ function PainelConciliacaoIA({
                 </div>
             )}
 
-            {/* Recomendações */}
             {resultado.recomendacoes.length > 0 && (
                 <div className="space-y-1">
                     <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">Recomendações</p>
@@ -573,7 +565,6 @@ function PainelConciliacaoIA({
                 </div>
             )}
 
-            {/* Conclusão */}
             <div className="rounded-xl border border-white/5 bg-white/2 px-4 py-3">
                 <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Conclusão do Auditor</p>
                 <p className="text-xs font-semibold">{resultado.conclusao}</p>
@@ -582,10 +573,23 @@ function PainelConciliacaoIA({
     );
 }
 
-// ─── Tabela de fechamentos ────────────────────────────────────────────────────
+// ─── Tabela de fechamentos com seleção ─────────────────────────────────────────
 
-function TabelaFechamentos({ fechamentos }: { fechamentos: FechamentoPendente[] }) {
+function TabelaFechamentos({
+    fechamentos,
+    selectedIds = [],
+    onToggleSelect,
+    onSelectAll,
+}: {
+    fechamentos: FechamentoPendente[];
+    selectedIds?: string[];
+    onToggleSelect?: (uid: string) => void;
+    onSelectAll?: (selected: boolean) => void;
+}) {
     const [aberto, setAberto] = useState<string | null>(null);
+
+    const allSelected = fechamentos.length > 0 && fechamentos.every(f => selectedIds.includes(f.uid));
+    const someSelected = selectedIds.length > 0 && !allSelected;
 
     if (fechamentos.length === 0) return (
         <div className="card p-12 text-center">
@@ -602,9 +606,25 @@ function TabelaFechamentos({ fechamentos }: { fechamentos: FechamentoPendente[] 
     return (
         <div className="card overflow-hidden">
             <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                    <Search size={13} className="text-muted" />
-                    <span className="text-xs font-bold">Fechamentos Pendentes de Auditoria ({fechamentos.length})</span>
+                <div className="flex items-center gap-3">
+                    {onSelectAll && (
+                        <label className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                className="w-3.5 h-3.5 rounded border-white/20 bg-white/5 accent-primary"
+                                checked={allSelected}
+                                ref={input => {
+                                    if (input) input.indeterminate = someSelected;
+                                }}
+                                onChange={(e) => onSelectAll(e.target.checked)}
+                            />
+                            <span className="text-[10px] text-muted">Todos</span>
+                        </label>
+                    )}
+                    <div className="flex items-center gap-2">
+                        <Search size={13} className="text-muted" />
+                        <span className="text-xs font-bold">Fechamentos Pendentes de Auditoria ({fechamentos.length})</span>
+                    </div>
                 </div>
                 <div className="flex gap-4 text-[10px] text-muted">
                     <span>PIX Ext.: <span className="font-bold text-foreground">{fmt(totalPix)}</span></span>
@@ -615,13 +635,14 @@ function TabelaFechamentos({ fechamentos }: { fechamentos: FechamentoPendente[] 
             <table className="w-full text-xs">
                 <thead>
                     <tr className="border-b border-white/5">
+                        {onToggleSelect && <th className="w-8 px-2 py-3"></th>}
                         <th className="text-left px-4 py-3 text-[10px] font-bold text-muted uppercase">Tipo</th>
                         <th className="text-left px-4 py-3 text-[10px] font-bold text-muted uppercase">Data / Terminal</th>
                         <th className="text-left px-4 py-3 text-[10px] font-bold text-muted uppercase">Operador / Arquivo</th>
                         <th className="text-right px-4 py-3 text-[10px] font-bold text-muted uppercase">PIX Externo</th>
                         <th className="text-right px-4 py-3 text-[10px] font-bold text-muted uppercase">Depósito Cofre</th>
                         <th className="text-right px-4 py-3 text-[10px] font-bold text-muted uppercase">Total / Saldo</th>
-                        <th className="px-4 py-3" />
+                        <th className="px-4 py-3"></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -629,13 +650,23 @@ function TabelaFechamentos({ fechamentos }: { fechamentos: FechamentoPendente[] 
                         const isTFL = f.fonte === 'fechamento_tfl';
                         const isOpen = aberto === f.uid;
                         const valorPrincipal = isTFL ? f.saldo_final : f.resumo_total_entradas;
+                        const isSelected = selectedIds.includes(f.uid);
                         return (
-                            <>
+                            <React.Fragment key={f.uid}>
                                 <tr
-                                    key={f.uid}
                                     className="border-b border-white/3 hover:bg-white/2 cursor-pointer transition-colors"
                                     onClick={() => setAberto(isOpen ? null : f.uid)}
                                 >
+                                    {onToggleSelect && (
+                                        <td className="px-2 py-3" onClick={(e) => e.stopPropagation()}>
+                                            <input
+                                                type="checkbox"
+                                                className="w-3.5 h-3.5 rounded border-white/20 bg-white/5 accent-primary"
+                                                checked={isSelected}
+                                                onChange={() => onToggleSelect(f.uid)}
+                                            />
+                                        </td>
+                                    )}
                                     <td className="px-4 py-3">
                                         {isTFL ? (
                                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-primary/10 text-primary border border-primary/20">
@@ -685,8 +716,8 @@ function TabelaFechamentos({ fechamentos }: { fechamentos: FechamentoPendente[] 
                                     </td>
                                 </tr>
                                 {isOpen && (
-                                    <tr key={`d-${f.uid}`} className="bg-white/1">
-                                        <td colSpan={7} className="px-6 py-4">
+                                    <tr className="bg-white/1">
+                                        <td colSpan={onToggleSelect ? 8 : 7} className="px-6 py-4">
                                             {isTFL ? (
                                                 <div className="grid grid-cols-3 gap-3">
                                                     <div className="rounded-xl border border-success/20 bg-success/5 p-3">
@@ -727,7 +758,7 @@ function TabelaFechamentos({ fechamentos }: { fechamentos: FechamentoPendente[] 
                                         </td>
                                     </tr>
                                 )}
-                            </>
+                            </React.Fragment>
                         );
                     })}
                 </tbody>
@@ -748,6 +779,7 @@ export function ExtratosConciliacao() {
     const [loading, setLoading] = useState(true);
     const [processando, setProcessando] = useState(false);
     const [resultado, setResultado] = useState<ConciliacaoIAResultado | null>(null);
+    const [selectedFechamentoIds, setSelectedFechamentoIds] = useState<string[]>([]);
     const { toast } = useToast();
     const supabase = createBrowserSupabaseClient();
 
@@ -825,6 +857,9 @@ export function ExtratosConciliacao() {
                 const transacoes = await getTransacoesOFX(lojaId, datas[0], datas[datas.length - 1]);
                 setTransacoesOFX(transacoes);
             }
+
+            // Reset selection when data reloads
+            setSelectedFechamentoIds([]);
         } catch (err) {
             toast({ type: 'error', message: 'Erro ao carregar dados.' });
             console.error(err);
@@ -835,6 +870,16 @@ export function ExtratosConciliacao() {
 
     useEffect(() => { carregarDados(); }, [carregarDados]);
 
+    const toggleSelect = (uid: string) => {
+        setSelectedFechamentoIds(prev =>
+            prev.includes(uid) ? prev.filter(id => id !== uid) : [...prev, uid]
+        );
+    };
+
+    const selectAll = (select: boolean) => {
+        setSelectedFechamentoIds(select ? fechamentos.map(f => f.uid) : []);
+    };
+
     async function fazerConciliacaoIA() {
         if (!lojaId) {
             toast({ type: 'error', message: 'Selecione uma loja para continuar.' });
@@ -844,18 +889,17 @@ export function ExtratosConciliacao() {
             toast({ type: 'warning', message: 'Importe um extrato OFX antes de conciliar.' });
             return;
         }
+        if (selectedFechamentoIds.length === 0) {
+            toast({ type: 'warning', message: 'Selecione pelo menos um fechamento para conciliar.' });
+            return;
+        }
 
         setProcessando(true);
         setResultado(null);
         try {
-            const datas = [
-                ...transacoesOFX.map(t => t.data),
-                ...fechamentos.map(f => f.data_turno).filter(Boolean),
-            ].sort();
-            const inicio = datas[0] ?? '';
-            const fim = datas[datas.length - 1] ?? '';
+            const fechamentosSelecionados = fechamentos.filter(f => selectedFechamentoIds.includes(f.uid));
 
-            const fechamentosTFL = fechamentos
+            const fechamentosTFL = fechamentosSelecionados
                 .filter(f => f.fonte === 'fechamento_tfl')
                 .map(f => ({
                     id: f.id,
@@ -867,7 +911,7 @@ export function ExtratosConciliacao() {
                     saldo_final: f.saldo_final,
                 }));
 
-            const fechamentosCaixa = fechamentos
+            const fechamentosCaixa = fechamentosSelecionados
                 .filter(f => f.fonte === 'caixa_sessoes')
                 .map(f => ({
                     id: f.id,
@@ -884,6 +928,13 @@ export function ExtratosConciliacao() {
                     valor_final_declarado: f.valor_final_declarado,
                     diferenca_caixa: f.diferenca_caixa,
                 }));
+
+            const datas = [
+                ...transacoesOFX.map(t => t.data),
+                ...fechamentosSelecionados.map(f => f.data_turno).filter(Boolean),
+            ].sort();
+            const inicio = datas[0] ?? '';
+            const fim = datas[datas.length - 1] ?? '';
 
             const response = await fetch('/api/caixa/conciliacao-ia', {
                 method: 'POST',
@@ -923,7 +974,6 @@ export function ExtratosConciliacao() {
         }
     }
 
-    // KPIs
     const totalPendentes = fechamentos.length;
     const totalOFX = transacoesOFX.length;
     const ofxConciliados = transacoesOFX.filter(t => t.conciliado).length;
@@ -942,7 +992,7 @@ export function ExtratosConciliacao() {
                 <div>
                     <h2 className="text-sm font-bold">Extratos & Conciliação Bancária</h2>
                     <p className="text-xs text-muted mt-0.5">
-                        Importe o extrato OFX e deixe o auditor IA cruzar com fechamentos TFL, PIX externos e depósitos
+                        Selecione os fechamentos e use o auditor IA para cruzar com o extrato OFX
                     </p>
                 </div>
                 <div className="flex gap-2">
@@ -952,11 +1002,11 @@ export function ExtratosConciliacao() {
                     <button
                         className="btn btn-primary text-xs"
                         onClick={fazerConciliacaoIA}
-                        disabled={processando || totalOFX === 0}
+                        disabled={processando || totalOFX === 0 || selectedFechamentoIds.length === 0}
                     >
                         {processando
                             ? <><Loader2 size={13} className="animate-spin" /> Analisando...</>
-                            : <><Sparkles size={13} /> Conciliar com IA</>
+                            : <><Sparkles size={13} /> Conciliar {selectedFechamentoIds.length} selecionado(s)</>
                         }
                     </button>
                 </div>
@@ -1029,8 +1079,13 @@ export function ExtratosConciliacao() {
             {/* Transações OFX importadas */}
             {transacoesOFX.length > 0 && <TabelaOFX transacoes={transacoesOFX} />}
 
-            {/* Fechamentos pendentes */}
-            <TabelaFechamentos fechamentos={fechamentos} />
+            {/* Fechamentos pendentes com seleção */}
+            <TabelaFechamentos
+                fechamentos={fechamentos}
+                selectedIds={selectedFechamentoIds}
+                onToggleSelect={toggleSelect}
+                onSelectAll={selectAll}
+            />
         </div>
     );
 }
