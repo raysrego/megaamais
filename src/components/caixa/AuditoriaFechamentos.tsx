@@ -24,9 +24,7 @@ import {
 } from '@/actions/extrato-conciliacao';
 
 // ──────────────────────────────────────────────────────────────────────────────
-// NOVAS FUNÇÕES PARA TFL (PIX externos e sangria)
-// Estas funções devem ser criadas em @/actions/extrato-conciliacao ou localmente
-// Para simplificar, implementamos diretamente aqui com supabase
+// Funções para TFL (PIX externos e sangria)
 // ──────────────────────────────────────────────────────────────────────────────
 
 interface PixExternoTFL {
@@ -88,7 +86,7 @@ async function setSangriaTFL(tflId: string, valor: number): Promise<void> {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// TFL types (já existentes)
+// Tipos TFL
 // ──────────────────────────────────────────────────────────────────────────────
 
 interface JogoTFL { descricao: string; numero_sorteio?: string | null; quantidade: number; valor: number; }
@@ -128,10 +126,6 @@ interface RelatorioTFL {
     };
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Main types
-// ──────────────────────────────────────────────────────────────────────────────
-
 type FonteRegistro = 'caixa_sessoes' | 'fechamento_tfl';
 
 interface Fechamento {
@@ -160,13 +154,12 @@ interface Fechamento {
     fundo_caixa_devolvido?: boolean;
     saldo_esperado?: number;
     loja_id?: string;
-    // TFL-specific
     total_creditos?: number;
     total_debitos?: number;
     saldo_final?: number;
     arquivo_nome?: string;
     dados_extraidos?: RelatorioTFL;
-    sangria_valor?: number;          // novo campo para TFL
+    sangria_valor?: number;
 }
 
 interface AnaliseIA {
@@ -216,7 +209,7 @@ const formatarDataHoraLocal = (dataStr: string | null) => {
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Componentes de exibição para TFL (PIX externos e sangria)
+// Componentes TFL
 // ──────────────────────────────────────────────────────────────────────────────
 
 function PixExternosTFLList({ tflId, refreshTrigger }: { tflId: string; refreshTrigger: number }) {
@@ -272,10 +265,6 @@ function SangriaTFLDisplay({ valor }: { valor: number }) {
         </div>
     );
 }
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Detalhamento TFL (modificado para incluir PIX externos e sangria)
-// ──────────────────────────────────────────────────────────────────────────────
 
 function DetalhesTFL({ dados, tflId, refreshPixTrigger }: { dados: RelatorioTFL; tflId: string; refreshPixTrigger: number }) {
     const [sangria, setSangria] = useState<number>(0);
@@ -363,7 +352,6 @@ function DetalhesTFL({ dados, tflId, refreshPixTrigger }: { dados: RelatorioTFL;
                 </SecaoTFL>
             )}
 
-            {/* NOVA SEÇÃO: PIX externos e sangria do TFL */}
             <div className="space-y-3">
                 <PixExternosTFLList tflId={tflId} refreshTrigger={refreshPixTrigger} />
                 <SangriaTFLDisplay valor={sangria} />
@@ -410,7 +398,7 @@ function DetalhesTFL({ dados, tflId, refreshPixTrigger }: { dados: RelatorioTFL;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Detalhamento Operador (mantido igual, mas adicionada a exibição dos PIX externos)
+// Componentes Operador
 // ──────────────────────────────────────────────────────────────────────────────
 
 function PixExternosList({ sessaoId, refreshTrigger }: { sessaoId: number; refreshTrigger: number }) {
@@ -461,7 +449,6 @@ function DetalhesOperador({ f, refreshPixTrigger }: { f: Fechamento; refreshPixT
 
     return (
         <div className="space-y-4 text-sm">
-            {/* KPIs */}
             <div className="grid grid-cols-3 gap-2">
                 <div className="p-3 rounded-xl border border-border bg-surface-subtle">
                     <p className="text-[10px] text-muted font-bold uppercase mb-1">Entradas</p>
@@ -477,7 +464,6 @@ function DetalhesOperador({ f, refreshPixTrigger }: { f: Fechamento; refreshPixT
                 </div>
             </div>
 
-            {/* Entradas */}
             <div>
                 <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">Detalhamento de Entradas</p>
                 <div className="rounded-xl border border-border overflow-hidden">
@@ -502,7 +488,6 @@ function DetalhesOperador({ f, refreshPixTrigger }: { f: Fechamento; refreshPixT
                 </div>
             </div>
 
-            {/* Saídas */}
             <div>
                 <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">Detalhamento de Saídas</p>
                 <div className="rounded-xl border border-border overflow-hidden">
@@ -527,7 +512,6 @@ function DetalhesOperador({ f, refreshPixTrigger }: { f: Fechamento; refreshPixT
                 </div>
             </div>
 
-            {/* Complementares */}
             {((f.valor_pix_externo || 0) > 0 || (f.valor_cofre || 0) > 0 || f.valor_inicial > 0) && (
                 <div>
                     <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">Valores Complementares</p>
@@ -563,7 +547,6 @@ function DetalhesOperador({ f, refreshPixTrigger }: { f: Fechamento; refreshPixT
                 </div>
             )}
 
-            {/* PIX Externos Unitários e Depósito no Cofre (detalhado) */}
             <div className="space-y-3">
                 <PixExternosList sessaoId={sessaoId} refreshTrigger={refreshPixTrigger} />
                 {(f.valor_cofre ?? 0) > 0 && (
@@ -577,7 +560,6 @@ function DetalhesOperador({ f, refreshPixTrigger }: { f: Fechamento; refreshPixT
                 )}
             </div>
 
-            {/* Resumo final */}
             <div className="rounded-xl border border-border p-3 bg-surface-subtle space-y-1">
                 <div className="flex justify-between text-xs py-0.5">
                     <span className="text-muted">Saldo Esperado</span>
@@ -601,7 +583,7 @@ function DetalhesOperador({ f, refreshPixTrigger }: { f: Fechamento; refreshPixT
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Componentes auxiliares (SecaoTFL, TabelaTFL) - já existentes
+// Componentes auxiliares
 // ──────────────────────────────────────────────────────────────────────────────
 
 function SecaoTFL({ titulo, children }: { titulo: string; children: React.ReactNode }) {
@@ -650,10 +632,9 @@ function TabelaTFL({ rows, totalLabel, totalQtd, totalValor, corTotal }: {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Formulários para o modal "Adicionais" (Operador e TFL)
+// Formulários para modal "Adicionais"
 // ──────────────────────────────────────────────────────────────────────────────
 
-// Formulário de PIX externos para OPERADOR (já existente, adaptado para chamar onSaved)
 function PixExternosFormOperador({
     sessaoId,
     lojaId,
@@ -894,7 +875,6 @@ function DepositoCofreForm({
     );
 }
 
-// Formulário para TFL: permite adicionar múltiplos PIX externos e definir sangria
 function TFLAdicionaisForm({
     tflId,
     lojaId,
@@ -911,12 +891,10 @@ function TFLAdicionaisForm({
     const [novoPixData, setNovoPixData] = useState(new Date().toISOString().split('T')[0]);
     const [novoPixDesc, setNovoPixDesc] = useState('');
     const [salvandoPix, setSalvandoPix] = useState(false);
-
     const [sangriaValor, setSangriaValor] = useState<string>('');
     const [carregandoSangria, setCarregandoSangria] = useState(true);
     const [salvandoSangria, setSalvandoSangria] = useState(false);
 
-    // Carregar dados existentes
     useEffect(() => {
         const carregar = async () => {
             try {
@@ -996,7 +974,6 @@ function TFLAdicionaisForm({
 
     return (
         <div className="space-y-6">
-            {/* Seção PIX Externos */}
             <div className="rounded-xl border border-blue-500/15 bg-blue-500/5 p-4 space-y-3">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -1058,7 +1035,6 @@ function TFLAdicionaisForm({
                 </button>
             </div>
 
-            {/* Seção Sangria */}
             <div className="rounded-xl border border-warning/15 bg-warning/5 p-4 space-y-3">
                 <div className="flex items-center gap-2">
                     <ArrowUpRight size={13} className="text-warning" />
@@ -1077,7 +1053,7 @@ function TFLAdicionaisForm({
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Modal de auditoria (original)
+// Modal de auditoria
 // ──────────────────────────────────────────────────────────────────────────────
 
 interface ModalAuditoriaProps {
@@ -1180,16 +1156,14 @@ export function AuditoriaFechamentos() {
     const [fechamentos, setFechamentos] = useState<Fechamento[]>([]);
     const [selectedFechamento, setSelectedFechamento] = useState<Fechamento | null>(null);
     const [showValidationModal, setShowValidationModal] = useState(false);
-    const [showAdicionaisModal, setShowAdicionaisModal] = useState(false);       // para operador
-    const [showAdicionaisTFLModal, setShowAdicionaisTFLModal] = useState(false); // para TFL
+    const [showAdicionaisModal, setShowAdicionaisModal] = useState(false);
+    const [showAdicionaisTFLModal, setShowAdicionaisTFLModal] = useState(false);
     const [filtroStatus, setFiltroStatus] = useState<'todos' | 'pendente' | 'aprovado' | 'rejeitado'>('todos');
     const [filtroDataInicio, setFiltroDataInicio] = useState('');
     const [filtroDataFim, setFiltroDataFim] = useState('');
 
     const [analisandoIA, setAnalisandoIA] = useState(false);
     const [resultadoIA, setResultadoIA] = useState<ResultadoAnalise | null>(null);
-
-    // Controles de refresh para as listas de PIX e sangria
     const [refreshPixTrigger, setRefreshPixTrigger] = useState(0);
 
     const fetchHistorico = useCallback(async () => {
@@ -1471,7 +1445,6 @@ export function AuditoriaFechamentos() {
 
     return (
         <div className="auditoria-fechamentos">
-            {/* Header */}
             <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
@@ -1509,7 +1482,6 @@ export function AuditoriaFechamentos() {
                 </div>
             </div>
 
-            {/* Filtros por data */}
             <div className="mb-6 p-4 rounded-xl bg-surface-subtle border border-border">
                 <div className="flex items-center gap-2 mb-3">
                     <Filter size={16} className="text-primary-blue-light" />
@@ -1532,7 +1504,6 @@ export function AuditoriaFechamentos() {
                 </div>
             </div>
 
-            {/* Resultado da Análise IA */}
             {resultadoIA && (
                 <div className="mb-6 rounded-xl border border-border bg-bg-card overflow-hidden">
                     <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-surface-subtle">
@@ -1590,7 +1561,6 @@ export function AuditoriaFechamentos() {
                 </div>
             )}
 
-            {/* Tabela + painel de detalhes */}
             <div style={{ display: 'grid', gridTemplateColumns: selectedFechamento ? '1fr 520px' : '1fr', gap: '1.5rem' }}>
                 <div className="card p-0 overflow-hidden">
                     {fechamentos.length === 0 ? (
@@ -1638,15 +1608,14 @@ export function AuditoriaFechamentos() {
                                             <td className="text-right py-2 px-2">
                                                 <ChevronRight size={16} className="text-muted" />
                                             </td>
-                                        </table>
-                                    )}
+                                        </tr>
+                                    ))}
                                 </tbody>
                             </table>
                         </div>
                     )}
                 </div>
 
-                {/* Painel de Detalhes */}
                 {selectedFechamento && (
                     <div className="card flex flex-col overflow-y-auto max-h-[85vh]">
                         <div className="flex items-center justify-between mb-4">
@@ -1657,7 +1626,6 @@ export function AuditoriaFechamentos() {
                             <button onClick={() => setSelectedFechamento(null)} className="btn btn-ghost btn-sm px-2">fechar</button>
                         </div>
 
-                        {/* Identificação */}
                         <div className="flex items-center gap-3 mb-5 p-3 rounded-xl bg-surface-subtle border border-border">
                             <div className="w-10 h-10 rounded-full flex items-center justify-center bg-warning/10 text-warning flex-shrink-0">
                                 <ShieldCheck size={20} />
@@ -1677,13 +1645,11 @@ export function AuditoriaFechamentos() {
                             </div>
                         </div>
 
-                        {/* Detalhamento completo com refreshTrigger */}
                         {selectedFechamento.fonte === 'fechamento_tfl' && selectedFechamento.dados_extraidos
                             ? <DetalhesTFL dados={selectedFechamento.dados_extraidos} tflId={selectedFechamento.id} refreshPixTrigger={refreshPixTrigger} />
                             : <DetalhesOperador f={selectedFechamento} refreshPixTrigger={refreshPixTrigger} />
                         }
 
-                        {/* Justificativa */}
                         {selectedFechamento.justificativa && (
                             <div className="mt-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
                                 <span className="text-[9px] text-yellow-500 font-bold uppercase">
@@ -1697,7 +1663,6 @@ export function AuditoriaFechamentos() {
 
                         {selectedFechamento.status_validacao === 'pendente' && (
                             <div className="mt-5 flex gap-2">
-                                {/* Botão Adicionais para ambos os tipos */}
                                 <button
                                     className="btn btn-ghost flex-1 py-2.5 text-sm font-semibold border border-blue-500/20 text-blue-300 hover:bg-blue-500/10"
                                     onClick={() => {
@@ -1724,7 +1689,6 @@ export function AuditoriaFechamentos() {
                 )}
             </div>
 
-            {/* Modal Auditoria (para aprovação/rejeição) */}
             {showValidationModal && selectedFechamento && (
                 <ModalAuditoria
                     fechamento={selectedFechamento}
@@ -1734,7 +1698,6 @@ export function AuditoriaFechamentos() {
                 />
             )}
 
-            {/* Modal Adicionais para OPERADOR */}
             {showAdicionaisModal && selectedFechamento && selectedFechamento.fonte === 'caixa_sessoes' && (
                 <>
                     <div className="fixed inset-0 bg-black/80 z-[9998]" onClick={async () => { setShowAdicionaisModal(false); await fetchHistorico(); setRefreshPixTrigger(prev => prev + 1); }} />
@@ -1750,7 +1713,6 @@ export function AuditoriaFechamentos() {
                                 <X size={18} />
                             </button>
                         </div>
-
                         <div className="space-y-4">
                             <p className="text-[10px] font-bold text-muted uppercase tracking-wider">Dados para Conciliação Bancária</p>
                             <PixExternosFormOperador
@@ -1766,7 +1728,6 @@ export function AuditoriaFechamentos() {
                                 onSaved={() => { setRefreshPixTrigger(prev => prev + 1); }}
                             />
                         </div>
-
                         <div className="flex justify-end mt-5 pt-4 border-t border-border">
                             <button className="btn btn-primary text-sm" onClick={async () => { setShowAdicionaisModal(false); await fetchHistorico(); setRefreshPixTrigger(prev => prev + 1); }}>
                                 Concluir
@@ -1776,7 +1737,6 @@ export function AuditoriaFechamentos() {
                 </>
             )}
 
-            {/* Modal Adicionais para TFL */}
             {showAdicionaisTFLModal && selectedFechamento && selectedFechamento.fonte === 'fechamento_tfl' && (
                 <>
                     <div className="fixed inset-0 bg-black/80 z-[9998]" onClick={async () => { setShowAdicionaisTFLModal(false); await fetchHistorico(); setRefreshPixTrigger(prev => prev + 1); }} />
@@ -1792,13 +1752,11 @@ export function AuditoriaFechamentos() {
                                 <X size={18} />
                             </button>
                         </div>
-
                         <TFLAdicionaisForm
                             tflId={selectedFechamento.id}
                             lojaId={selectedFechamento.loja_id ?? ''}
                             onSaved={() => { setRefreshPixTrigger(prev => prev + 1); }}
                         />
-
                         <div className="flex justify-end mt-5 pt-4 border-t border-border">
                             <button className="btn btn-primary text-sm" onClick={async () => { setShowAdicionaisTFLModal(false); await fetchHistorico(); setRefreshPixTrigger(prev => prev + 1); }}>
                                 Concluir
