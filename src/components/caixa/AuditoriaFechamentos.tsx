@@ -23,7 +23,73 @@ import {
     type PixExterno,
 } from '@/actions/extrato-conciliacao';
 
-// ─── TFL types (espelho de FechamentoCaixaTFL) ─────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────
+// NOVAS FUNÇÕES PARA TFL (PIX externos e sangria)
+// Estas funções devem ser criadas em @/actions/extrato-conciliacao ou localmente
+// Para simplificar, implementamos diretamente aqui com supabase
+// ──────────────────────────────────────────────────────────────────────────────
+
+interface PixExternoTFL {
+    id: number;
+    tfl_id: string;
+    data: string;
+    valor: number;
+    descricao: string | null;
+    conciliado: boolean;
+    created_at: string;
+}
+
+async function getPixExternosPorTFL(tflId: string): Promise<PixExternoTFL[]> {
+    const supabase = createBrowserSupabaseClient();
+    const { data, error } = await supabase
+        .from('pix_externos_tfl')
+        .select('*')
+        .eq('tfl_id', tflId)
+        .order('data', { ascending: false });
+    if (error) throw error;
+    return data || [];
+}
+
+async function adicionarPixExternoTFL(tflId: string, data: string, valor: number, descricao?: string): Promise<PixExternoTFL> {
+    const supabase = createBrowserSupabaseClient();
+    const { data: newPix, error } = await supabase
+        .from('pix_externos_tfl')
+        .insert({ tfl_id: tflId, data, valor, descricao: descricao || null, conciliado: false })
+        .select()
+        .single();
+    if (error) throw error;
+    return newPix;
+}
+
+async function removerPixExternoTFL(id: number): Promise<void> {
+    const supabase = createBrowserSupabaseClient();
+    const { error } = await supabase.from('pix_externos_tfl').delete().eq('id', id);
+    if (error) throw error;
+}
+
+async function getSangriaTFL(tflId: string): Promise<number> {
+    const supabase = createBrowserSupabaseClient();
+    const { data, error } = await supabase
+        .from('fechamento_tfl')
+        .select('sangria_valor')
+        .eq('id', tflId)
+        .single();
+    if (error) return 0;
+    return data?.sangria_valor || 0;
+}
+
+async function setSangriaTFL(tflId: string, valor: number): Promise<void> {
+    const supabase = createBrowserSupabaseClient();
+    const { error } = await supabase
+        .from('fechamento_tfl')
+        .update({ sangria_valor: valor })
+        .eq('id', tflId);
+    if (error) throw error;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// TFL types (já existentes)
+// ──────────────────────────────────────────────────────────────────────────────
 
 interface JogoTFL { descricao: string; numero_sorteio?: string | null; quantidade: number; valor: number; }
 interface ContaTFL { descricao: string; quantidade: number; valor: number; }
@@ -62,7 +128,9 @@ interface RelatorioTFL {
     };
 }
 
-// ─── Main types ────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────
+// Main types
+// ──────────────────────────────────────────────────────────────────────────────
 
 type FonteRegistro = 'caixa_sessoes' | 'fechamento_tfl';
 
@@ -98,6 +166,7 @@ interface Fechamento {
     saldo_final?: number;
     arquivo_nome?: string;
     dados_extraidos?: RelatorioTFL;
+    sangria_valor?: number;          // novo campo para TFL
 }
 
 interface AnaliseIA {
@@ -113,7 +182,9 @@ interface ResultadoAnalise {
     resumo: string;
 }
 
-// ─── Helpers ───────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ──────────────────────────────────────────────────────────────────────────────
 
 function fmt(valor: number | null | undefined): string {
     if (valor == null) return '—';
@@ -144,7 +215,203 @@ const formatarDataHoraLocal = (dataStr: string | null) => {
     return formatarDataLocal(dataStr);
 };
 
-// ─── Componente: Lista de PIX Externos (exibição) ─────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────
+// Componentes de exibição para TFL (PIX externos e sangria)
+// ──────────────────────────────────────────────────────────────────────────────
+
+function PixExternosTFLList({ tflId, refreshTrigger }: { tflId: string; refreshTrigger: number }) {
+    const [lista, setLista] = useState<PixExternoTFL[]>([]);
+    const [carregando, setCarregando] = useState(true);
+
+    useEffect(() => {
+        if (!tflId) return;
+        getPixExternosPorTFL(tflId)
+            .then(setLista)
+            .catch(err => console.error('Erro ao carregar PIX externos TFL:', err))
+            .finally(() => setCarregando(false));
+    }, [tflId, refreshTrigger]);
+
+    if (carregando) return <Loader2 size={12} className="animate-spin text-muted" />;
+    if (lista.length === 0) return <p className="text-[10px] text-muted">Nenhum PIX externo registrado para este TFL.</p>;
+
+    const total = lista.reduce((acc, p) => acc + p.valor, 0);
+    return (
+        <div className="rounded-xl border border-blue-500/15 bg-blue-500/5 p-3">
+            <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                    <CreditCard size={12} className="text-blue-400" />
+                    <span className="text-[10px] font-bold text-blue-300 uppercase tracking-wider">PIX Externos Unitários (TFL)</span>
+                </div>
+                <span className="text-xs font-bold text-blue-300">{fmt(total)}</span>
+            </div>
+            <div className="space-y-1.5">
+                {lista.map(p => (
+                    <div key={p.id} className="flex items-center justify-between text-xs border-b border-white/5 pb-1 last:border-0">
+                        <div className="flex items-center gap-2">
+                            <span className="text-muted text-[10px]">{p.data.split('T')[0].split('-').reverse().join('/')}</span>
+                            <span>{fmt(p.valor)}</span>
+                            {p.descricao && <span className="text-muted text-[10px]">({p.descricao})</span>}
+                        </div>
+                        {p.conciliado && <span className="text-[9px] text-success">✓ conciliado</span>}
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+function SangriaTFLDisplay({ valor }: { valor: number }) {
+    if (!valor || valor === 0) return null;
+    return (
+        <div className="rounded-xl border border-warning/15 bg-warning/5 p-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+                <ArrowUpRight size={12} className="text-warning" />
+                <span className="text-[10px] font-bold text-yellow-300 uppercase">Sangria (TFL)</span>
+            </div>
+            <span className="text-sm font-bold text-yellow-300">{fmt(valor)}</span>
+        </div>
+    );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Detalhamento TFL (modificado para incluir PIX externos e sangria)
+// ──────────────────────────────────────────────────────────────────────────────
+
+function DetalhesTFL({ dados, tflId, refreshPixTrigger }: { dados: RelatorioTFL; tflId: string; refreshPixTrigger: number }) {
+    const [sangria, setSangria] = useState<number>(0);
+    useEffect(() => {
+        getSangriaTFL(tflId).then(setSangria);
+    }, [tflId, refreshPixTrigger]);
+
+    return (
+        <div className="space-y-5 text-sm">
+            <div className="grid grid-cols-3 gap-2">
+                <div className="p-3 rounded-xl border border-border bg-surface-subtle">
+                    <p className="text-[10px] text-muted font-bold uppercase mb-1">Créditos</p>
+                    <p className="text-base font-black text-success tabular-nums">{fmt(dados.total_creditos)}</p>
+                </div>
+                <div className="p-3 rounded-xl border border-border bg-surface-subtle">
+                    <p className="text-[10px] text-muted font-bold uppercase mb-1">Débitos</p>
+                    <p className="text-base font-black text-danger tabular-nums">{fmt(dados.total_debitos)}</p>
+                </div>
+                <div className="p-3 rounded-xl border border-border bg-surface-subtle">
+                    <p className="text-[10px] text-muted font-bold uppercase mb-1">Saldo Final</p>
+                    <p className="text-base font-black text-primary-blue-light tabular-nums">{fmt(dados.saldo_final)}</p>
+                </div>
+            </div>
+
+            {dados.recebimentos?.jogos?.length > 0 && (
+                <SecaoTFL titulo="Recebimentos — Jogos">
+                    <TabelaTFL
+                        rows={dados.recebimentos.jogos.map(j => ({
+                            desc: j.descricao + (j.numero_sorteio ? ` #${j.numero_sorteio}` : ''),
+                            qtd: j.quantidade,
+                            valor: j.valor,
+                        }))}
+                        totalLabel="Total Jogos"
+                        totalQtd={dados.recebimentos.total_jogos_quantidade}
+                        totalValor={dados.recebimentos.total_jogos_valor}
+                        corTotal="text-success"
+                    />
+                </SecaoTFL>
+            )}
+
+            {dados.recebimentos?.contas?.length > 0 && (
+                <SecaoTFL titulo="Recebimentos — Contas">
+                    <TabelaTFL
+                        rows={dados.recebimentos.contas.map(c => ({ desc: c.descricao, qtd: c.quantidade, valor: c.valor }))}
+                        totalLabel="Total Contas"
+                        totalQtd={dados.recebimentos.total_contas_quantidade}
+                        totalValor={dados.recebimentos.total_contas_valor}
+                        corTotal="text-success"
+                    />
+                    <div className="flex justify-between text-sm font-black border-t-2 border-border pt-2 mt-1">
+                        <span className="uppercase">Total Recebimentos</span>
+                        <span className="text-success tabular-nums">{fmt(dados.recebimentos.total_recebimentos_valor)}</span>
+                    </div>
+                </SecaoTFL>
+            )}
+
+            {dados.premios_pagos?.itens?.length > 0 && (
+                <SecaoTFL titulo="Prêmios Pagos">
+                    <TabelaTFL
+                        rows={dados.premios_pagos.itens.map(p => ({ desc: p.descricao, qtd: p.quantidade, valor: p.valor }))}
+                        totalLabel="Total Prêmios"
+                        totalQtd={dados.premios_pagos.total_quantidade}
+                        totalValor={dados.premios_pagos.total_valor}
+                        corTotal="text-danger"
+                    />
+                </SecaoTFL>
+            )}
+
+            {dados.pagamentos?.itens?.length > 0 && (
+                <SecaoTFL titulo="Pagamentos">
+                    <TabelaTFL
+                        rows={dados.pagamentos.itens.map(p => ({ desc: p.descricao, qtd: p.quantidade, valor: p.valor }))}
+                    />
+                </SecaoTFL>
+            )}
+
+            {dados.servicos_conta?.itens?.length > 0 && (
+                <SecaoTFL titulo="Serviços Conta Corrente / Poupança">
+                    <TabelaTFL
+                        rows={dados.servicos_conta.itens.map(s => ({ desc: s.descricao, qtd: s.quantidade, valor: s.valor }))}
+                        totalLabel="Total Conta"
+                        totalQtd={dados.servicos_conta.total_quantidade}
+                        totalValor={dados.servicos_conta.total_valor}
+                    />
+                </SecaoTFL>
+            )}
+
+            {/* NOVA SEÇÃO: PIX externos e sangria do TFL */}
+            <div className="space-y-3">
+                <PixExternosTFLList tflId={tflId} refreshTrigger={refreshPixTrigger} />
+                <SangriaTFLDisplay valor={sangria} />
+            </div>
+
+            {dados.total_em_caixa != null && (
+                <div className="p-3 rounded-xl bg-primary-blue-light/10 border border-primary-blue-light/20 text-center">
+                    <p className="text-[10px] font-bold text-primary-blue-light uppercase mb-1">Total em Caixa</p>
+                    <p className="text-xl font-black text-primary-blue-light">{fmt(dados.total_em_caixa)}</p>
+                </div>
+            )}
+
+            <SecaoTFL titulo="Totais Finais">
+                <div className="rounded-xl border border-border p-3 bg-surface-subtle space-y-1">
+                    {[
+                        { label: 'Créditos Manuais', valor: dados.totais_finais?.creditos_manuais },
+                        { label: 'Créditos TFL',     valor: dados.totais_finais?.creditos_tfl },
+                        { label: 'Débitos Manuais',  valor: dados.totais_finais?.debitos_manuais },
+                        { label: 'Débitos TFL',      valor: dados.totais_finais?.debitos_tfl },
+                    ].map((r, i) => (
+                        <div key={i} className="flex justify-between text-xs py-0.5">
+                            <span className="text-muted">{r.label}</span>
+                            <span className="font-semibold tabular-nums">{fmt(r.valor)}</span>
+                        </div>
+                    ))}
+                    <div className="border-t border-border pt-2 mt-2 space-y-1">
+                        <div className="flex justify-between text-sm font-bold">
+                            <span>Total Créditos</span>
+                            <span className="text-success tabular-nums">{fmt(dados.totais_finais?.total_creditos)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm font-bold">
+                            <span>Total Débitos</span>
+                            <span className="text-danger tabular-nums">{fmt(dados.totais_finais?.total_debitos)}</span>
+                        </div>
+                        <div className="flex justify-between text-base font-black border-t border-border pt-2">
+                            <span>Saldo Final</span>
+                            <span className="text-primary-blue-light tabular-nums">{fmt(dados.totais_finais?.saldo_final)}</span>
+                        </div>
+                    </div>
+                </div>
+            </SecaoTFL>
+        </div>
+    );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Detalhamento Operador (mantido igual, mas adicionada a exibição dos PIX externos)
+// ──────────────────────────────────────────────────────────────────────────────
 
 function PixExternosList({ sessaoId, refreshTrigger }: { sessaoId: number; refreshTrigger: number }) {
     const [lista, setLista] = useState<PixExterno[]>([]);
@@ -186,8 +453,6 @@ function PixExternosList({ sessaoId, refreshTrigger }: { sessaoId: number; refre
         </div>
     );
 }
-
-// ─── Detalhamento Operador (com exibição de PIX externos e cofre) ────────────
 
 function DetalhesOperador({ f, refreshPixTrigger }: { f: Fechamento; refreshPixTrigger: number }) {
     const totalEntradas = (f.total_pix || 0) + (f.total_dinheiro || 0);
@@ -335,7 +600,9 @@ function DetalhesOperador({ f, refreshPixTrigger }: { f: Fechamento; refreshPixT
     );
 }
 
-// ─── Detalhamento TFL (mantido igual) ───────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────
+// Componentes auxiliares (SecaoTFL, TabelaTFL) - já existentes
+// ──────────────────────────────────────────────────────────────────────────────
 
 function SecaoTFL({ titulo, children }: { titulo: string; children: React.ReactNode }) {
     return (
@@ -382,130 +649,12 @@ function TabelaTFL({ rows, totalLabel, totalQtd, totalValor, corTotal }: {
     );
 }
 
-function DetalhesTFL({ dados }: { dados: RelatorioTFL }) {
-    return (
-        <div className="space-y-5 text-sm">
-            <div className="grid grid-cols-3 gap-2">
-                <div className="p-3 rounded-xl border border-border bg-surface-subtle">
-                    <p className="text-[10px] text-muted font-bold uppercase mb-1">Créditos</p>
-                    <p className="text-base font-black text-success tabular-nums">{fmt(dados.total_creditos)}</p>
-                </div>
-                <div className="p-3 rounded-xl border border-border bg-surface-subtle">
-                    <p className="text-[10px] text-muted font-bold uppercase mb-1">Débitos</p>
-                    <p className="text-base font-black text-danger tabular-nums">{fmt(dados.total_debitos)}</p>
-                </div>
-                <div className="p-3 rounded-xl border border-border bg-surface-subtle">
-                    <p className="text-[10px] text-muted font-bold uppercase mb-1">Saldo Final</p>
-                    <p className="text-base font-black text-primary-blue-light tabular-nums">{fmt(dados.saldo_final)}</p>
-                </div>
-            </div>
+// ──────────────────────────────────────────────────────────────────────────────
+// Formulários para o modal "Adicionais" (Operador e TFL)
+// ──────────────────────────────────────────────────────────────────────────────
 
-            {dados.recebimentos?.jogos?.length > 0 && (
-                <SecaoTFL titulo="Recebimentos — Jogos">
-                    <TabelaTFL
-                        rows={dados.recebimentos.jogos.map(j => ({
-                            desc: j.descricao + (j.numero_sorteio ? ` #${j.numero_sorteio}` : ''),
-                            qtd: j.quantidade,
-                            valor: j.valor,
-                        }))}
-                        totalLabel="Total Jogos"
-                        totalQtd={dados.recebimentos.total_jogos_quantidade}
-                        totalValor={dados.recebimentos.total_jogos_valor}
-                        corTotal="text-success"
-                    />
-                </SecaoTFL>
-            )}
-
-            {dados.recebimentos?.contas?.length > 0 && (
-                <SecaoTFL titulo="Recebimentos — Contas">
-                    <TabelaTFL
-                        rows={dados.recebimentos.contas.map(c => ({ desc: c.descricao, qtd: c.quantidade, valor: c.valor }))}
-                        totalLabel="Total Contas"
-                        totalQtd={dados.recebimentos.total_contas_quantidade}
-                        totalValor={dados.recebimentos.total_contas_valor}
-                        corTotal="text-success"
-                    />
-                    <div className="flex justify-between text-sm font-black border-t-2 border-border pt-2 mt-1">
-                        <span className="uppercase">Total Recebimentos</span>
-                        <span className="text-success tabular-nums">{fmt(dados.recebimentos.total_recebimentos_valor)}</span>
-                    </div>
-                </SecaoTFL>
-            )}
-
-            {dados.premios_pagos?.itens?.length > 0 && (
-                <SecaoTFL titulo="Prêmios Pagos">
-                    <TabelaTFL
-                        rows={dados.premios_pagos.itens.map(p => ({ desc: p.descricao, qtd: p.quantidade, valor: p.valor }))}
-                        totalLabel="Total Prêmios"
-                        totalQtd={dados.premios_pagos.total_quantidade}
-                        totalValor={dados.premios_pagos.total_valor}
-                        corTotal="text-danger"
-                    />
-                </SecaoTFL>
-            )}
-
-            {dados.pagamentos?.itens?.length > 0 && (
-                <SecaoTFL titulo="Pagamentos">
-                    <TabelaTFL
-                        rows={dados.pagamentos.itens.map(p => ({ desc: p.descricao, qtd: p.quantidade, valor: p.valor }))}
-                    />
-                </SecaoTFL>
-            )}
-
-            {dados.servicos_conta?.itens?.length > 0 && (
-                <SecaoTFL titulo="Serviços Conta Corrente / Poupança">
-                    <TabelaTFL
-                        rows={dados.servicos_conta.itens.map(s => ({ desc: s.descricao, qtd: s.quantidade, valor: s.valor }))}
-                        totalLabel="Total Conta"
-                        totalQtd={dados.servicos_conta.total_quantidade}
-                        totalValor={dados.servicos_conta.total_valor}
-                    />
-                </SecaoTFL>
-            )}
-
-            {dados.total_em_caixa != null && (
-                <div className="p-3 rounded-xl bg-primary-blue-light/10 border border-primary-blue-light/20 text-center">
-                    <p className="text-[10px] font-bold text-primary-blue-light uppercase mb-1">Total em Caixa</p>
-                    <p className="text-xl font-black text-primary-blue-light">{fmt(dados.total_em_caixa)}</p>
-                </div>
-            )}
-
-            <SecaoTFL titulo="Totais Finais">
-                <div className="rounded-xl border border-border p-3 bg-surface-subtle space-y-1">
-                    {[
-                        { label: 'Créditos Manuais', valor: dados.totais_finais?.creditos_manuais },
-                        { label: 'Créditos TFL',     valor: dados.totais_finais?.creditos_tfl },
-                        { label: 'Débitos Manuais',  valor: dados.totais_finais?.debitos_manuais },
-                        { label: 'Débitos TFL',      valor: dados.totais_finais?.debitos_tfl },
-                    ].map((r, i) => (
-                        <div key={i} className="flex justify-between text-xs py-0.5">
-                            <span className="text-muted">{r.label}</span>
-                            <span className="font-semibold tabular-nums">{fmt(r.valor)}</span>
-                        </div>
-                    ))}
-                    <div className="border-t border-border pt-2 mt-2 space-y-1">
-                        <div className="flex justify-between text-sm font-bold">
-                            <span>Total Créditos</span>
-                            <span className="text-success tabular-nums">{fmt(dados.totais_finais?.total_creditos)}</span>
-                        </div>
-                        <div className="flex justify-between text-sm font-bold">
-                            <span>Total Débitos</span>
-                            <span className="text-danger tabular-nums">{fmt(dados.totais_finais?.total_debitos)}</span>
-                        </div>
-                        <div className="flex justify-between text-base font-black border-t border-border pt-2">
-                            <span>Saldo Final</span>
-                            <span className="text-primary-blue-light tabular-nums">{fmt(dados.totais_finais?.saldo_final)}</span>
-                        </div>
-                    </div>
-                </div>
-            </SecaoTFL>
-        </div>
-    );
-}
-
-// ─── Formulários do Modal Adicionais para Operador ─────────────────────────
-
-function PixExternosForm({
+// Formulário de PIX externos para OPERADOR (já existente, adaptado para chamar onSaved)
+function PixExternosFormOperador({
     sessaoId,
     lojaId,
     dataTurno,
@@ -680,8 +829,8 @@ function DepositoCofreForm({
     valorAtual: number;
     onSaved: () => void;
 }) {
-    const { toast } = useToast();
     const supabase = createBrowserSupabaseClient();
+    const { toast } = useToast();
     const [valor, setValor] = useState(valorAtual > 0 ? String(valorAtual) : '');
     const [salvando, setSalvando] = useState(false);
     const [salvo, setSalvo] = useState(valorAtual > 0);
@@ -745,7 +894,191 @@ function DepositoCofreForm({
     );
 }
 
-// ─── Modal de auditoria (igual ao original) ──────────────────────────────────
+// Formulário para TFL: permite adicionar múltiplos PIX externos e definir sangria
+function TFLAdicionaisForm({
+    tflId,
+    lojaId,
+    onSaved,
+}: {
+    tflId: string;
+    lojaId: string;
+    onSaved: () => void;
+}) {
+    const { toast } = useToast();
+    const [pixList, setPixList] = useState<PixExternoTFL[]>([]);
+    const [carregandoPix, setCarregandoPix] = useState(true);
+    const [novoPixValor, setNovoPixValor] = useState('');
+    const [novoPixData, setNovoPixData] = useState(new Date().toISOString().split('T')[0]);
+    const [novoPixDesc, setNovoPixDesc] = useState('');
+    const [salvandoPix, setSalvandoPix] = useState(false);
+
+    const [sangriaValor, setSangriaValor] = useState<string>('');
+    const [carregandoSangria, setCarregandoSangria] = useState(true);
+    const [salvandoSangria, setSalvandoSangria] = useState(false);
+
+    // Carregar dados existentes
+    useEffect(() => {
+        const carregar = async () => {
+            try {
+                const pix = await getPixExternosPorTFL(tflId);
+                setPixList(pix);
+                const sangria = await getSangriaTFL(tflId);
+                setSangriaValor(sangria > 0 ? sangria.toString() : '');
+            } catch (err) {
+                console.error(err);
+                toast({ type: 'error', message: 'Erro ao carregar dados do TFL.' });
+            } finally {
+                setCarregandoPix(false);
+                setCarregandoSangria(false);
+            }
+        };
+        carregar();
+    }, [tflId, toast]);
+
+    async function adicionarPix() {
+        const valor = parseFloat(novoPixValor.replace(',', '.'));
+        if (!valor || valor <= 0) {
+            toast({ type: 'warning', message: 'Informe um valor válido para o PIX.' });
+            return;
+        }
+        if (!novoPixData) {
+            toast({ type: 'warning', message: 'Informe a data do PIX.' });
+            return;
+        }
+        setSalvandoPix(true);
+        try {
+            const novo = await adicionarPixExternoTFL(tflId, novoPixData, valor, novoPixDesc);
+            setPixList(prev => [novo, ...prev]);
+            setNovoPixValor('');
+            setNovoPixDesc('');
+            toast({ type: 'success', message: 'PIX externo adicionado ao TFL.' });
+            onSaved();
+        } catch (err) {
+            toast({ type: 'error', message: 'Erro ao adicionar PIX.' });
+            console.error(err);
+        } finally {
+            setSalvandoPix(false);
+        }
+    }
+
+    async function removerPix(id: number) {
+        try {
+            await removerPixExternoTFL(id);
+            setPixList(prev => prev.filter(p => p.id !== id));
+            toast({ type: 'success', message: 'PIX removido.' });
+            onSaved();
+        } catch (err) {
+            toast({ type: 'error', message: 'Erro ao remover PIX.' });
+            console.error(err);
+        }
+    }
+
+    async function salvarSangria() {
+        const valor = parseFloat(sangriaValor.replace(',', '.'));
+        if (isNaN(valor)) {
+            toast({ type: 'warning', message: 'Informe um valor numérico para a sangria (ou deixe vazio para zerar).' });
+            return;
+        }
+        setSalvandoSangria(true);
+        try {
+            await setSangriaTFL(tflId, valor || 0);
+            toast({ type: 'success', message: 'Sangria do TFL atualizada.' });
+            onSaved();
+        } catch (err) {
+            toast({ type: 'error', message: 'Erro ao salvar sangria.' });
+            console.error(err);
+        } finally {
+            setSalvandoSangria(false);
+        }
+    }
+
+    const totalPix = pixList.reduce((a, p) => a + p.valor, 0);
+
+    return (
+        <div className="space-y-6">
+            {/* Seção PIX Externos */}
+            <div className="rounded-xl border border-blue-500/15 bg-blue-500/5 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <CreditCard size={13} className="text-blue-400" />
+                        <span className="text-xs font-bold text-blue-300">PIX Externos Unitários (TFL)</span>
+                    </div>
+                    {pixList.length > 0 && (
+                        <span className="text-[10px] font-bold text-blue-400">
+                            Total: {fmt(totalPix)}
+                        </span>
+                    )}
+                </div>
+
+                {carregandoPix ? (
+                    <div className="flex items-center gap-2 text-xs text-muted py-1">
+                        <Loader2 size={11} className="animate-spin" /> Carregando...
+                    </div>
+                ) : pixList.length > 0 ? (
+                    <div className="space-y-1.5 max-h-60 overflow-y-auto">
+                        {pixList.map(p => (
+                            <div key={p.id} className="flex items-center justify-between bg-white/3 rounded-lg px-3 py-2">
+                                <div className="flex items-center gap-3">
+                                    <span className="text-[10px] text-muted flex items-center gap-1">
+                                        <CalendarDays size={10} />
+                                        {p.data.split('T')[0].split('-').reverse().join('/')}
+                                    </span>
+                                    <span className="text-xs font-semibold text-blue-300">{fmt(p.valor)}</span>
+                                    {p.descricao && <span className="text-[10px] text-muted">{p.descricao}</span>}
+                                    {p.conciliado && (
+                                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-success/10 text-success">Conciliado</span>
+                                    )}
+                                </div>
+                                <button onClick={() => removerPix(p.id)} className="p-1 hover:text-error text-muted">
+                                    <Trash2 size={11} />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                ) : (
+                    <p className="text-[10px] text-muted">Nenhum PIX externo registrado para este TFL.</p>
+                )}
+
+                <div className="grid grid-cols-3 gap-2">
+                    <div>
+                        <label className="block text-[10px] text-muted mb-1">Valor (R$)</label>
+                        <input type="number" step="0.01" placeholder="0,00" className="input w-full text-xs h-8" value={novoPixValor} onChange={e => setNovoPixValor(e.target.value)} />
+                    </div>
+                    <div>
+                        <label className="block text-[10px] text-muted mb-1">Data</label>
+                        <input type="date" className="input w-full text-xs h-8" value={novoPixData} onChange={e => setNovoPixData(e.target.value)} />
+                    </div>
+                    <div>
+                        <label className="block text-[10px] text-muted mb-1">Descrição</label>
+                        <input type="text" placeholder="Opcional" className="input w-full text-xs h-8" value={novoPixDesc} onChange={e => setNovoPixDesc(e.target.value)} />
+                    </div>
+                </div>
+                <button className="btn btn-ghost text-xs h-8 border border-blue-500/20 text-blue-300 hover:bg-blue-500/10 w-full" onClick={adicionarPix} disabled={salvandoPix}>
+                    {salvandoPix ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />} Adicionar PIX Externo
+                </button>
+            </div>
+
+            {/* Seção Sangria */}
+            <div className="rounded-xl border border-warning/15 bg-warning/5 p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                    <ArrowUpRight size={13} className="text-warning" />
+                    <span className="text-xs font-bold text-yellow-300">Sangria (retirada de caixa)</span>
+                </div>
+                <p className="text-[10px] text-muted">Valor retirado do caixa físico do terminal (não aparece automaticamente no TFL).</p>
+                <div className="flex gap-2">
+                    <input type="number" step="0.01" placeholder="0,00" className="input flex-1 text-xs h-8" value={sangriaValor} onChange={e => setSangriaValor(e.target.value)} />
+                    <button className="btn btn-ghost text-xs h-8 border border-warning/20 text-yellow-300 hover:bg-warning/10 px-4" onClick={salvarSangria} disabled={salvandoSangria}>
+                        {salvandoSangria ? <Loader2 size={11} className="animate-spin" /> : 'Salvar Sangria'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Modal de auditoria (original)
+// ──────────────────────────────────────────────────────────────────────────────
 
 interface ModalAuditoriaProps {
     fechamento: Fechamento;
@@ -782,8 +1115,8 @@ function ModalAuditoria({ fechamento, onClose, onAprovar, onRejeitar }: ModalAud
 
                 <div className="mb-6">
                     {isTFL && fechamento.dados_extraidos
-                        ? <DetalhesTFL dados={fechamento.dados_extraidos} />
-                        : <DetalhesOperador f={fechamento} refreshPixTrigger={0} /> // refreshPixTrigger não usado aqui
+                        ? <DetalhesTFL dados={fechamento.dados_extraidos} tflId={fechamento.id} refreshPixTrigger={0} />
+                        : <DetalhesOperador f={fechamento} refreshPixTrigger={0} />
                     }
                 </div>
 
@@ -835,7 +1168,9 @@ function ModalAuditoria({ fechamento, onClose, onAprovar, onRejeitar }: ModalAud
     );
 }
 
-// ─── Componente Principal ────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────
+// Componente Principal
+// ──────────────────────────────────────────────────────────────────────────────
 
 export function AuditoriaFechamentos() {
     const supabase = createBrowserSupabaseClient();
@@ -845,7 +1180,8 @@ export function AuditoriaFechamentos() {
     const [fechamentos, setFechamentos] = useState<Fechamento[]>([]);
     const [selectedFechamento, setSelectedFechamento] = useState<Fechamento | null>(null);
     const [showValidationModal, setShowValidationModal] = useState(false);
-    const [showAdicionaisModal, setShowAdicionaisModal] = useState(false);
+    const [showAdicionaisModal, setShowAdicionaisModal] = useState(false);       // para operador
+    const [showAdicionaisTFLModal, setShowAdicionaisTFLModal] = useState(false); // para TFL
     const [filtroStatus, setFiltroStatus] = useState<'todos' | 'pendente' | 'aprovado' | 'rejeitado'>('todos');
     const [filtroDataInicio, setFiltroDataInicio] = useState('');
     const [filtroDataFim, setFiltroDataFim] = useState('');
@@ -853,13 +1189,8 @@ export function AuditoriaFechamentos() {
     const [analisandoIA, setAnalisandoIA] = useState(false);
     const [resultadoIA, setResultadoIA] = useState<ResultadoAnalise | null>(null);
 
-    // Controle de atualização da lista de PIX na ficha de detalhes
+    // Controles de refresh para as listas de PIX e sangria
     const [refreshPixTrigger, setRefreshPixTrigger] = useState(0);
-
-    // Estados para o modal de adicionais TFL
-    const [showAdicionaisTFLModal, setShowAdicionaisTFLModal] = useState(false);
-    const [observacoesTFL, setObservacoesTFL] = useState('');
-    const [salvandoObservacoes, setSalvandoObservacoes] = useState(false);
 
     const fetchHistorico = useCallback(async () => {
         setLoading(true);
@@ -913,7 +1244,7 @@ export function AuditoriaFechamentos() {
 
             let tflQuery = supabase
                 .from('fechamento_tfl')
-                .select('id, data_referencia, terminal, total_creditos, total_debitos, saldo_final, arquivo_nome, status_auditoria, observacoes_auditoria, dados_extraidos, created_at')
+                .select('id, data_referencia, terminal, total_creditos, total_debitos, saldo_final, arquivo_nome, status_auditoria, observacoes_auditoria, dados_extraidos, created_at, sangria_valor')
                 .order('created_at', { ascending: false })
                 .limit(100);
 
@@ -952,6 +1283,7 @@ export function AuditoriaFechamentos() {
                 saldo_final: r.saldo_final || 0,
                 arquivo_nome: r.arquivo_nome,
                 dados_extraidos: r.dados_extraidos ?? undefined,
+                sangria_valor: r.sangria_valor || 0,
             }));
 
             const todos = [...deSessoes, ...deTFL].sort((a, b) => {
@@ -1010,26 +1342,6 @@ export function AuditoriaFechamentos() {
             toast({ message: error.message || 'Erro ao rejeitar', type: 'error' });
         }
         setShowValidationModal(false);
-    };
-
-    const salvarObservacoesTFL = async () => {
-        if (!selectedFechamento) return;
-        setSalvandoObservacoes(true);
-        try {
-            const { error } = await supabase
-                .from('fechamento_tfl')
-                .update({ observacoes_auditoria: observacoesTFL })
-                .eq('id', selectedFechamento.id);
-            if (error) throw error;
-            toast({ message: 'Observações salvas com sucesso!', type: 'success' });
-            await fetchHistorico();
-            setShowAdicionaisTFLModal(false);
-            setObservacoesTFL('');
-        } catch (err: any) {
-            toast({ message: 'Erro ao salvar observações: ' + (err.message || 'Erro desconhecido'), type: 'error' });
-        } finally {
-            setSalvandoObservacoes(false);
-        }
     };
 
     const fazerAnaliseIA = useCallback(async () => {
@@ -1326,7 +1638,7 @@ export function AuditoriaFechamentos() {
                                             <td className="text-right py-2 px-2">
                                                 <ChevronRight size={16} className="text-muted" />
                                             </td>
-                                        </tr>
+                                        </table>
                                     ))}
                                 </tbody>
                             </table>
@@ -1367,7 +1679,7 @@ export function AuditoriaFechamentos() {
 
                         {/* Detalhamento completo com refreshTrigger */}
                         {selectedFechamento.fonte === 'fechamento_tfl' && selectedFechamento.dados_extraidos
-                            ? <DetalhesTFL dados={selectedFechamento.dados_extraidos} />
+                            ? <DetalhesTFL dados={selectedFechamento.dados_extraidos} tflId={selectedFechamento.id} refreshPixTrigger={refreshPixTrigger} />
                             : <DetalhesOperador f={selectedFechamento} refreshPixTrigger={refreshPixTrigger} />
                         }
 
@@ -1392,7 +1704,6 @@ export function AuditoriaFechamentos() {
                                         if (selectedFechamento.fonte === 'caixa_sessoes') {
                                             setShowAdicionaisModal(true);
                                         } else {
-                                            setObservacoesTFL(selectedFechamento.justificativa || '');
                                             setShowAdicionaisTFLModal(true);
                                         }
                                     }}
@@ -1401,7 +1712,7 @@ export function AuditoriaFechamentos() {
                                     Adicionais
                                 </button>
                                 <button
-                                    className="btn btn-primary py-2.5 text-sm font-bold flex-1"
+                                    className={`btn btn-primary py-2.5 text-sm font-bold ${selectedFechamento.fonte === 'caixa_sessoes' ? 'flex-1' : 'w-full'}`}
                                     onClick={() => setShowValidationModal(true)}
                                 >
                                     <ShieldCheck size={14} />
@@ -1413,7 +1724,7 @@ export function AuditoriaFechamentos() {
                 )}
             </div>
 
-            {/* Modal Auditoria */}
+            {/* Modal Auditoria (para aprovação/rejeição) */}
             {showValidationModal && selectedFechamento && (
                 <ModalAuditoria
                     fechamento={selectedFechamento}
@@ -1423,7 +1734,7 @@ export function AuditoriaFechamentos() {
                 />
             )}
 
-            {/* Modal Adicionais para Operador */}
+            {/* Modal Adicionais para OPERADOR */}
             {showAdicionaisModal && selectedFechamento && selectedFechamento.fonte === 'caixa_sessoes' && (
                 <>
                     <div className="fixed inset-0 bg-black/80 z-[9998]" onClick={async () => { setShowAdicionaisModal(false); await fetchHistorico(); setRefreshPixTrigger(prev => prev + 1); }} />
@@ -1442,7 +1753,7 @@ export function AuditoriaFechamentos() {
 
                         <div className="space-y-4">
                             <p className="text-[10px] font-bold text-muted uppercase tracking-wider">Dados para Conciliação Bancária</p>
-                            <PixExternosForm
+                            <PixExternosFormOperador
                                 sessaoId={parseInt(selectedFechamento.id)}
                                 lojaId={selectedFechamento.loja_id ?? ''}
                                 dataTurno={selectedFechamento.data_turno}
@@ -1468,29 +1779,29 @@ export function AuditoriaFechamentos() {
             {/* Modal Adicionais para TFL */}
             {showAdicionaisTFLModal && selectedFechamento && selectedFechamento.fonte === 'fechamento_tfl' && (
                 <>
-                    <div className="fixed inset-0 bg-black/80 z-[9998]" onClick={() => { setShowAdicionaisTFLModal(false); setObservacoesTFL(''); }} />
-                    <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-md max-h-[90vh] overflow-y-auto bg-bg-card border border-border rounded-2xl z-[9999] p-6">
-                        <div className="flex justify-between items-center mb-4">
-                            <h2 className="text-lg font-bold">Observações Adicionais - TFL</h2>
-                            <button onClick={() => { setShowAdicionaisTFLModal(false); setObservacoesTFL(''); }} className="btn btn-ghost btn-sm"><X size={18} /></button>
-                        </div>
-                        <div className="space-y-4">
+                    <div className="fixed inset-0 bg-black/80 z-[9998]" onClick={async () => { setShowAdicionaisTFLModal(false); await fetchHistorico(); setRefreshPixTrigger(prev => prev + 1); }} />
+                    <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-xl max-h-[90vh] overflow-y-auto bg-bg-card border border-border rounded-2xl z-[9999] p-6">
+                        <div className="flex justify-between items-center mb-5">
                             <div>
-                                <label className="text-xs font-bold text-muted block mb-1">Observações / Justificativa</label>
-                                <textarea
-                                    className="input w-full text-sm"
-                                    rows={4}
-                                    value={observacoesTFL}
-                                    onChange={(e) => setObservacoesTFL(e.target.value)}
-                                    placeholder="Ex: divergência por estorno pendente, ajuste manual, etc."
-                                />
+                                <h2 className="text-lg font-bold">Adicionais do TFL</h2>
+                                <p className="text-xs text-muted mt-0.5">
+                                    Terminal {selectedFechamento.terminal_id} &bull; {formatarDataLocal(selectedFechamento.data_turno)}
+                                </p>
                             </div>
-                            <button
-                                className="btn btn-primary w-full text-sm"
-                                onClick={salvarObservacoesTFL}
-                                disabled={salvandoObservacoes}
-                            >
-                                {salvandoObservacoes ? <Loader2 size={14} className="animate-spin" /> : 'Salvar Observações'}
+                            <button onClick={async () => { setShowAdicionaisTFLModal(false); await fetchHistorico(); setRefreshPixTrigger(prev => prev + 1); }} className="btn btn-ghost btn-sm">
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        <TFLAdicionaisForm
+                            tflId={selectedFechamento.id}
+                            lojaId={selectedFechamento.loja_id ?? ''}
+                            onSaved={() => { setRefreshPixTrigger(prev => prev + 1); }}
+                        />
+
+                        <div className="flex justify-end mt-5 pt-4 border-t border-border">
+                            <button className="btn btn-primary text-sm" onClick={async () => { setShowAdicionaisTFLModal(false); await fetchHistorico(); setRefreshPixTrigger(prev => prev + 1); }}>
+                                Concluir
                             </button>
                         </div>
                     </div>
