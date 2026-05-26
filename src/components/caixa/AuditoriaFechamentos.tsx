@@ -728,23 +728,6 @@ function ModalAuditoria({ fechamento, onClose, onAprovar, onRejeitar }: ModalAud
                     }
                 </div>
 
-                {/* PIX Externos e Depósito Cofre — apenas para caixa_sessoes */}
-                {!isTFL && (
-                    <div className="space-y-3 mb-6">
-                        <p className="text-[10px] font-bold text-muted uppercase tracking-wider">Dados para Conciliação Bancária</p>
-                        <PixExternosForm
-                            sessaoId={parseInt(fechamento.id)}
-                            lojaId={fechamento.loja_id ?? ''}
-                            dataTurno={fechamento.data_turno}
-                        />
-                        <DepositoCofreForm
-                            sessaoId={parseInt(fechamento.id)}
-                            lojaId={fechamento.loja_id ?? ''}
-                            valorAtual={fechamento.valor_cofre ?? 0}
-                        />
-                    </div>
-                )}
-
                 {/* Justificativa do operador */}
                 {fechamento.justificativa && (
                     <div className="mb-5 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">

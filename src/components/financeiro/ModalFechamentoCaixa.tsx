@@ -1,16 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import {
-    X,
-    AlertTriangle,
-    Loader2,
-    CheckCircle2,
-    ArrowUpCircle,
-    ArrowDownCircle,
-    DollarSign
-} from 'lucide-react';
-import { MoneyInput } from '@/components/ui/MoneyInput';
+import { X, TriangleAlert as AlertTriangle, Loader as Loader2, CircleCheck as CheckCircle2, CircleArrowUp as ArrowUpCircle, CircleArrowDown as ArrowDownCircle, DollarSign } from 'lucide-react';
 import { CaixaSessao } from '@/hooks/useCaixa';
 
 interface TransacaoBase {
@@ -35,8 +26,6 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
     const [justificativa, setJustificativa] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
     const [isSuccess, setIsSuccess] = useState(false);
-    const [valorCofre, setValorCofre] = useState(0);
-    const [valorPixExterno, setValorPixExterno] = useState(0);
 
     const totalCreditos = useMemo(() => {
         return transacoes
@@ -86,8 +75,6 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
             await onFinish({
                 observacoes: observacoes || undefined,
                 tflData: {},
-                valorCofre,
-                valorPixExterno
             });
             setIsSuccess(true);
         } catch (error) {
@@ -159,41 +146,6 @@ export function ModalFechamentoCaixa({ sessao, transacoes, onClose, onFinish }: 
                             </div>
                             <div className="text-[10px] text-muted italic mt-2">
                                 Saldo = Valor Inicial + Entradas - Saídas
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Informações Adicionais: Cofre e PIX Externo */}
-                    <div className="bg-surface-subtle p-4 rounded-xl border border-border mb-6">
-                        <p className="text-xs font-bold mb-3 text-muted uppercase tracking-wider">Informações Adicionais (opcional)</p>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="text-xs font-medium text-muted mb-1 block">
-                                    Valor colocado no cofre
-                                </label>
-                                <MoneyInput
-                                    value={valorCofre}
-                                    onValueChange={setValorCofre}
-                                    placeholder="0,00"
-                                    disabled={isProcessing}
-                                />
-                                <p className="text-[10px] text-muted mt-1">
-                                    Valor em dinheiro físico que será depositado no cofre
-                                </p>
-                            </div>
-                            <div>
-                                <label className="text-xs font-medium text-muted mb-1 block">
-                                    PIX de jogos externos
-                                </label>
-                                <MoneyInput
-                                    value={valorPixExterno}
-                                    onValueChange={setValorPixExterno}
-                                    placeholder="0,00"
-                                    disabled={isProcessing}
-                                />
-                                <p className="text-[10px] text-muted mt-1">
-                                    PIX recebidos fora do sistema (jogos avulsos, etc.)
-                                </p>
                             </div>
                         </div>
                     </div>
