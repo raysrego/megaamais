@@ -1318,21 +1318,21 @@ export function AuditoriaFechamentos() {
                         )}
 
                         {selectedFechamento.status_validacao === 'pendente' && (
-                            <div className="mt-5 flex flex-col gap-2">
+                            <div className="mt-5 flex gap-2">
                                 {selectedFechamento.fonte === 'caixa_sessoes' && (
                                     <button
-                                        className="btn btn-ghost w-full py-2 text-sm font-semibold border border-blue-500/20 text-blue-300 hover:bg-blue-500/10"
+                                        className="btn btn-ghost flex-1 py-2.5 text-sm font-semibold border border-blue-500/20 text-blue-300 hover:bg-blue-500/10"
                                         onClick={() => setShowAdicionaisModal(true)}
                                     >
-                                        <Plus size={14} className="mr-1" />
+                                        <Plus size={14} />
                                         Adicionais
                                     </button>
                                 )}
                                 <button
-                                    className="btn btn-primary w-full py-3 text-base font-bold"
+                                    className={`btn btn-primary py-2.5 text-sm font-bold ${selectedFechamento.fonte === 'caixa_sessoes' ? 'flex-1' : 'w-full'}`}
                                     onClick={() => setShowValidationModal(true)}
                                 >
-                                    <ShieldCheck size={16} className="mr-2" />
+                                    <ShieldCheck size={14} />
                                     Auditar Agora
                                 </button>
                             </div>
@@ -1354,7 +1354,7 @@ export function AuditoriaFechamentos() {
             {/* Modal Adicionais */}
             {showAdicionaisModal && selectedFechamento && selectedFechamento.fonte === 'caixa_sessoes' && (
                 <>
-                    <div className="fixed inset-0 bg-black/80 z-[9998]" onClick={() => setShowAdicionaisModal(false)} />
+                    <div className="fixed inset-0 bg-black/80 z-[9998]" onClick={async () => { setShowAdicionaisModal(false); await fetchHistorico(); }} />
                     <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-xl max-h-[90vh] overflow-y-auto bg-bg-card border border-border rounded-2xl z-[9999] p-6">
                         <div className="flex justify-between items-center mb-5">
                             <div>
@@ -1383,7 +1383,7 @@ export function AuditoriaFechamentos() {
                         </div>
 
                         <div className="flex justify-end mt-5 pt-4 border-t border-border">
-                            <button className="btn btn-primary text-sm" onClick={() => setShowAdicionaisModal(false)}>
+                            <button className="btn btn-primary text-sm" onClick={async () => { setShowAdicionaisModal(false); await fetchHistorico(); }}>
                                 Concluir
                             </button>
                         </div>
