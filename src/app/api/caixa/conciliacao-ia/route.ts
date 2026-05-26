@@ -143,7 +143,7 @@ ${JSON.stringify(dados.transacoesOFX, null, 2)}
 ## Fechamentos TFL (${dados.fechamentosTFL.length} registros)
 ${JSON.stringify(dados.fechamentosTFL, null, 2)}
 
-`## PIX Externos Unitários (Operador):
+## PIX Externos Unitários (Operador):
 ${JSON.stringify(fechamentosCaixa.flatMap(f => f.pix_externos_unitarios), null, 2)}
 
 ## Sangria TFL:
