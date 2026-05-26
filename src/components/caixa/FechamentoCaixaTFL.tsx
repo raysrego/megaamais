@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback } from 'react';
-import { Upload, FileText, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, X, Loader as Loader2, TrendingUp, TrendingDown, ChevronRight, ChevronDown, Banknote, Send } from 'lucide-react';
+import { Upload, FileText, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, X, Loader as Loader2, TrendingUp, TrendingDown, ChevronRight, ChevronDown, Banknote, Send, Store } from 'lucide-react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import { useLoja } from '@/contexts/LojaContext';
 import { useToast } from '@/contexts/ToastContext';
@@ -331,12 +331,15 @@ function DetalhesTFL({ dados }: { dados: RelatorioTFL }) {
 
 export function FechamentoCaixaTFL() {
     const supabase = createBrowserSupabaseClient();
-    const { lojaAtual } = useLoja();
+    const { lojaAtual, lojasDisponiveis } = useLoja();
     const { toast } = useToast();
     const fileInputRef = useRef<HTMLInputElement>(null);
 
+    const [lojaSelecionada, setLojaSelecionada] = useState<string>('');
     const [dragging, setDragging] = useState(false);
     const [registros, setRegistros] = useState<RegistroTFL[]>([]);
+
+    const lojaIdEfetiva = lojaSelecionada || lojaAtual?.id || '';
 
     const addFile = useCallback((file: File) => {
         const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/gif'];
@@ -384,6 +387,11 @@ export function FechamentoCaixaTFL() {
         const item = registros.find(r => r.id === id);
         if (!item?.resultado) return;
 
+        if (!lojaIdEfetiva) {
+            toast({ message: 'Selecione uma loja antes de enviar.', type: 'error' });
+            return;
+        }
+
         const { data: userData } = await supabase.auth.getUser();
         const d = item.resultado;
 
@@ -396,7 +404,7 @@ export function FechamentoCaixaTFL() {
         const { data, error } = await supabase
             .from('fechamento_tfl')
             .insert({
-                loja_id: lojaAtual?.id ?? null,
+                loja_id: lojaIdEfetiva,
                 user_id: userData?.user?.id ?? null,
                 data_referencia: dataRef,
                 terminal: d.terminal,
@@ -419,7 +427,7 @@ export function FechamentoCaixaTFL() {
             r.id === id ? { ...r, status: 'enviado', dbId: data?.id ?? null } : r
         ));
         toast({ message: 'Fechamento enviado para auditoria!', type: 'success' });
-    }, [registros, supabase, lojaAtual, toast]);
+    }, [registros, supabase, lojaIdEfetiva, toast]);
 
     const handleDrop = useCallback((e: React.DragEvent) => {
         e.preventDefault();
@@ -435,13 +443,38 @@ export function FechamentoCaixaTFL() {
     return (
         <div className="space-y-6">
             {/* Header */}
-            <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                    <FileText className="text-primary" size={20} />
+            <div className="flex items-start justify-between gap-4 mb-2 flex-wrap">
+                <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                        <FileText className="text-primary" size={20} />
+                    </div>
+                    <div>
+                        <h3 className="text-lg font-bold">Importar Relatório TFL</h3>
+                        <p className="text-xs text-muted">Importe o relatório Conexão Parceiros — o histórico e auditoria ficam na aba Auditoria</p>
+                    </div>
                 </div>
-                <div>
-                    <h3 className="text-lg font-bold">Importar Relatório TFL</h3>
-                    <p className="text-xs text-muted">Importe o relatório Conexão Parceiros — o histórico e auditoria ficam na aba Auditoria</p>
+
+                {/* Seletor de Loja */}
+                <div className="flex items-center gap-2 rounded-xl border border-border bg-surface-subtle px-3 py-2 min-w-[220px]">
+                    <Store size={14} className="text-muted shrink-0" />
+                    <div className="flex-1 min-w-0">
+                        <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-0.5">Loja do fechamento</p>
+                        {lojasDisponiveis.length > 1 ? (
+                            <select
+                                className="w-full bg-transparent text-xs font-semibold focus:outline-none cursor-pointer"
+                                value={lojaSelecionada || lojaAtual?.id || ''}
+                                onChange={e => setLojaSelecionada(e.target.value)}
+                            >
+                                {lojasDisponiveis.map(l => (
+                                    <option key={l.id} value={l.id}>{l.nome_fantasia}</option>
+                                ))}
+                            </select>
+                        ) : (
+                            <p className="text-xs font-semibold truncate">
+                                {lojaAtual?.nome_fantasia ?? 'Nenhuma loja selecionada'}
+                            </p>
+                        )}
+                    </div>
                 </div>
             </div>
 
