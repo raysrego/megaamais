@@ -147,7 +147,7 @@ ${JSON.stringify(dados.fechamentosTFL, null, 2)}
 ${JSON.stringify(fechamentosCaixa.flatMap(f => f.pix_externos_unitarios), null, 2)}
 
 ## Sangria TFL:
-${JSON.stringify(fechamentosTFL.map(f => ({ id: f.id, sangria: f.sangria_valor })), null, 2)}`
+${JSON.stringify(fechamentosTFL.map(f => ({ id: f.id, sangria: f.sangria_valor })), null, 2)}
 
 ## Fechamentos de Caixa Operador (${dados.fechamentosCaixa.length} registros)
 ${JSON.stringify(dados.fechamentosCaixa, null, 2)}
