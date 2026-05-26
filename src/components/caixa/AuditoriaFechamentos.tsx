@@ -144,7 +144,198 @@ const formatarDataHoraLocal = (dataStr: string | null) => {
     return formatarDataLocal(dataStr);
 };
 
-// ─── Detalhamento TFL ─────────────────────────────────────────────────────────
+// ─── Componente: Lista de PIX Externos (exibição) ─────────────────────────────
+
+function PixExternosList({ sessaoId, refreshTrigger }: { sessaoId: number; refreshTrigger: number }) {
+    const [lista, setLista] = useState<PixExterno[]>([]);
+    const [carregando, setCarregando] = useState(true);
+
+    useEffect(() => {
+        if (!sessaoId) return;
+        getPixExternosPorSessao(sessaoId)
+            .then(setLista)
+            .catch(err => console.error('Erro ao carregar PIX externos:', err))
+            .finally(() => setCarregando(false));
+    }, [sessaoId, refreshTrigger]);
+
+    if (carregando) return <Loader2 size={12} className="animate-spin text-muted" />;
+    if (lista.length === 0) return <p className="text-[10px] text-muted">Nenhum PIX externo registrado.</p>;
+
+    const total = lista.reduce((acc, p) => acc + p.valor, 0);
+    return (
+        <div className="rounded-xl border border-blue-500/15 bg-blue-500/5 p-3">
+            <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                    <CreditCard size={12} className="text-blue-400" />
+                    <span className="text-[10px] font-bold text-blue-300 uppercase tracking-wider">PIX Externos Unitários</span>
+                </div>
+                <span className="text-xs font-bold text-blue-300">{fmt(total)}</span>
+            </div>
+            <div className="space-y-1.5">
+                {lista.map(p => (
+                    <div key={p.id} className="flex items-center justify-between text-xs border-b border-white/5 pb-1 last:border-0">
+                        <div className="flex items-center gap-2">
+                            <span className="text-muted text-[10px]">{p.data_pix.split('T')[0].split('-').reverse().join('/')}</span>
+                            <span>{fmt(p.valor)}</span>
+                            {p.descricao && <span className="text-muted text-[10px]">({p.descricao})</span>}
+                        </div>
+                        {p.conciliado && <span className="text-[9px] text-success">✓ conciliado</span>}
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+// ─── Detalhamento Operador (com exibição de PIX externos e cofre) ────────────
+
+function DetalhesOperador({ f, refreshPixTrigger }: { f: Fechamento; refreshPixTrigger: number }) {
+    const totalEntradas = (f.total_pix || 0) + (f.total_dinheiro || 0);
+    const totalSaidas = (f.total_sangrias || 0) + (f.total_depositos || 0) + (f.total_boletos || 0) + (f.total_trocados || 0);
+    const sessaoId = parseInt(f.id);
+
+    return (
+        <div className="space-y-4 text-sm">
+            {/* KPIs */}
+            <div className="grid grid-cols-3 gap-2">
+                <div className="p-3 rounded-xl border border-border bg-surface-subtle">
+                    <p className="text-[10px] text-muted font-bold uppercase mb-1">Entradas</p>
+                    <p className="text-base font-black text-success tabular-nums">{fmt(totalEntradas)}</p>
+                </div>
+                <div className="p-3 rounded-xl border border-border bg-surface-subtle">
+                    <p className="text-[10px] text-muted font-bold uppercase mb-1">Saídas</p>
+                    <p className="text-base font-black text-danger tabular-nums">{fmt(totalSaidas)}</p>
+                </div>
+                <div className="p-3 rounded-xl border border-border bg-surface-subtle">
+                    <p className="text-[10px] text-muted font-bold uppercase mb-1">Valor na Conta</p>
+                    <p className="text-base font-black text-primary-blue-light tabular-nums">{fmt(f.valor_na_conta)}</p>
+                </div>
+            </div>
+
+            {/* Entradas */}
+            <div>
+                <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">Detalhamento de Entradas</p>
+                <div className="rounded-xl border border-border overflow-hidden">
+                    <div className="flex items-center justify-between px-3 py-2 border-b border-border/60 bg-surface-subtle/50">
+                        <div className="flex items-center gap-2 text-success">
+                            <Wallet size={13} />
+                            <span className="text-xs font-semibold">PIX</span>
+                        </div>
+                        <span className="text-sm font-bold text-success tabular-nums">{fmt(f.total_pix)}</span>
+                    </div>
+                    <div className="flex items-center justify-between px-3 py-2 bg-surface-subtle/20">
+                        <div className="flex items-center gap-2 text-success">
+                            <Banknote size={13} />
+                            <span className="text-xs font-semibold">Dinheiro</span>
+                        </div>
+                        <span className="text-sm font-bold text-success tabular-nums">{fmt(f.total_dinheiro)}</span>
+                    </div>
+                    <div className="flex items-center justify-between px-3 py-2 border-t border-border bg-success/5">
+                        <span className="text-xs font-black uppercase text-success">Total Entradas</span>
+                        <span className="text-sm font-black text-success tabular-nums">{fmt(totalEntradas)}</span>
+                    </div>
+                </div>
+            </div>
+
+            {/* Saídas */}
+            <div>
+                <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">Detalhamento de Saídas</p>
+                <div className="rounded-xl border border-border overflow-hidden">
+                    {[
+                        { icon: <ArrowUpRight size={13} />, label: 'Sangrias',  valor: f.total_sangrias  || 0 },
+                        { icon: <Landmark     size={13} />, label: 'Depósitos', valor: f.total_depositos || 0 },
+                        { icon: <Receipt      size={13} />, label: 'Boletos',   valor: f.total_boletos   || 0 },
+                        { icon: <Coins        size={13} />, label: 'Trocados',  valor: f.total_trocados  || 0 },
+                    ].map((row, i, arr) => (
+                        <div key={i} className={`flex items-center justify-between px-3 py-2 ${i < arr.length - 1 ? 'border-b border-border/60' : ''} bg-surface-subtle/20`}>
+                            <div className="flex items-center gap-2 text-danger">
+                                {row.icon}
+                                <span className="text-xs font-semibold">{row.label}</span>
+                            </div>
+                            <span className="text-sm font-bold text-danger tabular-nums">{fmt(row.valor)}</span>
+                        </div>
+                    ))}
+                    <div className="flex items-center justify-between px-3 py-2 border-t border-border bg-danger/5">
+                        <span className="text-xs font-black uppercase text-danger">Total Saídas</span>
+                        <span className="text-sm font-black text-danger tabular-nums">{fmt(totalSaidas)}</span>
+                    </div>
+                </div>
+            </div>
+
+            {/* Complementares */}
+            {((f.valor_pix_externo || 0) > 0 || (f.valor_cofre || 0) > 0 || f.valor_inicial > 0) && (
+                <div>
+                    <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">Valores Complementares</p>
+                    <div className="rounded-xl border border-border overflow-hidden">
+                        {f.valor_inicial > 0 && (
+                            <div className="flex items-center justify-between px-3 py-2 border-b border-border/60 bg-surface-subtle/20">
+                                <div className="flex items-center gap-2 text-muted">
+                                    <CreditCard size={13} />
+                                    <span className="text-xs font-semibold">Fundo de Caixa Inicial</span>
+                                </div>
+                                <span className="text-sm font-bold tabular-nums">{fmt(f.valor_inicial)}</span>
+                            </div>
+                        )}
+                        {(f.valor_pix_externo || 0) > 0 && (
+                            <div className="flex items-center justify-between px-3 py-2 border-b border-border/60 bg-surface-subtle/20">
+                                <div className="flex items-center gap-2 text-muted">
+                                    <ArrowDownLeft size={13} />
+                                    <span className="text-xs font-semibold">PIX Externo Informado</span>
+                                </div>
+                                <span className="text-sm font-bold tabular-nums">{fmt(f.valor_pix_externo)}</span>
+                            </div>
+                        )}
+                        {(f.valor_cofre || 0) > 0 && (
+                            <div className="flex items-center justify-between px-3 py-2 bg-surface-subtle/20">
+                                <div className="flex items-center gap-2 text-muted">
+                                    <ShieldCheck size={13} />
+                                    <span className="text-xs font-semibold">Enviado ao Cofre</span>
+                                </div>
+                                <span className="text-sm font-bold tabular-nums">{fmt(f.valor_cofre)}</span>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* PIX Externos Unitários e Depósito no Cofre (detalhado) */}
+            <div className="space-y-3">
+                <PixExternosList sessaoId={sessaoId} refreshTrigger={refreshPixTrigger} />
+                {(f.valor_cofre ?? 0) > 0 && (
+                    <div className="rounded-xl border border-warning/15 bg-warning/5 p-3 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <Landmark size={12} className="text-warning" />
+                            <span className="text-[10px] font-bold text-yellow-300 uppercase">Depósito no Cofre</span>
+                        </div>
+                        <span className="text-sm font-bold text-yellow-300">{fmt(f.valor_cofre)}</span>
+                    </div>
+                )}
+            </div>
+
+            {/* Resumo final */}
+            <div className="rounded-xl border border-border p-3 bg-surface-subtle space-y-1">
+                <div className="flex justify-between text-xs py-0.5">
+                    <span className="text-muted">Saldo Esperado</span>
+                    <span className="font-semibold tabular-nums">{fmt(f.saldo_esperado)}</span>
+                </div>
+                <div className="flex justify-between text-xs py-0.5">
+                    <span className="text-muted">Valor Declarado no Caixa</span>
+                    <span className="font-semibold tabular-nums">{fmt(f.saldo_no_caixa)}</span>
+                </div>
+                <div className={`flex justify-between text-sm font-bold border-t border-border pt-2 mt-1 ${Math.abs(f.divergencia) > 5 ? 'text-danger' : 'text-success'}`}>
+                    <span>Divergência</span>
+                    <span className="tabular-nums">{fmt(f.divergencia)}</span>
+                </div>
+                <div className="flex justify-between text-base font-black border-t border-border pt-2 mt-1">
+                    <span>Valor na Conta</span>
+                    <span className="text-primary-blue-light tabular-nums">{fmt(f.valor_na_conta)}</span>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ─── Detalhamento TFL (mantido igual ao original) ───────────────────────────
 
 function SecaoTFL({ titulo, children }: { titulo: string; children: React.ReactNode }) {
     return (
@@ -312,149 +503,18 @@ function DetalhesTFL({ dados }: { dados: RelatorioTFL }) {
     );
 }
 
-// ─── Detalhamento Operador ────────────────────────────────────────────────────
-
-function DetalhesOperador({ f }: { f: Fechamento }) {
-    const totalEntradas = (f.total_pix || 0) + (f.total_dinheiro || 0);
-    const totalSaidas = (f.total_sangrias || 0) + (f.total_depositos || 0) + (f.total_boletos || 0) + (f.total_trocados || 0);
-
-    return (
-        <div className="space-y-4 text-sm">
-            {/* KPIs */}
-            <div className="grid grid-cols-3 gap-2">
-                <div className="p-3 rounded-xl border border-border bg-surface-subtle">
-                    <p className="text-[10px] text-muted font-bold uppercase mb-1">Entradas</p>
-                    <p className="text-base font-black text-success tabular-nums">{fmt(totalEntradas)}</p>
-                </div>
-                <div className="p-3 rounded-xl border border-border bg-surface-subtle">
-                    <p className="text-[10px] text-muted font-bold uppercase mb-1">Saídas</p>
-                    <p className="text-base font-black text-danger tabular-nums">{fmt(totalSaidas)}</p>
-                </div>
-                <div className="p-3 rounded-xl border border-border bg-surface-subtle">
-                    <p className="text-[10px] text-muted font-bold uppercase mb-1">Valor na Conta</p>
-                    <p className="text-base font-black text-primary-blue-light tabular-nums">{fmt(f.valor_na_conta)}</p>
-                </div>
-            </div>
-
-            {/* Entradas */}
-            <div>
-                <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">Detalhamento de Entradas</p>
-                <div className="rounded-xl border border-border overflow-hidden">
-                    <div className="flex items-center justify-between px-3 py-2 border-b border-border/60 bg-surface-subtle/50">
-                        <div className="flex items-center gap-2 text-success">
-                            <Wallet size={13} />
-                            <span className="text-xs font-semibold">PIX</span>
-                        </div>
-                        <span className="text-sm font-bold text-success tabular-nums">{fmt(f.total_pix)}</span>
-                    </div>
-                    <div className="flex items-center justify-between px-3 py-2 bg-surface-subtle/20">
-                        <div className="flex items-center gap-2 text-success">
-                            <Banknote size={13} />
-                            <span className="text-xs font-semibold">Dinheiro</span>
-                        </div>
-                        <span className="text-sm font-bold text-success tabular-nums">{fmt(f.total_dinheiro)}</span>
-                    </div>
-                    <div className="flex items-center justify-between px-3 py-2 border-t border-border bg-success/5">
-                        <span className="text-xs font-black uppercase text-success">Total Entradas</span>
-                        <span className="text-sm font-black text-success tabular-nums">{fmt(totalEntradas)}</span>
-                    </div>
-                </div>
-            </div>
-
-            {/* Saídas */}
-            <div>
-                <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">Detalhamento de Saídas</p>
-                <div className="rounded-xl border border-border overflow-hidden">
-                    {[
-                        { icon: <ArrowUpRight size={13} />, label: 'Sangrias',  valor: f.total_sangrias  || 0 },
-                        { icon: <Landmark     size={13} />, label: 'Depósitos', valor: f.total_depositos || 0 },
-                        { icon: <Receipt      size={13} />, label: 'Boletos',   valor: f.total_boletos   || 0 },
-                        { icon: <Coins        size={13} />, label: 'Trocados',  valor: f.total_trocados  || 0 },
-                    ].map((row, i, arr) => (
-                        <div key={i} className={`flex items-center justify-between px-3 py-2 ${i < arr.length - 1 ? 'border-b border-border/60' : ''} bg-surface-subtle/20`}>
-                            <div className="flex items-center gap-2 text-danger">
-                                {row.icon}
-                                <span className="text-xs font-semibold">{row.label}</span>
-                            </div>
-                            <span className="text-sm font-bold text-danger tabular-nums">{fmt(row.valor)}</span>
-                        </div>
-                    ))}
-                    <div className="flex items-center justify-between px-3 py-2 border-t border-border bg-danger/5">
-                        <span className="text-xs font-black uppercase text-danger">Total Saídas</span>
-                        <span className="text-sm font-black text-danger tabular-nums">{fmt(totalSaidas)}</span>
-                    </div>
-                </div>
-            </div>
-
-            {/* Complementares */}
-            {((f.valor_pix_externo || 0) > 0 || (f.valor_cofre || 0) > 0 || f.valor_inicial > 0) && (
-                <div>
-                    <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">Valores Complementares</p>
-                    <div className="rounded-xl border border-border overflow-hidden">
-                        {f.valor_inicial > 0 && (
-                            <div className="flex items-center justify-between px-3 py-2 border-b border-border/60 bg-surface-subtle/20">
-                                <div className="flex items-center gap-2 text-muted">
-                                    <CreditCard size={13} />
-                                    <span className="text-xs font-semibold">Fundo de Caixa Inicial</span>
-                                </div>
-                                <span className="text-sm font-bold tabular-nums">{fmt(f.valor_inicial)}</span>
-                            </div>
-                        )}
-                        {(f.valor_pix_externo || 0) > 0 && (
-                            <div className="flex items-center justify-between px-3 py-2 border-b border-border/60 bg-surface-subtle/20">
-                                <div className="flex items-center gap-2 text-muted">
-                                    <ArrowDownLeft size={13} />
-                                    <span className="text-xs font-semibold">PIX Externo Informado</span>
-                                </div>
-                                <span className="text-sm font-bold tabular-nums">{fmt(f.valor_pix_externo)}</span>
-                            </div>
-                        )}
-                        {(f.valor_cofre || 0) > 0 && (
-                            <div className="flex items-center justify-between px-3 py-2 bg-surface-subtle/20">
-                                <div className="flex items-center gap-2 text-muted">
-                                    <ShieldCheck size={13} />
-                                    <span className="text-xs font-semibold">Enviado ao Cofre</span>
-                                </div>
-                                <span className="text-sm font-bold tabular-nums">{fmt(f.valor_cofre)}</span>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
-
-            {/* Resumo final */}
-            <div className="rounded-xl border border-border p-3 bg-surface-subtle space-y-1">
-                <div className="flex justify-between text-xs py-0.5">
-                    <span className="text-muted">Saldo Esperado</span>
-                    <span className="font-semibold tabular-nums">{fmt(f.saldo_esperado)}</span>
-                </div>
-                <div className="flex justify-between text-xs py-0.5">
-                    <span className="text-muted">Valor Declarado no Caixa</span>
-                    <span className="font-semibold tabular-nums">{fmt(f.saldo_no_caixa)}</span>
-                </div>
-                <div className={`flex justify-between text-sm font-bold border-t border-border pt-2 mt-1 ${Math.abs(f.divergencia) > 5 ? 'text-danger' : 'text-success'}`}>
-                    <span>Divergência</span>
-                    <span className="tabular-nums">{fmt(f.divergencia)}</span>
-                </div>
-                <div className="flex justify-between text-base font-black border-t border-border pt-2 mt-1">
-                    <span>Valor na Conta</span>
-                    <span className="text-primary-blue-light tabular-nums">{fmt(f.valor_na_conta)}</span>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-// ─── Formulário de PIX Externos Unitários ────────────────────────────────────
+// ─── Formulários do Modal Adicionais (já existentes) ─────────────────────────
 
 function PixExternosForm({
     sessaoId,
     lojaId,
     dataTurno,
+    onSaved,
 }: {
     sessaoId: number;
     lojaId: string;
     dataTurno: string;
+    onSaved: () => void;
 }) {
     const { toast } = useToast();
     const [lista, setLista] = useState<PixExterno[]>([]);
@@ -494,6 +554,7 @@ function PixExternosForm({
             setNovoValor('');
             setNovaDescricao('');
             toast({ type: 'success', message: 'PIX externo adicionado.' });
+            onSaved(); // notifica o componente pai para atualizar a lista na ficha
         } catch (e: unknown) {
             toast({ type: 'error', message: 'Erro ao adicionar PIX externo.' });
             console.error(e);
@@ -507,6 +568,7 @@ function PixExternosForm({
             await removerPixExterno(id);
             setLista(prev => prev.filter(p => p.id !== id));
             toast({ type: 'success', message: 'PIX externo removido.' });
+            onSaved();
         } catch (e: unknown) {
             toast({ type: 'error', message: 'Erro ao remover PIX externo.' });
             console.error(e);
@@ -529,7 +591,6 @@ function PixExternosForm({
                 )}
             </div>
 
-            {/* Lista existente */}
             {carregando ? (
                 <div className="flex items-center gap-2 text-xs text-muted py-1">
                     <Loader2 size={11} className="animate-spin" /> Carregando...
@@ -564,7 +625,6 @@ function PixExternosForm({
                 <p className="text-[10px] text-muted">Nenhum PIX externo registrado.</p>
             )}
 
-            {/* Formulário para adicionar */}
             <div className="grid grid-cols-3 gap-2">
                 <div>
                     <label className="block text-[10px] text-muted mb-1">Valor (R$)</label>
@@ -609,16 +669,16 @@ function PixExternosForm({
     );
 }
 
-// ─── Formulário de Depósito no Cofre ─────────────────────────────────────────
-
 function DepositoCofreForm({
     sessaoId,
     lojaId,
     valorAtual,
+    onSaved,
 }: {
     sessaoId: number;
     lojaId: string;
     valorAtual: number;
+    onSaved: () => void;
 }) {
     const { toast } = useToast();
     const supabase = createBrowserSupabaseClient();
@@ -641,6 +701,7 @@ function DepositoCofreForm({
             if (error) throw error;
             setSalvo(true);
             toast({ type: 'success', message: 'Depósito no cofre registrado.' });
+            onSaved();
         } catch (e: unknown) {
             toast({ type: 'error', message: 'Erro ao salvar depósito no cofre.' });
             console.error(e);
@@ -684,7 +745,7 @@ function DepositoCofreForm({
     );
 }
 
-// ─── Modal de auditoria ────────────────────────────────────────────────────────
+// ─── Modal de auditoria (igual ao original) ──────────────────────────────────
 
 interface ModalAuditoriaProps {
     fechamento: Fechamento;
@@ -697,7 +758,6 @@ function ModalAuditoria({ fechamento, onClose, onAprovar, onRejeitar }: ModalAud
     const [modoRejeitar, setModoRejeitar] = useState(false);
     const [justificativa, setJustificativa] = useState('');
     const [observacoes, setObservacoes] = useState('');
-
     const isTFL = fechamento.fonte === 'fechamento_tfl';
 
     return (
@@ -720,15 +780,13 @@ function ModalAuditoria({ fechamento, onClose, onAprovar, onRejeitar }: ModalAud
                     <button onClick={onClose} className="btn btn-ghost btn-sm"><X size={18} /></button>
                 </div>
 
-                {/* Detalhamento completo */}
                 <div className="mb-6">
                     {isTFL && fechamento.dados_extraidos
                         ? <DetalhesTFL dados={fechamento.dados_extraidos} />
-                        : <DetalhesOperador f={fechamento} />
+                        : <DetalhesOperador f={fechamento} refreshPixTrigger={0} /> // refreshPixTrigger não usado aqui
                     }
                 </div>
 
-                {/* Justificativa do operador */}
                 {fechamento.justificativa && (
                     <div className="mb-5 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
                         <span className="text-[9px] text-yellow-500 font-bold uppercase">
@@ -738,7 +796,6 @@ function ModalAuditoria({ fechamento, onClose, onAprovar, onRejeitar }: ModalAud
                     </div>
                 )}
 
-                {/* Ações */}
                 {!modoRejeitar ? (
                     <div className="flex gap-3 justify-end border-t border-border pt-4">
                         <button className="btn btn-ghost text-sm" onClick={onClose}>Cancelar</button>
@@ -778,7 +835,7 @@ function ModalAuditoria({ fechamento, onClose, onAprovar, onRejeitar }: ModalAud
     );
 }
 
-// ─── Main Component ────────────────────────────────────────────────────────────
+// ─── Componente Principal ────────────────────────────────────────────────────
 
 export function AuditoriaFechamentos() {
     const supabase = createBrowserSupabaseClient();
@@ -796,10 +853,12 @@ export function AuditoriaFechamentos() {
     const [analisandoIA, setAnalisandoIA] = useState(false);
     const [resultadoIA, setResultadoIA] = useState<ResultadoAnalise | null>(null);
 
+    // Controle de atualização da lista de PIX na ficha de detalhes
+    const [refreshPixTrigger, setRefreshPixTrigger] = useState(0);
+
     const fetchHistorico = useCallback(async () => {
         setLoading(true);
         try {
-            // ── caixa_sessoes ────────────────────────────────────────────────
             const sessoesBruto = await getFechamentosAuditoria({
                 status: filtroStatus !== 'todos' ? filtroStatus : undefined,
                 dataInicio: filtroDataInicio || undefined,
@@ -847,7 +906,6 @@ export function AuditoriaFechamentos() {
                 };
             });
 
-            // ── fechamento_tfl (inclui dados_extraidos) ──────────────────────
             let tflQuery = supabase
                 .from('fechamento_tfl')
                 .select('id, data_referencia, terminal, total_creditos, total_debitos, saldo_final, arquivo_nome, status_auditoria, observacoes_auditoria, dados_extraidos, created_at')
@@ -1282,10 +1340,10 @@ export function AuditoriaFechamentos() {
                             </div>
                         </div>
 
-                        {/* Detalhamento completo */}
+                        {/* Detalhamento completo com refreshTrigger */}
                         {selectedFechamento.fonte === 'fechamento_tfl' && selectedFechamento.dados_extraidos
                             ? <DetalhesTFL dados={selectedFechamento.dados_extraidos} />
-                            : <DetalhesOperador f={selectedFechamento} />
+                            : <DetalhesOperador f={selectedFechamento} refreshPixTrigger={refreshPixTrigger} />
                         }
 
                         {/* Justificativa */}
@@ -1337,7 +1395,7 @@ export function AuditoriaFechamentos() {
             {/* Modal Adicionais */}
             {showAdicionaisModal && selectedFechamento && selectedFechamento.fonte === 'caixa_sessoes' && (
                 <>
-                    <div className="fixed inset-0 bg-black/80 z-[9998]" onClick={async () => { setShowAdicionaisModal(false); await fetchHistorico(); }} />
+                    <div className="fixed inset-0 bg-black/80 z-[9998]" onClick={async () => { setShowAdicionaisModal(false); await fetchHistorico(); setRefreshPixTrigger(prev => prev + 1); }} />
                     <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-xl max-h-[90vh] overflow-y-auto bg-bg-card border border-border rounded-2xl z-[9999] p-6">
                         <div className="flex justify-between items-center mb-5">
                             <div>
@@ -1346,7 +1404,7 @@ export function AuditoriaFechamentos() {
                                     Terminal {selectedFechamento.terminal_id} &bull; {formatarDataLocal(selectedFechamento.data_turno)}
                                 </p>
                             </div>
-                            <button onClick={() => setShowAdicionaisModal(false)} className="btn btn-ghost btn-sm">
+                            <button onClick={async () => { setShowAdicionaisModal(false); await fetchHistorico(); setRefreshPixTrigger(prev => prev + 1); }} className="btn btn-ghost btn-sm">
                                 <X size={18} />
                             </button>
                         </div>
@@ -1357,16 +1415,18 @@ export function AuditoriaFechamentos() {
                                 sessaoId={parseInt(selectedFechamento.id)}
                                 lojaId={selectedFechamento.loja_id ?? ''}
                                 dataTurno={selectedFechamento.data_turno}
+                                onSaved={() => { setRefreshPixTrigger(prev => prev + 1); }}
                             />
                             <DepositoCofreForm
                                 sessaoId={parseInt(selectedFechamento.id)}
                                 lojaId={selectedFechamento.loja_id ?? ''}
                                 valorAtual={selectedFechamento.valor_cofre ?? 0}
+                                onSaved={() => { setRefreshPixTrigger(prev => prev + 1); }}
                             />
                         </div>
 
                         <div className="flex justify-end mt-5 pt-4 border-t border-border">
-                            <button className="btn btn-primary text-sm" onClick={async () => { setShowAdicionaisModal(false); await fetchHistorico(); }}>
+                            <button className="btn btn-primary text-sm" onClick={async () => { setShowAdicionaisModal(false); await fetchHistorico(); setRefreshPixTrigger(prev => prev + 1); }}>
                                 Concluir
                             </button>
                         </div>
