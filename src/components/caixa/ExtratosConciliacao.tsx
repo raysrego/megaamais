@@ -659,13 +659,15 @@ function TabelaFechamentos({
     const allSelected = fechamentos.length > 0 && fechamentos.every(f => selectedIds.includes(f.uid));
     const someSelected = selectedIds.length > 0 && !allSelected;
 
-    if (fechamentos.length === 0) return (
-        <div className="card p-12 text-center">
-            <CheckCircle2 size={32} className="mx-auto mb-3 text-success opacity-50" />
-            <p className="text-sm font-semibold">Nenhum fechamento pendente de auditoria</p>
-            <p className="text-xs text-muted mt-1">Todos os fechamentos foram auditados.</p>
-        </div>
-    );
+    if (fechamentos.length === 0) {
+        return (
+            <div className="card p-12 text-center">
+                <CheckCircle2 size={32} className="mx-auto mb-3 text-success opacity-50" />
+                <p className="text-sm font-semibold">Nenhum fechamento pendente de auditoria</p>
+                <p className="text-xs text-muted mt-1">Todos os fechamentos foram auditados.</p>
+            </div>
+        );
+    }
 
     const totalEntradas = fechamentos.reduce((a, f) => a + (f.resumo_total_entradas ?? 0), 0);
     const totalCofre = fechamentos.reduce((a, f) => a + (f.valor_enviado_cofre ?? 0), 0);
@@ -714,7 +716,7 @@ function TabelaFechamentos({
                     </tr>
                 </thead>
                 <tbody>
-                    {fechamentos.map(f => {
+                    {fechamentos.map((f) => {
                         const isTFL = f.fonte === 'fechamento_tfl';
                         const isOpen = aberto === f.uid;
                         const valorPrincipal = isTFL ? f.saldo_final : f.resumo_total_entradas;
@@ -824,7 +826,7 @@ function TabelaFechamentos({
                                                 </div>
                                             )}
                                         </td>
-                                    <tr>
+                                    </tr>
                                 )}
                             </React.Fragment>
                         );
