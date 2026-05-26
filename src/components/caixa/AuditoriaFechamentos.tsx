@@ -335,7 +335,7 @@ function DetalhesOperador({ f, refreshPixTrigger }: { f: Fechamento; refreshPixT
     );
 }
 
-// ─── Detalhamento TFL (mantido igual ao original) ───────────────────────────
+// ─── Detalhamento TFL (mantido igual) ───────────────────────────
 
 function SecaoTFL({ titulo, children }: { titulo: string; children: React.ReactNode }) {
     return (
@@ -503,7 +503,7 @@ function DetalhesTFL({ dados }: { dados: RelatorioTFL }) {
     );
 }
 
-// ─── Formulários do Modal Adicionais (já existentes) ─────────────────────────
+// ─── Formulários do Modal Adicionais para Operador ─────────────────────────
 
 function PixExternosForm({
     sessaoId,
@@ -554,7 +554,7 @@ function PixExternosForm({
             setNovoValor('');
             setNovaDescricao('');
             toast({ type: 'success', message: 'PIX externo adicionado.' });
-            onSaved(); // notifica o componente pai para atualizar a lista na ficha
+            onSaved();
         } catch (e: unknown) {
             toast({ type: 'error', message: 'Erro ao adicionar PIX externo.' });
             console.error(e);
@@ -856,6 +856,11 @@ export function AuditoriaFechamentos() {
     // Controle de atualização da lista de PIX na ficha de detalhes
     const [refreshPixTrigger, setRefreshPixTrigger] = useState(0);
 
+    // Estados para o modal de adicionais TFL
+    const [showAdicionaisTFLModal, setShowAdicionaisTFLModal] = useState(false);
+    const [observacoesTFL, setObservacoesTFL] = useState('');
+    const [salvandoObservacoes, setSalvandoObservacoes] = useState(false);
+
     const fetchHistorico = useCallback(async () => {
         setLoading(true);
         try {
@@ -1005,6 +1010,26 @@ export function AuditoriaFechamentos() {
             toast({ message: error.message || 'Erro ao rejeitar', type: 'error' });
         }
         setShowValidationModal(false);
+    };
+
+    const salvarObservacoesTFL = async () => {
+        if (!selectedFechamento) return;
+        setSalvandoObservacoes(true);
+        try {
+            const { error } = await supabase
+                .from('fechamento_tfl')
+                .update({ observacoes_auditoria: observacoesTFL })
+                .eq('id', selectedFechamento.id);
+            if (error) throw error;
+            toast({ message: 'Observações salvas com sucesso!', type: 'success' });
+            await fetchHistorico();
+            setShowAdicionaisTFLModal(false);
+            setObservacoesTFL('');
+        } catch (err: any) {
+            toast({ message: 'Erro ao salvar observações: ' + (err.message || 'Erro desconhecido'), type: 'error' });
+        } finally {
+            setSalvandoObservacoes(false);
+        }
     };
 
     const fazerAnaliseIA = useCallback(async () => {
@@ -1360,17 +1385,23 @@ export function AuditoriaFechamentos() {
 
                         {selectedFechamento.status_validacao === 'pendente' && (
                             <div className="mt-5 flex gap-2">
-                                {selectedFechamento.fonte === 'caixa_sessoes' && (
-                                    <button
-                                        className="btn btn-ghost flex-1 py-2.5 text-sm font-semibold border border-blue-500/20 text-blue-300 hover:bg-blue-500/10"
-                                        onClick={() => setShowAdicionaisModal(true)}
-                                    >
-                                        <Plus size={14} />
-                                        Adicionais
-                                    </button>
-                                )}
+                                {/* Botão Adicionais para ambos os tipos */}
                                 <button
-                                    className={`btn btn-primary py-2.5 text-sm font-bold ${selectedFechamento.fonte === 'caixa_sessoes' ? 'flex-1' : 'w-full'}`}
+                                    className="btn btn-ghost flex-1 py-2.5 text-sm font-semibold border border-blue-500/20 text-blue-300 hover:bg-blue-500/10"
+                                    onClick={() => {
+                                        if (selectedFechamento.fonte === 'caixa_sessoes') {
+                                            setShowAdicionaisModal(true);
+                                        } else {
+                                            setObservacoesTFL(selectedFechamento.justificativa || '');
+                                            setShowAdicionaisTFLModal(true);
+                                        }
+                                    }}
+                                >
+                                    <Plus size={14} />
+                                    Adicionais
+                                </button>
+                                <button
+                                    className="btn btn-primary py-2.5 text-sm font-bold flex-1"
                                     onClick={() => setShowValidationModal(true)}
                                 >
                                     <ShieldCheck size={14} />
@@ -1392,7 +1423,7 @@ export function AuditoriaFechamentos() {
                 />
             )}
 
-            {/* Modal Adicionais */}
+            {/* Modal Adicionais para Operador */}
             {showAdicionaisModal && selectedFechamento && selectedFechamento.fonte === 'caixa_sessoes' && (
                 <>
                     <div className="fixed inset-0 bg-black/80 z-[9998]" onClick={async () => { setShowAdicionaisModal(false); await fetchHistorico(); setRefreshPixTrigger(prev => prev + 1); }} />
@@ -1428,6 +1459,38 @@ export function AuditoriaFechamentos() {
                         <div className="flex justify-end mt-5 pt-4 border-t border-border">
                             <button className="btn btn-primary text-sm" onClick={async () => { setShowAdicionaisModal(false); await fetchHistorico(); setRefreshPixTrigger(prev => prev + 1); }}>
                                 Concluir
+                            </button>
+                        </div>
+                    </div>
+                </>
+            )}
+
+            {/* Modal Adicionais para TFL */}
+            {showAdicionaisTFLModal && selectedFechamento && selectedFechamento.fonte === 'fechamento_tfl' && (
+                <>
+                    <div className="fixed inset-0 bg-black/80 z-[9998]" onClick={() => { setShowAdicionaisTFLModal(false); setObservacoesTFL(''); }} />
+                    <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-md max-h-[90vh] overflow-y-auto bg-bg-card border border-border rounded-2xl z-[9999] p-6">
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-lg font-bold">Observações Adicionais - TFL</h2>
+                            <button onClick={() => { setShowAdicionaisTFLModal(false); setObservacoesTFL(''); }} className="btn btn-ghost btn-sm"><X size={18} /></button>
+                        </div>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-xs font-bold text-muted block mb-1">Observações / Justificativa</label>
+                                <textarea
+                                    className="input w-full text-sm"
+                                    rows={4}
+                                    value={observacoesTFL}
+                                    onChange={(e) => setObservacoesTFL(e.target.value)}
+                                    placeholder="Ex: divergência por estorno pendente, ajuste manual, etc."
+                                />
+                            </div>
+                            <button
+                                className="btn btn-primary w-full text-sm"
+                                onClick={salvarObservacoesTFL}
+                                disabled={salvandoObservacoes}
+                            >
+                                {salvandoObservacoes ? <Loader2 size={14} className="animate-spin" /> : 'Salvar Observações'}
                             </button>
                         </div>
                     </div>
