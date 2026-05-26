@@ -237,7 +237,7 @@ export async function POST(request: NextRequest) {
         const userPrompt = construirPrompt(payload);
 
         // Use um modelo válido (verifique os disponíveis no seu plano)
-        const model = anthropic('claude-opus-4-5''); // ou claude-opus-4-5
+        const model = anthropic('claude-opus-4-5'); // ou claude-opus-4-5
 
         const { text } = await generateText({
             model,
