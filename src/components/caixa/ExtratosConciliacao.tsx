@@ -1,18 +1,18 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { RefreshCw, Loader as Loader2, ArrowRightLeft, CircleCheck as CheckCircle2, TriangleAlert as AlertTriangle, Clock, ChevronRight, X, Landmark, Banknote, CreditCard, TrendingUp, Upload, FileText, Calendar, Check, Search, CircleAlert, Info } from 'lucide-react';
+import { RefreshCw, Loader as Loader2, ArrowRightLeft, CircleCheck as CheckCircle2, TriangleAlert as AlertTriangle, Clock, ChevronRight, X, Landmark, TrendingUp, Upload, FileText, Calendar, Check, Search, CircleAlert, Info, Sparkles, ShieldCheck, ShieldAlert, ShieldX, ChevronDown } from 'lucide-react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import { useToast } from '@/contexts/ToastContext';
 import { getFechamentosAuditoria } from '@/actions/auditoria';
 import {
     salvarTransacoesOFX,
     getTransacoesOFX,
-    executarConciliacaoDetalhada,
     type OFXTransacaoSalva,
     type ResultadoConciliacao,
 } from '@/actions/extrato-conciliacao';
 import type { OFXDados } from '@/lib/ofx-parser';
+import type { ConciliacaoIAResultado } from '@/app/api/caixa/conciliacao-ia/route';
 import { useLoja } from '@/contexts/LojaContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -515,6 +515,226 @@ function TabelaOFX({ transacoes }: { transacoes: OFXTransacaoSalva[] }) {
     );
 }
 
+// ─── Painel resultado IA ─────────────────────────────────────────────────────
+
+const NIVEL_COR = {
+    info: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
+    aviso: 'text-warning bg-warning/10 border-warning/20',
+    critico: 'text-error bg-error/10 border-error/20',
+} as const;
+
+const TIPO_COR: Record<string, string> = {
+    pix: 'text-success',
+    deposito: 'text-warning',
+    estorno: 'text-error',
+    debito: 'text-error',
+    outros: 'text-muted',
+};
+
+const STATUS_COR: Record<string, string> = {
+    conciliado: 'bg-success/10 text-success border-success/20',
+    pendente: 'bg-muted/10 text-muted border-muted/20',
+    divergente: 'bg-warning/10 text-warning border-warning/20',
+    suspeito: 'bg-error/10 text-error border-error/20',
+};
+
+function PainelConciliacaoIA({
+    resultado,
+    onFechar,
+}: {
+    resultado: ConciliacaoIAResultado;
+    onFechar: () => void;
+}) {
+    const [showItens, setShowItens] = useState(false);
+
+    const StatusIcon = resultado.status_geral === 'aprovado'
+        ? ShieldCheck
+        : resultado.status_geral === 'aprovado_com_ressalvas'
+            ? ShieldAlert
+            : ShieldX;
+
+    const statusColor = resultado.status_geral === 'aprovado'
+        ? 'text-success border-success/30 bg-success/5'
+        : resultado.status_geral === 'aprovado_com_ressalvas'
+            ? 'text-warning border-warning/30 bg-warning/5'
+            : 'text-error border-error/30 bg-error/5';
+
+    const riscoColor = resultado.risco === 'baixo'
+        ? 'bg-success/10 text-success'
+        : resultado.risco === 'medio'
+            ? 'bg-warning/10 text-warning'
+            : 'bg-error/10 text-error';
+
+    const resumo = resultado.resumo_financeiro;
+    const criticos = resultado.alertas.filter(a => a.nivel === 'critico');
+    const avisos = resultado.alertas.filter(a => a.nivel === 'aviso');
+    const infos = resultado.alertas.filter(a => a.nivel === 'info');
+
+    return (
+        <div className="card p-5 space-y-5">
+            {/* Header */}
+            <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
+                        <Sparkles size={16} className="text-primary" />
+                    </div>
+                    <div>
+                        <h3 className="text-sm font-bold">Conciliação por IA — Auditor Fiscal</h3>
+                        <p className="text-[10px] text-muted mt-0.5">Análise gerada pelo agente Claude</p>
+                    </div>
+                </div>
+                <div className="flex items-center gap-2">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${riscoColor}`}>
+                        RISCO {resultado.risco.toUpperCase()}
+                    </span>
+                    <button className="btn btn-ghost p-1.5" onClick={onFechar}><X size={14} /></button>
+                </div>
+            </div>
+
+            {/* Status geral + Parecer */}
+            <div className={`rounded-xl border p-4 ${statusColor}`}>
+                <div className="flex items-center gap-2 mb-2">
+                    <StatusIcon size={16} />
+                    <span className="text-xs font-bold uppercase tracking-wider">
+                        {resultado.status_geral === 'aprovado' ? 'Aprovado'
+                            : resultado.status_geral === 'aprovado_com_ressalvas' ? 'Aprovado com Ressalvas'
+                                : 'Rejeitado'}
+                    </span>
+                </div>
+                <p className="text-xs leading-relaxed">{resultado.parecer_geral}</p>
+            </div>
+
+            {/* Resumo financeiro */}
+            <div>
+                <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">Resumo Financeiro</p>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="rounded-xl border border-success/20 bg-success/5 p-3">
+                        <p className="text-[10px] text-success uppercase tracking-wider mb-1">Créditos OFX</p>
+                        <p className="text-sm font-bold text-success">{fmt(resumo.total_creditos_ofx)}</p>
+                    </div>
+                    <div className="rounded-xl border border-error/20 bg-error/5 p-3">
+                        <p className="text-[10px] text-error uppercase tracking-wider mb-1">Débitos OFX</p>
+                        <p className="text-sm font-bold text-error">{fmt(resumo.total_debitos_ofx)}</p>
+                    </div>
+                    <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-3">
+                        <p className="text-[10px] text-blue-400 uppercase tracking-wider mb-1">PIX Externos</p>
+                        <p className="text-sm font-bold text-blue-400">{fmt(resumo.total_pix_externos)}</p>
+                    </div>
+                    <div className="rounded-xl border border-warning/20 bg-warning/5 p-3">
+                        <p className="text-[10px] text-warning uppercase tracking-wider mb-1">Depósitos Cofre</p>
+                        <p className="text-sm font-bold text-warning">{fmt(resumo.total_depositos_cofre)}</p>
+                    </div>
+                    <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                        <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Estornos</p>
+                        <p className="text-sm font-bold">{fmt(resumo.total_estornos)}</p>
+                    </div>
+                    <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                        <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Saldo TFL</p>
+                        <p className="text-sm font-bold">{fmt(resumo.saldo_tfl_periodo)}</p>
+                    </div>
+                    <div className={`rounded-xl border p-3 col-span-2 ${Math.abs(resumo.diferenca_apurada) > 0.02 ? 'border-error/30 bg-error/5' : 'border-success/20 bg-success/5'}`}>
+                        <p className={`text-[10px] uppercase tracking-wider mb-1 ${Math.abs(resumo.diferenca_apurada) > 0.02 ? 'text-error' : 'text-success'}`}>
+                            Diferença Apurada
+                        </p>
+                        <p className={`text-sm font-bold ${Math.abs(resumo.diferenca_apurada) > 0.02 ? 'text-error' : 'text-success'}`}>
+                            {fmt(resumo.diferenca_apurada)}
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            {/* Alertas */}
+            {resultado.alertas.length > 0 && (
+                <div className="space-y-2">
+                    <p className="text-[10px] font-bold text-muted uppercase tracking-wider">Alertas</p>
+                    {[...criticos, ...avisos, ...infos].map((alerta, i) => (
+                        <div key={i} className={`flex items-start gap-2 rounded-lg border px-3 py-2 ${NIVEL_COR[alerta.nivel]}`}>
+                            {alerta.nivel === 'critico' ? <ShieldX size={12} className="mt-0.5 shrink-0" />
+                                : alerta.nivel === 'aviso' ? <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                                    : <Info size={12} className="mt-0.5 shrink-0" />}
+                            <p className="text-xs">{alerta.mensagem}</p>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Itens conciliados — collapsible */}
+            {resultado.itens_conciliados.length > 0 && (
+                <div>
+                    <button
+                        className="flex items-center gap-2 text-[10px] font-bold text-muted uppercase tracking-wider hover:text-foreground transition-colors"
+                        onClick={() => setShowItens(v => !v)}
+                    >
+                        <ChevronDown size={12} className={`transition-transform ${showItens ? 'rotate-180' : ''}`} />
+                        Itens Conciliados ({resultado.itens_conciliados.length})
+                    </button>
+                    {showItens && (
+                        <div className="mt-3 rounded-xl border border-white/5 overflow-hidden">
+                            <div className="overflow-y-auto max-h-72">
+                                <table className="w-full text-xs">
+                                    <thead className="sticky top-0 bg-[var(--card-bg)]">
+                                        <tr className="border-b border-white/5">
+                                            <th className="text-left px-3 py-2 text-[10px] font-bold text-muted uppercase">Data</th>
+                                            <th className="text-left px-3 py-2 text-[10px] font-bold text-muted uppercase">Tipo</th>
+                                            <th className="text-left px-3 py-2 text-[10px] font-bold text-muted uppercase">Descrição</th>
+                                            <th className="text-right px-3 py-2 text-[10px] font-bold text-muted uppercase">Valor</th>
+                                            <th className="text-center px-3 py-2 text-[10px] font-bold text-muted uppercase">Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {resultado.itens_conciliados.map((item, i) => (
+                                            <tr key={i} className="border-b border-white/3 hover:bg-white/2">
+                                                <td className="px-3 py-2">{fmtData(item.data)}</td>
+                                                <td className={`px-3 py-2 font-semibold capitalize ${TIPO_COR[item.tipo] ?? 'text-muted'}`}>{item.tipo}</td>
+                                                <td className="px-3 py-2 text-muted max-w-[200px] truncate" title={item.observacao ?? item.descricao_ofx}>
+                                                    {item.descricao_ofx}
+                                                    {item.observacao && (
+                                                        <span className="block text-[9px] text-warning truncate">{item.observacao}</span>
+                                                    )}
+                                                </td>
+                                                <td className={`px-3 py-2 text-right font-mono font-semibold ${TIPO_COR[item.tipo] ?? ''}`}>
+                                                    {fmt(item.valor)}
+                                                </td>
+                                                <td className="px-3 py-2 text-center">
+                                                    <span className={`inline-block text-[9px] font-bold px-1.5 py-0.5 rounded border ${STATUS_COR[item.status]}`}>
+                                                        {item.status === 'conciliado' ? 'OK'
+                                                            : item.status === 'pendente' ? 'Pend.'
+                                                                : item.status === 'divergente' ? 'Diverg.'
+                                                                    : 'Suspeito'}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* Recomendações */}
+            {resultado.recomendacoes.length > 0 && (
+                <div className="space-y-1">
+                    <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">Recomendações</p>
+                    {resultado.recomendacoes.map((rec, i) => (
+                        <div key={i} className="flex items-start gap-2 text-xs text-muted">
+                            <span className="text-primary mt-0.5">•</span>
+                            <span>{rec}</span>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Conclusão */}
+            <div className="rounded-xl border border-white/5 bg-white/2 px-4 py-3">
+                <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Conclusão do Auditor</p>
+                <p className="text-xs font-semibold">{resultado.conclusao}</p>
+            </div>
+        </div>
+    );
+}
+
 // ─── Tabela de fechamentos ────────────────────────────────────────────────────
 
 function TabelaFechamentos({ fechamentos }: { fechamentos: FechamentoPendente[] }) {
@@ -680,7 +900,7 @@ export function ExtratosConciliacao() {
     const [contas, setContas] = useState<ContaBancaria[]>([]);
     const [loading, setLoading] = useState(true);
     const [processando, setProcessando] = useState(false);
-    const [resultado, setResultado] = useState<ResultadoConciliacao | null>(null);
+    const [resultado, setResultado] = useState<ConciliacaoIAResultado | null>(null);
     const { toast } = useToast();
     const supabase = createBrowserSupabaseClient();
 
@@ -768,7 +988,7 @@ export function ExtratosConciliacao() {
 
     useEffect(() => { carregarDados(); }, [carregarDados]);
 
-    async function fazerConciliacao() {
+    async function fazerConciliacaoIA() {
         if (!lojaId) {
             toast({ type: 'error', message: 'Selecione uma loja para continuar.' });
             return;
@@ -777,23 +997,79 @@ export function ExtratosConciliacao() {
             toast({ type: 'warning', message: 'Importe um extrato OFX antes de conciliar.' });
             return;
         }
-        if (fechamentos.length === 0) {
-            toast({ type: 'info', message: 'Não há fechamentos pendentes.' });
-            return;
-        }
 
         setProcessando(true);
+        setResultado(null);
         try {
-            const datas = fechamentos.map(f => f.data_turno).sort();
-            const res = await executarConciliacaoDetalhada(lojaId, datas[0], datas[datas.length - 1]);
+            const datas = [
+                ...transacoesOFX.map(t => t.data),
+                ...fechamentos.map(f => f.data_turno).filter(Boolean),
+            ].sort();
+            const inicio = datas[0] ?? '';
+            const fim = datas[datas.length - 1] ?? '';
+
+            const fechamentosTFL = fechamentos
+                .filter(f => f.fonte === 'fechamento_tfl')
+                .map(f => ({
+                    id: f.id,
+                    data_referencia: f.data_turno,
+                    terminal: f.terminal_id,
+                    arquivo_nome: f.arquivo_nome,
+                    total_creditos: f.total_creditos,
+                    total_debitos: f.total_debitos,
+                    saldo_final: f.saldo_final,
+                }));
+
+            const fechamentosCaixa = fechamentos
+                .filter(f => f.fonte === 'caixa_sessoes')
+                .map(f => ({
+                    id: f.id,
+                    data_turno: f.data_turno,
+                    terminal_id: f.terminal_id,
+                    operador_nome: f.operador_nome,
+                    resumo_entradas_pix: f.resumo_entradas_pix,
+                    resumo_entradas_dinheiro: f.resumo_entradas_dinheiro,
+                    resumo_saidas_sangria: f.resumo_saidas_sangria,
+                    resumo_saidas_deposito: f.resumo_saidas_deposito,
+                    valor_enviado_cofre: f.valor_enviado_cofre,
+                    pix_externo_informado: f.pix_externo_informado,
+                    resumo_total_entradas: f.resumo_total_entradas,
+                    valor_final_declarado: f.valor_final_declarado,
+                    diferenca_caixa: f.diferenca_caixa,
+                }));
+
+            const response = await fetch('/api/caixa/conciliacao-ia', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    lojaId,
+                    periodo: { inicio, fim },
+                    transacoesOFX: transacoesOFX.map(t => ({
+                        fitid: t.fitid,
+                        tipo: t.tipo,
+                        data: t.data,
+                        valor: t.valor,
+                        memo: t.memo,
+                    })),
+                    fechamentosTFL,
+                    fechamentosCaixa,
+                }),
+            });
+
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.error ?? 'Erro na API');
+            }
+
+            const res: ConciliacaoIAResultado = await response.json();
             setResultado(res);
-            await carregarDados();
             toast({
-                type: res.pix_nao_encontrados.length === 0 ? 'success' : 'warning',
-                message: `Conciliação concluída: ${res.pix_conciliados + res.depositos_conciliados} match(es) encontrado(s).`,
+                type: res.status_geral === 'rejeitado' ? 'error'
+                    : res.status_geral === 'aprovado_com_ressalvas' ? 'warning' : 'success',
+                message: `Conciliação IA concluída — ${res.status_geral === 'aprovado' ? 'Aprovado' : res.status_geral === 'aprovado_com_ressalvas' ? 'Aprovado com ressalvas' : 'Rejeitado'}.`,
             });
         } catch (err) {
-            toast({ type: 'error', message: 'Erro ao executar conciliação.' });
+            toast({ type: 'error', message: 'Erro ao executar conciliação por IA.' });
             console.error(err);
         } finally {
             setProcessando(false);
@@ -819,7 +1095,7 @@ export function ExtratosConciliacao() {
                 <div>
                     <h2 className="text-sm font-bold">Extratos & Conciliação Bancária</h2>
                     <p className="text-xs text-muted mt-0.5">
-                        Importe o extrato OFX e cruze com fechamentos de caixa, PIX externos e depósitos do cofre
+                        Importe o extrato OFX e deixe o auditor IA cruzar com fechamentos TFL, PIX externos e depósitos
                     </p>
                 </div>
                 <div className="flex gap-2">
@@ -828,11 +1104,13 @@ export function ExtratosConciliacao() {
                     </button>
                     <button
                         className="btn btn-primary text-xs"
-                        onClick={fazerConciliacao}
-                        disabled={processando || totalOFX === 0 || totalPendentes === 0}
+                        onClick={fazerConciliacaoIA}
+                        disabled={processando || totalOFX === 0}
                     >
-                        {processando ? <Loader2 size={13} className="animate-spin" /> : <ArrowRightLeft size={13} />}
-                        Fazer Conciliação
+                        {processando
+                            ? <><Loader2 size={13} className="animate-spin" /> Analisando...</>
+                            : <><Sparkles size={13} /> Conciliar com IA</>
+                        }
                     </button>
                 </div>
             </div>
@@ -893,9 +1171,9 @@ export function ExtratosConciliacao() {
                 </div>
             )}
 
-            {/* Resultado da conciliação */}
+            {/* Resultado da conciliação IA */}
             {resultado && (
-                <ResultadoConciliacaoPanel
+                <PainelConciliacaoIA
                     resultado={resultado}
                     onFechar={() => setResultado(null)}
                 />
