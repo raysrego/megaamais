@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { anthropic } from '@ai-sdk/anthropic';
 import { generateText } from 'ai';
+import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────
+// TYPES (mantidos iguais aos originais)
+// ──────────────────────────────────────────────────────────────────────────────
 
 interface TransacaoOFX {
     fitid: string;
@@ -80,6 +83,7 @@ export interface ConciliacaoIAResultado {
     conclusao: string;
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
 // ─── Prompt ───────────────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = `Você é um auditor fiscal especializado em casas lotéricas e terminais de loteria federal (TFL).
@@ -87,60 +91,59 @@ Sua função é realizar a conciliação bancária completa entre o extrato OFX 
 
 ## Suas responsabilidades como auditor:
 
-### 1. Análise do Extrato OFX
-- Faça a análise com base na data do relatório do fechamento
-- Se o extrato tem transações de uma ou mais datas, a análise deve ter foco apenas nas datas dos fechamentos selecionados
-- Classifique cada transação: PIX recebido, depósito, estorno/chargeback, débito de tarifa, TEDs recebidas, etc.
-- Identifique créditos que correspondem a PIX registrados pelos operadores
-- Identifique créditos que correspondem a depósitos do cofre no banco
-- Identifique débitos suspeitos ou não esperados
-- Detecte estornos (valores negativos ou descrição com "ESTORNO", "DEVOLUCAO", "REVERSAL")
+## Entrada fornecida
+- **Relatório TFL**: contém data de fechamento, saldo final do período, lista de transações esperadas (créditos de vendas, débitos de repasse à CAIXA, pagamento de prêmios, etc.).
+- **Extrato OFX**: extrato bancário completo do mês, com transações contendo \`FITID\`, data, valor, descrição.
+- **Fechamentos de caixa** (opcional): informações de PIX recebido por operadores, depósitos de cofre, sangrias.
 
-### 2. Cruzamento com TFL
-- Compare o saldo final do TFL com o saldo esperado na conta bancária no mesmo período
-- Identifique discrepâncias entre créditos TFL e créditos no extrato bancário
-- Valores de jogos cobrados no TFL devem aparecer como débitos no extrato (repasse à CAIXA)
-- Prêmios pagos no TFL aparecem como débitos no extrato (saída para pagamento)
+## Regras fundamentais
+1. **Janela de conciliação**: para cada data de fechamento TFL (ex: \`D\`), a análise deve considerar transações no extrato bancário entre \`D\` e \`D+3\` dias (inclusive). Isto cobre liquidações de cartão de crédito e atrasos operacionais.
+2. **Direção da verificação**: parta sempre do TFL para o extrato. O que estiver no extrato mas não no TFL pode ser anotado como "outras origens", mas **não** é considerado inconsistência crítica.
+3. **Tolerância de valor**: considera‑se correspondência se a diferença for ≤ R$ 0,02 (arredondamentos e taxas bancárias).
+4. **Prioridade de alerta**: as anomalias mais importantes são:
+   - Crédito esperado no TFL (vendas, PIX, depósito de cofre) sem correspondência no extrato.
+   - Débito esperado no TFL (repasse à CAIXA, pagamento de prêmios) sem correspondência no extrato.
+   - Divergência de valor > R$ 0,02 entre TFL e extrato para a mesma transação identificada.
 
-### 3. Cruzamento com Fechamentos de Caixa
-- PIX externos informados pelos operadores devem ter correspondência no extrato como créditos
-- Depósitos do cofre devem aparecer como crédito no extrato na mesma data (tolerância 1 dia)
-- Sangrias sem depósito correspondente no extrato são suspeitas
-- Divergências de caixa > R$50 com créditos não explicados no extrato são críticas
+## Etapas da conciliação
 
-### 4. Regras de Classificação
-- Conciliado: transação OFX tem correspondência exata (data + valor ±R$0,02) nos fechamentos
-- Pendente: transação OFX sem correspondência clara, mas sem indício de fraude
-- Divergente: valor no extrato difere do registrado no sistema (> R$0,02)
-- Suspeito: padrão incomum (horário atípico, valor quebrado não usual, memo inconsistente)
+### 1. Extrair transações esperadas do TFL
+Para cada data de fechamento fornecida, liste:
+- **Créditos esperados** (vendas totais, PIX de operadores, depósitos de cofre).
+- **Débitos esperados** (repasse à CAIXA, prêmios pagos, tarifas, sangrias).
+- Saldo final informado pelo TFL.
 
-### 5. Formato de resposta
+### 2. Buscar correspondências no extrato OFX (janela D a D+3)
+- Para cada transação esperada, procure no extrato transações do mesmo tipo (crédito/débito) com:
+  - Data dentro da janela (permita diferença de 1 dia para feriados bancários, se sinalizado).
+  - Valor compatível (± R$ 0,02).
+  - Descrição que faça sentido (ex: "PIX", "DEPÓSITO", "REPASSE", "PRÊMIO").
+- Use o \`FITID\` para evitar duplicação no relatório.
+
+### 3. Classificar o status de cada transação esperada
+- **Conciliado**: encontrou correspondência exata (valor e data na janela, mesmo tipo).
+- **Divergente**: encontrou correspondência de data/tipo, mas valor difere > R$ 0,02.
+- **Pendente**: não encontrou correspondência, mas a data do extrato ainda pode vir (se hoje < D+3, por exemplo) – apenas se a análise for em tempo real; se o extrato já cobre todo o mês, "pendente" equivale a "não conciliado".
+- **Não conciliado** (crítico): não encontrou nenhuma transação compatível no extrato dentro da janela, mesmo com extrato completo.
+
+### 4. Identificar anomalias secundárias (opcional, mas útil)
+- Estornos/chargebacks no extrato que anulem um crédito conciliado.
+- Débitos suspeitos no extrato (ex: tarifas não previstas, saques não autorizados).
+- Sangria no caixa sem depósito correspondente no extrato (crédito ausente).
+
+### 5. Gerar resumo com foco nas inconsistências
+- Liste apenas as transações do TFL que **não** estão conciliadas ou que estão divergentes.
+- Para cada uma, informe: data TFL, valor esperado, tipo, e no extrato qual transação mais próxima (se houver) com data, valor, FITID.
+- Se o extrato tiver créditos/débitos relevantes sem relação com o TFL, inclua uma seção "Outras movimentações no extrato" (sem gerar alarme).
+
+### 6. Formato de resposta
 Retorne APENAS JSON válido sem markdown, seguindo exatamente o schema fornecido.
 Seja específico: cite valores, datas e fitids ao descrever anomalias.
 Não invente dados — baseie-se exclusivamente nos dados fornecidos.`;
 
 function construirPrompt(dados: ConciliacaoIAPayload): string {
-    const pixExternosOperador = dados.fechamentosCaixa.flatMap(f =>
-        (f.pix_externos_unitarios || []).map(p => ({
-            ...p,
-            data: p.data_pix,
-            origem: `operador_${f.operador_nome}`,
-            sessao_id: f.id
-        }))
-    );
-
-    const pixExternosTFL = dados.fechamentosTFL.flatMap(f =>
-        (f.pix_externos || []).map(p => ({
-            ...p,
-            origem: `tfl_${f.terminal}`,
-            tfl_id: f.id
-        }))
-    );
-
-    const todosPixExternos = [...pixExternosOperador, ...pixExternosTFL];
-    const sangrias = dados.fechamentosTFL
-        .filter(f => f.sangria_valor && f.sangria_valor > 0)
-        .map(f => ({ tfl_id: f.id, data: f.data_referencia, valor: f.sangria_valor }));
+    const pixExternosOperador = dados.fechamentosCaixa.flatMap(f => f.pix_externos_unitarios || []);
+    const sangriasTFL = dados.fechamentosTFL.map(f => ({ id: f.id, sangria: f.sangria_valor || 0 }));
 
     return `
 Realize a conciliação bancária fiscal do período ${dados.periodo.inicio} a ${dados.periodo.fim}.
@@ -151,13 +154,13 @@ ${JSON.stringify(dados.transacoesOFX, null, 2)}
 ## Fechamentos TFL (${dados.fechamentosTFL.length} registros)
 ${JSON.stringify(dados.fechamentosTFL, null, 2)}
 
-## PIX Externos Unitários (individuais) - DEVEM SER CRUZADOS COM O EXTRATO NA MESMA DATA:
-${todosPixExternos.length > 0 ? JSON.stringify(todosPixExternos, null, 2) : 'Nenhum PIX externo unitário informado.'}
+## PIX Externos Unitários (Operador):
+${JSON.stringify(pixExternosOperador, null, 2)}
 
-## Sangrias informadas (valores retirados do caixa físico que devem aparecer como débito no extrato):
-${sangrias.length > 0 ? JSON.stringify(sangrias, null, 2) : 'Nenhuma sangria informada.'}
+## Sangria TFL:
+${JSON.stringify(sangriasTFL, null, 2)}
 
-## Fechamentos de Caixa Operador (totais agregados para referência):
+## Fechamentos de Caixa Operador (${dados.fechamentosCaixa.length} registros)
 ${JSON.stringify(dados.fechamentosCaixa, null, 2)}
 
 Retorne APENAS o JSON no seguinte schema, sem nenhum texto adicional:
@@ -195,7 +198,9 @@ Retorne APENAS o JSON no seguinte schema, sem nenhum texto adicional:
 `;
 }
 
-// ─── Route Handler (corrigido) ───────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────
+// ROUTE HANDLER (sem alterações na chamada da IA, apenas prepara os dados)
+// ──────────────────────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
     try {
@@ -210,9 +215,8 @@ export async function POST(request: NextRequest) {
 
         const userPrompt = construirPrompt(payload);
 
-        // Modelo válido - use um dos abaixo:
-        // const model = anthropic('claude-opus-4-5');
-        const model = anthropic('claude-opus-4-5'); // mais leve e rápido
+        // Modelo válido e disponível
+        const model = anthropic('claude-opus-4-5'); 
 
         const { text } = await generateText({
             model,
@@ -227,7 +231,6 @@ export async function POST(request: NextRequest) {
 
         const parsed: Partial<ConciliacaoIAResultado> = JSON.parse(jsonText);
 
-        // Garantir que todos os campos obrigatórios existam
         const safeResultado: ConciliacaoIAResultado = {
             parecer_geral: parsed.parecer_geral || 'Não foi possível gerar um parecer completo.',
             status_geral: parsed.status_geral || 'rejeitado',
@@ -244,7 +247,7 @@ export async function POST(request: NextRequest) {
             itens_conciliados: parsed.itens_conciliados || [],
             alertas: parsed.alertas || [],
             recomendacoes: parsed.recomendacoes || [],
-            conclusao: parsed.conclusao || 'Conciliação finalizada, mas com campos incompletos retornados pela IA.',
+            conclusao: parsed.conclusao || 'Conciliação finalizada.',
         };
 
         return NextResponse.json(safeResultado);
