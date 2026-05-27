@@ -1,1770 +1,1517 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-    ChevronRight, CircleCheck as CheckCircle2, TriangleAlert as AlertTriangle,
-    RefreshCw, ShieldCheck, Loader as Loader2, X, TrendingUp, TrendingDown,
-    ListFilter as Filter, Brain, CircleAlert as AlertCircle,
-    CircleCheck as CheckCircle, TriangleAlert as AlertTriangleIcon,
-    FileText, Banknote, Wallet, ArrowDownLeft, ArrowUpRight,
-    Receipt, CreditCard, Landmark, Coins, Plus, Trash2, CalendarDays,
+    RefreshCw, Loader as Loader2, CircleCheck as CheckCircle2, TriangleAlert as AlertTriangle,
+    Clock, ChevronRight, X, Landmark, TrendingUp, Upload, FileText, Calendar, Check, Search,
+    Info, Sparkles, ShieldCheck, ShieldAlert, ShieldX, ChevronDown, Trash2, Plus,
+    CalendarDays, CreditCard, Banknote, Wallet, ArrowDownLeft, ArrowUpRight, Receipt, Coins,
+    Filter, Brain, CircleAlert as AlertCircle
 } from 'lucide-react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
+import React from 'react';
 import { useToast } from '@/contexts/ToastContext';
+import { getFechamentosAuditoria } from '@/actions/auditoria';
 import {
-    getFechamentosAuditoria,
-    aprovarFechamento,
-    rejeitarFechamento,
-} from '@/actions/auditoria';
-import {
-    adicionarPixExterno,
-    removerPixExterno,
-    getPixExternosPorSessao,
-    type PixExterno,
+    salvarTransacoesOFX,
+    getTransacoesOFX,
+    type OFXTransacaoSalva,
 } from '@/actions/extrato-conciliacao';
+import type { OFXDados } from '@/lib/ofx-parser';
+import type { ConciliacaoIAResultado } from '@/app/api/caixa/conciliacao-ia/route';
+import { useLoja } from '@/contexts/LojaContext';
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Funções para TFL (PIX externos e sangria)
+// TIPOS
 // ──────────────────────────────────────────────────────────────────────────────
 
-interface PixExternoTFL {
-    id: number;
-    tfl_id: string;
-    data: string;
-    valor: number;
-    descricao: string | null;
-    conciliado: boolean;
-    created_at: string;
+type FonteFechamento = 'caixa_sessoes' | 'fechamento_tfl';
+
+interface FechamentoPendente {
+    uid: string;
+    id: string;
+    fonte: FonteFechamento;
+    data_turno: string;
+    terminal_id: string;
+    operador_nome: string;
+    // caixa_sessoes
+    resumo_entradas_pix: number;
+    resumo_entradas_dinheiro: number;
+    resumo_saidas_deposito: number;
+    resumo_saidas_sangria: number;
+    valor_enviado_cofre: number;
+    pix_externo_informado: number;
+    resumo_total_entradas: number;
+    valor_final_declarado: number;
+    diferenca_caixa: number;
+    // tfl
+    total_creditos: number;
+    total_debitos: number;
+    saldo_final: number;
+    arquivo_nome: string;
+    auditoria_status: string;
+    loja_id: string;
 }
 
-async function getPixExternosPorTFL(tflId: string): Promise<PixExternoTFL[]> {
+interface ContaBancaria {
+    id: string;
+    nome: string;
+    agencia: string;
+    conta_numero: string;
+}
+
+interface PixExternoDetalhado {
+    data: string;
+    valor: number;
+    descricao: string;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// FUNÇÕES AUXILIARES (BUSCA UNIFICADA DE PIX E MOVIMENTAÇÕES COFRE)
+// ──────────────────────────────────────────────────────────────────────────────
+
+// Busca PIX externos de uma sessão de caixa (tabela original)
+async function getPixExternosSessao(sessaoId: string): Promise<PixExternoDetalhado[]> {
+    const supabase = createBrowserSupabaseClient();
+    const { data, error } = await supabase
+        .from('pix_externos_sessao')
+        .select('data_pix, valor, descricao')
+        .eq('sessao_id', parseInt(sessaoId))
+        .order('data_pix', { ascending: true });
+    if (error) {
+        console.error('Erro ao buscar PIX externos da sessão:', error);
+        return [];
+    }
+    return (data || []).map(p => ({ data: p.data_pix, valor: p.valor, descricao: p.descricao || '' }));
+}
+
+// Busca PIX externos de um TFL (tabela original)
+async function getPixExternosTFL(tflId: string): Promise<{ id: number; data: string; valor: number; descricao: string | null; conciliado: boolean }[]> {
     const supabase = createBrowserSupabaseClient();
     const { data, error } = await supabase
         .from('pix_externos_tfl')
         .select('*')
         .eq('tfl_id', tflId)
-        .order('data', { ascending: false });
-    if (error) throw error;
+        .order('data', { ascending: true });
+    if (error) {
+        console.error('Erro ao buscar PIX externos do TFL:', error);
+        return [];
+    }
     return data || [];
 }
 
-async function adicionarPixExternoTFL(tflId: string, data: string, valor: number, descricao?: string): Promise<PixExternoTFL> {
-    const supabase = createBrowserSupabaseClient();
-    const { data: newPix, error } = await supabase
-        .from('pix_externos_tfl')
-        .insert({ tfl_id: tflId, data, valor, descricao: descricao || null, conciliado: false })
-        .select()
-        .single();
-    if (error) throw error;
-    return newPix;
+interface MovimentacaoCofre {
+    valor: number;
+    tipo: 'entrada_sangria' | 'saida_deposito';
+    data: string;
 }
 
-async function removerPixExternoTFL(id: number): Promise<void> {
+async function getMovimentacoesCofre(entidadeId: string, tipoEntidade: 'tfl' | 'sessao'): Promise<MovimentacaoCofre[]> {
     const supabase = createBrowserSupabaseClient();
-    const { error } = await supabase.from('pix_externos_tfl').delete().eq('id', id);
-    if (error) throw error;
+    const origem = tipoEntidade === 'tfl' ? 'tfl' : 'caixa';
+    const { data, error } = await supabase
+        .from('movimentacoes_cofre')
+        .select('valor, tipo, data')
+        .eq('entidade_id', entidadeId)
+        .eq('origem', origem);
+    if (error) {
+        console.error('Erro ao buscar movimentações de cofre:', error);
+        return [];
+    }
+    return (data || []).map(m => ({ valor: m.valor, tipo: m.tipo, data: m.data }));
 }
 
 async function getSangriaTFL(tflId: string): Promise<number> {
-    const supabase = createBrowserSupabaseClient();
-    const { data, error } = await supabase
-        .from('fechamento_tfl')
-        .select('sangria_valor')
-        .eq('id', tflId)
-        .single();
-    if (error) return 0;
-    return data?.sangria_valor || 0;
+    const movs = await getMovimentacoesCofre(tflId, 'tfl');
+    return movs.filter(m => m.tipo === 'entrada_sangria').reduce((acc, m) => acc + m.valor, 0);
 }
 
-async function setSangriaTFL(tflId: string, valor: number): Promise<void> {
+async function getDepositoCofre(sessaoId: string): Promise<number> {
+    const movs = await getMovimentacoesCofre(sessaoId, 'sessao');
+    return movs.filter(m => m.tipo === 'saida_deposito').reduce((acc, m) => acc + m.valor, 0);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// FUNÇÕES PARA GERENCIAR EXTRATOS OFX (LISTAR E DELETAR)
+// ──────────────────────────────────────────────────────────────────────────────
+async function getArquivosOFX(lojaId: string): Promise<{ nome: string; data: string; total: number }[]> {
+    const supabase = createBrowserSupabaseClient();
+    const { data, error } = await supabase
+        .from('transacoes_ofx')
+        .select('arquivo_nome, data, valor')
+        .eq('loja_id', lojaId)
+        .order('data', { ascending: false });
+    if (error) throw error;
+    const map = new Map<string, { data: string; total: number; count: number }>();
+    for (const t of data || []) {
+        const nome = t.arquivo_nome || 'Sem nome';
+        const existing = map.get(nome);
+        if (existing) {
+            existing.total += t.valor;
+            existing.count++;
+            if (t.data > existing.data) existing.data = t.data;
+        } else {
+            map.set(nome, { data: t.data, total: t.valor, count: 1 });
+        }
+    }
+    return Array.from(map.entries()).map(([nome, { data, total }]) => ({ nome, data, total }));
+}
+
+async function deletarArquivoOFX(lojaId: string, arquivoNome: string): Promise<void> {
     const supabase = createBrowserSupabaseClient();
     const { error } = await supabase
-        .from('fechamento_tfl')
-        .update({ sangria_valor: valor })
-        .eq('id', tflId);
+        .from('transacoes_ofx')
+        .delete()
+        .eq('loja_id', lojaId)
+        .eq('arquivo_nome', arquivoNome);
     if (error) throw error;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Tipos TFL
+// HELPERS GERAIS
 // ──────────────────────────────────────────────────────────────────────────────
 
-interface JogoTFL { descricao: string; numero_sorteio?: string | null; quantidade: number; valor: number; }
-interface ContaTFL { descricao: string; quantidade: number; valor: number; }
-interface PremioTFL { descricao: string; quantidade: number; valor: number; }
-interface PagamentoTFL { descricao: string; quantidade: number; valor: number; }
-interface ServicoContaTFL { descricao: string; quantidade: number; valor: number; }
-
-interface RelatorioTFL {
-    data_referencia: string | null;
-    terminal: string | null;
-    total_creditos: number | null;
-    total_debitos: number | null;
-    saldo_final: number | null;
-    recebimentos: {
-        jogos: JogoTFL[];
-        total_jogos_quantidade: number | null;
-        total_jogos_valor: number | null;
-        contas: ContaTFL[];
-        total_contas_quantidade: number | null;
-        total_contas_valor: number | null;
-        total_recebimentos_quantidade: number | null;
-        total_recebimentos_valor: number | null;
-    };
-    premios_pagos: { itens: PremioTFL[]; total_quantidade: number | null; total_valor: number | null; };
-    pagamentos: { itens: PagamentoTFL[]; total_quantidade: number | null; total_valor: number | null; };
-    servicos_conta: { itens: ServicoContaTFL[]; total_quantidade: number | null; total_valor: number | null; };
-    total_em_caixa: number | null;
-    totais_finais: {
-        creditos_manuais: number | null;
-        creditos_tfl: number | null;
-        debitos_manuais: number | null;
-        debitos_tfl: number | null;
-        total_creditos: number | null;
-        total_debitos: number | null;
-        saldo_final: number | null;
-    };
+function fmt(v: number | null | undefined): string {
+    if (v == null) return '—';
+    return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-type FonteRegistro = 'caixa_sessoes' | 'fechamento_tfl';
-
-interface Fechamento {
-    id: string;
-    fonte: FonteRegistro;
-    data_turno: string;
-    data_fechamento: string;
-    terminal_id: string;
-    operador_id: string;
-    operador_nome?: string;
-    valor_inicial: number;
-    total_lancamentos: number;
-    saldo_no_caixa: number;
-    divergencia: number;
-    valor_na_conta: number;
-    total_pix: number;
-    total_dinheiro: number;
-    total_sangrias: number;
-    total_depositos: number;
-    total_boletos: number;
-    total_trocados: number;
-    status_validacao: string;
-    justificativa?: string;
-    valor_cofre?: number;
-    valor_pix_externo?: number;
-    fundo_caixa_devolvido?: boolean;
-    saldo_esperado?: number;
-    loja_id?: string;
-    total_creditos?: number;
-    total_debitos?: number;
-    saldo_final?: number;
-    arquivo_nome?: string;
-    dados_extraidos?: RelatorioTFL;
-    sangria_valor?: number;
-}
-
-interface AnaliseIA {
-    id: string;
-    recomendacao: 'APROVAR' | 'REJEITAR' | 'REVISAR';
-    risco: 'BAIXO' | 'MEDIO' | 'ALTO';
-    parecer: string;
-    alertas: string[];
-}
-
-interface ResultadoAnalise {
-    analises: AnaliseIA[];
-    resumo: string;
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ──────────────────────────────────────────────────────────────────────────────
-
-function fmt(valor: number | null | undefined): string {
-    if (valor == null) return '—';
-    return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
-
-const formatarDataLocal = (dataStr: string) => {
+function fmtData(dataStr: string): string {
     if (!dataStr) return '-';
-    if (dataStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
-        const [ano, mes, dia] = dataStr.split('-');
-        return `${dia}/${mes}/${ano}`;
-    }
-    if (dataStr.includes('T')) {
-        const [data] = dataStr.split('T');
-        const [ano, mes, dia] = data.split('-');
-        return `${dia}/${mes}/${ano}`;
-    }
-    return dataStr;
-};
-
-const formatarDataHoraLocal = (dataStr: string | null) => {
-    if (!dataStr) return '-';
-    if (dataStr.includes('T')) {
-        const [data, hora] = dataStr.split('T');
-        const [ano, mes, dia] = data.split('-');
-        return `${dia}/${mes}/${ano} ${hora.substring(0, 5)}`;
-    }
-    return formatarDataLocal(dataStr);
-};
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Componentes TFL
-// ──────────────────────────────────────────────────────────────────────────────
-
-function PixExternosTFLList({ tflId, refreshTrigger }: { tflId: string; refreshTrigger: number }) {
-    const [lista, setLista] = useState<PixExternoTFL[]>([]);
-    const [carregando, setCarregando] = useState(true);
-
-    useEffect(() => {
-        if (!tflId) return;
-        getPixExternosPorTFL(tflId)
-            .then(setLista)
-            .catch(err => console.error('Erro ao carregar PIX externos TFL:', err))
-            .finally(() => setCarregando(false));
-    }, [tflId, refreshTrigger]);
-
-    if (carregando) return <Loader2 size={12} className="animate-spin text-muted" />;
-    if (lista.length === 0) return <p className="text-[10px] text-muted">Nenhum PIX externo registrado para este TFL.</p>;
-
-    const total = lista.reduce((acc, p) => acc + p.valor, 0);
-    return (
-        <div className="rounded-xl border border-blue-500/15 bg-blue-500/5 p-3">
-            <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                    <CreditCard size={12} className="text-blue-400" />
-                    <span className="text-[10px] font-bold text-blue-300 uppercase tracking-wider">PIX Externos Unitários (TFL)</span>
-                </div>
-                <span className="text-xs font-bold text-blue-300">{fmt(total)}</span>
-            </div>
-            <div className="space-y-1.5">
-                {lista.map(p => (
-                    <div key={p.id} className="flex items-center justify-between text-xs border-b border-white/5 pb-1 last:border-0">
-                        <div className="flex items-center gap-2">
-                            <span className="text-muted text-[10px]">{p.data.split('T')[0].split('-').reverse().join('/')}</span>
-                            <span>{fmt(p.valor)}</span>
-                            {p.descricao && <span className="text-muted text-[10px]">({p.descricao})</span>}
-                        </div>
-                        {p.conciliado && <span className="text-[9px] text-success">✓ conciliado</span>}
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
+    const clean = dataStr.split('T')[0];
+    const [y, m, d] = clean.split('-');
+    return `${d}/${m}/${y}`;
 }
 
-function SangriaTFLDisplay({ valor }: { valor: number }) {
-    if (!valor || valor === 0) return null;
+function StatusBadge({ status }: { status: 'pendente' | 'conciliado' | 'divergente' }) {
+    if (status === 'conciliado')
+        return (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-success/10 text-success border border-success/20">
+                <CheckCircle2 size={10} /> Conciliado
+            </span>
+        );
+    if (status === 'divergente')
+        return (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-warning/10 text-warning border border-warning/20">
+                <AlertTriangle size={10} /> Divergente
+            </span>
+        );
     return (
-        <div className="rounded-xl border border-warning/15 bg-warning/5 p-3 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-                <ArrowUpRight size={12} className="text-warning" />
-                <span className="text-[10px] font-bold text-yellow-300 uppercase">Sangria (TFL)</span>
-            </div>
-            <span className="text-sm font-bold text-yellow-300">{fmt(valor)}</span>
-        </div>
-    );
-}
-
-function DetalhesTFL({ dados, tflId, refreshPixTrigger }: { dados: RelatorioTFL; tflId: string; refreshPixTrigger: number }) {
-    const [sangria, setSangria] = useState<number>(0);
-    useEffect(() => {
-        getSangriaTFL(tflId).then(setSangria);
-    }, [tflId, refreshPixTrigger]);
-
-    return (
-        <div className="space-y-5 text-sm">
-            <div className="grid grid-cols-3 gap-2">
-                <div className="p-3 rounded-xl border border-border bg-surface-subtle">
-                    <p className="text-[10px] text-muted font-bold uppercase mb-1">Créditos</p>
-                    <p className="text-base font-black text-success tabular-nums">{fmt(dados.total_creditos)}</p>
-                </div>
-                <div className="p-3 rounded-xl border border-border bg-surface-subtle">
-                    <p className="text-[10px] text-muted font-bold uppercase mb-1">Débitos</p>
-                    <p className="text-base font-black text-danger tabular-nums">{fmt(dados.total_debitos)}</p>
-                </div>
-                <div className="p-3 rounded-xl border border-border bg-surface-subtle">
-                    <p className="text-[10px] text-muted font-bold uppercase mb-1">Saldo Final</p>
-                    <p className="text-base font-black text-primary-blue-light tabular-nums">{fmt(dados.saldo_final)}</p>
-                </div>
-            </div>
-
-            {dados.recebimentos?.jogos?.length > 0 && (
-                <SecaoTFL titulo="Recebimentos — Jogos">
-                    <TabelaTFL
-                        rows={dados.recebimentos.jogos.map(j => ({
-                            desc: j.descricao + (j.numero_sorteio ? ` #${j.numero_sorteio}` : ''),
-                            qtd: j.quantidade,
-                            valor: j.valor,
-                        }))}
-                        totalLabel="Total Jogos"
-                        totalQtd={dados.recebimentos.total_jogos_quantidade}
-                        totalValor={dados.recebimentos.total_jogos_valor}
-                        corTotal="text-success"
-                    />
-                </SecaoTFL>
-            )}
-
-            {dados.recebimentos?.contas?.length > 0 && (
-                <SecaoTFL titulo="Recebimentos — Contas">
-                    <TabelaTFL
-                        rows={dados.recebimentos.contas.map(c => ({ desc: c.descricao, qtd: c.quantidade, valor: c.valor }))}
-                        totalLabel="Total Contas"
-                        totalQtd={dados.recebimentos.total_contas_quantidade}
-                        totalValor={dados.recebimentos.total_contas_valor}
-                        corTotal="text-success"
-                    />
-                    <div className="flex justify-between text-sm font-black border-t-2 border-border pt-2 mt-1">
-                        <span className="uppercase">Total Recebimentos</span>
-                        <span className="text-success tabular-nums">{fmt(dados.recebimentos.total_recebimentos_valor)}</span>
-                    </div>
-                </SecaoTFL>
-            )}
-
-            {dados.premios_pagos?.itens?.length > 0 && (
-                <SecaoTFL titulo="Prêmios Pagos">
-                    <TabelaTFL
-                        rows={dados.premios_pagos.itens.map(p => ({ desc: p.descricao, qtd: p.quantidade, valor: p.valor }))}
-                        totalLabel="Total Prêmios"
-                        totalQtd={dados.premios_pagos.total_quantidade}
-                        totalValor={dados.premios_pagos.total_valor}
-                        corTotal="text-danger"
-                    />
-                </SecaoTFL>
-            )}
-
-            {dados.pagamentos?.itens?.length > 0 && (
-                <SecaoTFL titulo="Pagamentos">
-                    <TabelaTFL
-                        rows={dados.pagamentos.itens.map(p => ({ desc: p.descricao, qtd: p.quantidade, valor: p.valor }))}
-                    />
-                </SecaoTFL>
-            )}
-
-            {dados.servicos_conta?.itens?.length > 0 && (
-                <SecaoTFL titulo="Serviços Conta Corrente / Poupança">
-                    <TabelaTFL
-                        rows={dados.servicos_conta.itens.map(s => ({ desc: s.descricao, qtd: s.quantidade, valor: s.valor }))}
-                        totalLabel="Total Conta"
-                        totalQtd={dados.servicos_conta.total_quantidade}
-                        totalValor={dados.servicos_conta.total_valor}
-                    />
-                </SecaoTFL>
-            )}
-
-            <div className="space-y-3">
-                <PixExternosTFLList tflId={tflId} refreshTrigger={refreshPixTrigger} />
-                <SangriaTFLDisplay valor={sangria} />
-            </div>
-
-            {dados.total_em_caixa != null && (
-                <div className="p-3 rounded-xl bg-primary-blue-light/10 border border-primary-blue-light/20 text-center">
-                    <p className="text-[10px] font-bold text-primary-blue-light uppercase mb-1">Total em Caixa</p>
-                    <p className="text-xl font-black text-primary-blue-light">{fmt(dados.total_em_caixa)}</p>
-                </div>
-            )}
-
-            <SecaoTFL titulo="Totais Finais">
-                <div className="rounded-xl border border-border p-3 bg-surface-subtle space-y-1">
-                    {[
-                        { label: 'Créditos Manuais', valor: dados.totais_finais?.creditos_manuais },
-                        { label: 'Créditos TFL',     valor: dados.totais_finais?.creditos_tfl },
-                        { label: 'Débitos Manuais',  valor: dados.totais_finais?.debitos_manuais },
-                        { label: 'Débitos TFL',      valor: dados.totais_finais?.debitos_tfl },
-                    ].map((r, i) => (
-                        <div key={i} className="flex justify-between text-xs py-0.5">
-                            <span className="text-muted">{r.label}</span>
-                            <span className="font-semibold tabular-nums">{fmt(r.valor)}</span>
-                        </div>
-                    ))}
-                    <div className="border-t border-border pt-2 mt-2 space-y-1">
-                        <div className="flex justify-between text-sm font-bold">
-                            <span>Total Créditos</span>
-                            <span className="text-success tabular-nums">{fmt(dados.totais_finais?.total_creditos)}</span>
-                        </div>
-                        <div className="flex justify-between text-sm font-bold">
-                            <span>Total Débitos</span>
-                            <span className="text-danger tabular-nums">{fmt(dados.totais_finais?.total_debitos)}</span>
-                        </div>
-                        <div className="flex justify-between text-base font-black border-t border-border pt-2">
-                            <span>Saldo Final</span>
-                            <span className="text-primary-blue-light tabular-nums">{fmt(dados.totais_finais?.saldo_final)}</span>
-                        </div>
-                    </div>
-                </div>
-            </SecaoTFL>
-        </div>
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-muted/10 text-muted border border-muted/20">
+            <Clock size={10} /> Pendente
+        </span>
     );
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Componentes Operador
+// COMPONENTE: OFXUploadPanel
 // ──────────────────────────────────────────────────────────────────────────────
 
-function PixExternosList({ sessaoId, refreshTrigger }: { sessaoId: number; refreshTrigger: number }) {
-    const [lista, setLista] = useState<PixExterno[]>([]);
-    const [carregando, setCarregando] = useState(true);
-
-    useEffect(() => {
-        if (!sessaoId) return;
-        getPixExternosPorSessao(sessaoId)
-            .then(setLista)
-            .catch(err => console.error('Erro ao carregar PIX externos:', err))
-            .finally(() => setCarregando(false));
-    }, [sessaoId, refreshTrigger]);
-
-    if (carregando) return <Loader2 size={12} className="animate-spin text-muted" />;
-    if (lista.length === 0) return <p className="text-[10px] text-muted">Nenhum PIX externo registrado.</p>;
-
-    const total = lista.reduce((acc, p) => acc + p.valor, 0);
-    return (
-        <div className="rounded-xl border border-blue-500/15 bg-blue-500/5 p-3">
-            <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                    <CreditCard size={12} className="text-blue-400" />
-                    <span className="text-[10px] font-bold text-blue-300 uppercase tracking-wider">PIX Externos Unitários</span>
-                </div>
-                <span className="text-xs font-bold text-blue-300">{fmt(total)}</span>
-            </div>
-            <div className="space-y-1.5">
-                {lista.map(p => (
-                    <div key={p.id} className="flex items-center justify-between text-xs border-b border-white/5 pb-1 last:border-0">
-                        <div className="flex items-center gap-2">
-                            <span className="text-muted text-[10px]">{p.data_pix.split('T')[0].split('-').reverse().join('/')}</span>
-                            <span>{fmt(p.valor)}</span>
-                            {p.descricao && <span className="text-muted text-[10px]">({p.descricao})</span>}
-                        </div>
-                        {p.conciliado && <span className="text-[9px] text-success">✓ conciliado</span>}
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
-}
-
-function DetalhesOperador({ f, refreshPixTrigger }: { f: Fechamento; refreshPixTrigger: number }) {
-    const totalEntradas = (f.total_pix || 0) + (f.total_dinheiro || 0);
-    const totalSaidas = (f.total_sangrias || 0) + (f.total_depositos || 0) + (f.total_boletos || 0) + (f.total_trocados || 0);
-    const sessaoId = parseInt(f.id);
-
-    return (
-        <div className="space-y-4 text-sm">
-            <div className="grid grid-cols-3 gap-2">
-                <div className="p-3 rounded-xl border border-border bg-surface-subtle">
-                    <p className="text-[10px] text-muted font-bold uppercase mb-1">Entradas</p>
-                    <p className="text-base font-black text-success tabular-nums">{fmt(totalEntradas)}</p>
-                </div>
-                <div className="p-3 rounded-xl border border-border bg-surface-subtle">
-                    <p className="text-[10px] text-muted font-bold uppercase mb-1">Saídas</p>
-                    <p className="text-base font-black text-danger tabular-nums">{fmt(totalSaidas)}</p>
-                </div>
-                <div className="p-3 rounded-xl border border-border bg-surface-subtle">
-                    <p className="text-[10px] text-muted font-bold uppercase mb-1">Valor na Conta</p>
-                    <p className="text-base font-black text-primary-blue-light tabular-nums">{fmt(f.valor_na_conta)}</p>
-                </div>
-            </div>
-
-            <div>
-                <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">Detalhamento de Entradas</p>
-                <div className="rounded-xl border border-border overflow-hidden">
-                    <div className="flex items-center justify-between px-3 py-2 border-b border-border/60 bg-surface-subtle/50">
-                        <div className="flex items-center gap-2 text-success">
-                            <Wallet size={13} />
-                            <span className="text-xs font-semibold">PIX</span>
-                        </div>
-                        <span className="text-sm font-bold text-success tabular-nums">{fmt(f.total_pix)}</span>
-                    </div>
-                    <div className="flex items-center justify-between px-3 py-2 bg-surface-subtle/20">
-                        <div className="flex items-center gap-2 text-success">
-                            <Banknote size={13} />
-                            <span className="text-xs font-semibold">Dinheiro</span>
-                        </div>
-                        <span className="text-sm font-bold text-success tabular-nums">{fmt(f.total_dinheiro)}</span>
-                    </div>
-                    <div className="flex items-center justify-between px-3 py-2 border-t border-border bg-success/5">
-                        <span className="text-xs font-black uppercase text-success">Total Entradas</span>
-                        <span className="text-sm font-black text-success tabular-nums">{fmt(totalEntradas)}</span>
-                    </div>
-                </div>
-            </div>
-
-            <div>
-                <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">Detalhamento de Saídas</p>
-                <div className="rounded-xl border border-border overflow-hidden">
-                    {[
-                        { icon: <ArrowUpRight size={13} />, label: 'Sangrias',  valor: f.total_sangrias  || 0 },
-                        { icon: <Landmark     size={13} />, label: 'Depósitos', valor: f.total_depositos || 0 },
-                        { icon: <Receipt      size={13} />, label: 'Boletos',   valor: f.total_boletos   || 0 },
-                        { icon: <Coins        size={13} />, label: 'Trocados',  valor: f.total_trocados  || 0 },
-                    ].map((row, i, arr) => (
-                        <div key={i} className={`flex items-center justify-between px-3 py-2 ${i < arr.length - 1 ? 'border-b border-border/60' : ''} bg-surface-subtle/20`}>
-                            <div className="flex items-center gap-2 text-danger">
-                                {row.icon}
-                                <span className="text-xs font-semibold">{row.label}</span>
-                            </div>
-                            <span className="text-sm font-bold text-danger tabular-nums">{fmt(row.valor)}</span>
-                        </div>
-                    ))}
-                    <div className="flex items-center justify-between px-3 py-2 border-t border-border bg-danger/5">
-                        <span className="text-xs font-black uppercase text-danger">Total Saídas</span>
-                        <span className="text-sm font-black text-danger tabular-nums">{fmt(totalSaidas)}</span>
-                    </div>
-                </div>
-            </div>
-
-            {((f.valor_pix_externo || 0) > 0 || (f.valor_cofre || 0) > 0 || f.valor_inicial > 0) && (
-                <div>
-                    <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">Valores Complementares</p>
-                    <div className="rounded-xl border border-border overflow-hidden">
-                        {f.valor_inicial > 0 && (
-                            <div className="flex items-center justify-between px-3 py-2 border-b border-border/60 bg-surface-subtle/20">
-                                <div className="flex items-center gap-2 text-muted">
-                                    <CreditCard size={13} />
-                                    <span className="text-xs font-semibold">Fundo de Caixa Inicial</span>
-                                </div>
-                                <span className="text-sm font-bold tabular-nums">{fmt(f.valor_inicial)}</span>
-                            </div>
-                        )}
-                        {(f.valor_pix_externo || 0) > 0 && (
-                            <div className="flex items-center justify-between px-3 py-2 border-b border-border/60 bg-surface-subtle/20">
-                                <div className="flex items-center gap-2 text-muted">
-                                    <ArrowDownLeft size={13} />
-                                    <span className="text-xs font-semibold">PIX Externo Informado</span>
-                                </div>
-                                <span className="text-sm font-bold tabular-nums">{fmt(f.valor_pix_externo)}</span>
-                            </div>
-                        )}
-                        {(f.valor_cofre || 0) > 0 && (
-                            <div className="flex items-center justify-between px-3 py-2 bg-surface-subtle/20">
-                                <div className="flex items-center gap-2 text-muted">
-                                    <ShieldCheck size={13} />
-                                    <span className="text-xs font-semibold">Enviado ao Cofre</span>
-                                </div>
-                                <span className="text-sm font-bold tabular-nums">{fmt(f.valor_cofre)}</span>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
-
-            <div className="space-y-3">
-                <PixExternosList sessaoId={sessaoId} refreshTrigger={refreshPixTrigger} />
-                {(f.valor_cofre ?? 0) > 0 && (
-                    <div className="rounded-xl border border-warning/15 bg-warning/5 p-3 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                            <Landmark size={12} className="text-warning" />
-                            <span className="text-[10px] font-bold text-yellow-300 uppercase">Depósito no Cofre</span>
-                        </div>
-                        <span className="text-sm font-bold text-yellow-300">{fmt(f.valor_cofre)}</span>
-                    </div>
-                )}
-            </div>
-
-            <div className="rounded-xl border border-border p-3 bg-surface-subtle space-y-1">
-                <div className="flex justify-between text-xs py-0.5">
-                    <span className="text-muted">Saldo Esperado</span>
-                    <span className="font-semibold tabular-nums">{fmt(f.saldo_esperado)}</span>
-                </div>
-                <div className="flex justify-between text-xs py-0.5">
-                    <span className="text-muted">Valor Declarado no Caixa</span>
-                    <span className="font-semibold tabular-nums">{fmt(f.saldo_no_caixa)}</span>
-                </div>
-                <div className={`flex justify-between text-sm font-bold border-t border-border pt-2 mt-1 ${Math.abs(f.divergencia) > 5 ? 'text-danger' : 'text-success'}`}>
-                    <span>Divergência</span>
-                    <span className="tabular-nums">{fmt(f.divergencia)}</span>
-                </div>
-                <div className="flex justify-between text-base font-black border-t border-border pt-2 mt-1">
-                    <span>Valor na Conta</span>
-                    <span className="text-primary-blue-light tabular-nums">{fmt(f.valor_na_conta)}</span>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Componentes auxiliares
-// ──────────────────────────────────────────────────────────────────────────────
-
-function SecaoTFL({ titulo, children }: { titulo: string; children: React.ReactNode }) {
-    return (
-        <div>
-            <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">{titulo}</p>
-            {children}
-        </div>
-    );
-}
-
-function TabelaTFL({ rows, totalLabel, totalQtd, totalValor, corTotal }: {
-    rows: { desc: string; qtd: number; valor: number }[];
-    totalLabel?: string;
-    totalQtd?: number | null;
-    totalValor?: number | null;
-    corTotal?: string;
-}) {
-    return (
-        <table className="w-full text-sm">
-            <thead>
-                <tr className="border-b border-border text-[10px] text-muted">
-                    <th className="text-left pb-1 font-bold">Descrição</th>
-                    <th className="text-right pb-1 font-bold">Qtde</th>
-                    <th className="text-right pb-1 font-bold">Valor</th>
-                </tr>
-            </thead>
-            <tbody>
-                {rows.map((r, i) => (
-                    <tr key={i} className="border-b border-border/40 last:border-0">
-                        <td className="py-1">{r.desc}</td>
-                        <td className="py-1 text-right text-muted tabular-nums">{r.qtd}</td>
-                        <td className="py-1 text-right font-semibold tabular-nums">{fmt(r.valor)}</td>
-                    </tr>
-                ))}
-                {totalLabel && (
-                    <tr className={`font-bold border-t border-border ${corTotal ?? ''}`}>
-                        <td className="pt-2 uppercase">{totalLabel}</td>
-                        <td className="pt-2 text-right tabular-nums">{totalQtd ?? '—'}</td>
-                        <td className={`pt-2 text-right tabular-nums ${corTotal ?? ''}`}>{fmt(totalValor)}</td>
-                    </tr>
-                )}
-            </tbody>
-        </table>
-    );
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Formulários para modal "Adicionais"
-// ──────────────────────────────────────────────────────────────────────────────
-
-function PixExternosFormOperador({
-    sessaoId,
+function OFXUploadPanel({
     lojaId,
-    dataTurno,
-    onSaved,
+    contas,
+    onImportado,
 }: {
-    sessaoId: number;
     lojaId: string;
-    dataTurno: string;
-    onSaved: () => void;
+    contas: ContaBancaria[];
+    onImportado: (dados: OFXDados, arquivoNome: string) => void;
 }) {
+    const [dragging, setDragging] = useState(false);
+    const [processando, setProcessando] = useState(false);
+    const [preview, setPreview] = useState<OFXDados | null>(null);
+    const [arquivoNome, setArquivoNome] = useState('');
+    const [contaSelecionada, setContaSelecionada] = useState(contas[0]?.id ?? '');
+    const fileRef = useRef<HTMLInputElement>(null);
     const { toast } = useToast();
-    const [lista, setLista] = useState<PixExterno[]>([]);
-    const [carregando, setCarregando] = useState(true);
-    const [salvando, setSalvando] = useState(false);
-    const [novoValor, setNovoValor] = useState('');
-    const [novaData, setNovaData] = useState(dataTurno);
-    const [novaDescricao, setNovaDescricao] = useState('');
 
-    useEffect(() => {
-        getPixExternosPorSessao(sessaoId)
-            .then(setLista)
-            .catch(() => toast({ type: 'error', message: 'Erro ao carregar PIX externos.' }))
-            .finally(() => setCarregando(false));
-    }, [sessaoId, toast]);
-
-    async function adicionar() {
-        const valor = parseFloat(novoValor.replace(',', '.'));
-        if (!valor || valor <= 0) {
-            toast({ type: 'warning', message: 'Informe um valor válido.' });
-            return;
-        }
-        if (!novaData) {
-            toast({ type: 'warning', message: 'Informe a data do PIX.' });
-            return;
-        }
-        setSalvando(true);
+    async function processar(file: File) {
+        setProcessando(true);
         try {
-            const pix = await adicionarPixExterno({
-                sessao_id: sessaoId,
+            const text = await file.text();
+            const { parseOFX } = await import('@/lib/ofx-parser');
+            const dados = parseOFX(text);
+            setPreview(dados);
+            setArquivoNome(file.name);
+        } catch (e) {
+            toast({ type: 'error', message: 'Erro ao ler arquivo OFX. Verifique o formato.' });
+            console.error(e);
+        } finally {
+            setProcessando(false);
+        }
+    }
+
+    function onDrop(e: React.DragEvent) {
+        e.preventDefault();
+        setDragging(false);
+        const file = e.dataTransfer.files[0];
+        if (file && (file.name.endsWith('.ofx') || file.name.endsWith('.OFX'))) {
+            processar(file);
+        } else {
+            toast({ type: 'error', message: 'Envie um arquivo .OFX válido.' });
+        }
+    }
+
+    function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+        const file = e.target.files?.[0];
+        if (file) processar(file);
+    }
+
+    async function confirmarImport() {
+        if (!preview || !lojaId) return;
+        setProcessando(true);
+        try {
+            const transacoes = preview.transacoes.map(t => ({
                 loja_id: lojaId,
-                valor,
-                data_pix: novaData,
-                descricao: novaDescricao,
+                conta_id: contaSelecionada || undefined,
+                fitid: t.fitid,
+                tipo: t.tipo,
+                data: t.data,
+                valor: t.valor,
+                memo: t.memo,
+                checknum: t.checknum,
+            }));
+            const { inseridas, duplicadas } = await salvarTransacoesOFX(transacoes, lojaId, arquivoNome);
+            toast({
+                type: 'success',
+                message: `${inseridas} transação(ões) importada(s)${duplicadas > 0 ? `, ${duplicadas} já existia(m)` : ''}.`,
             });
-            setLista(prev => [...prev, pix]);
-            setNovoValor('');
-            setNovaDescricao('');
-            toast({ type: 'success', message: 'PIX externo adicionado.' });
-            onSaved();
-        } catch (e: unknown) {
-            toast({ type: 'error', message: 'Erro ao adicionar PIX externo.' });
+            onImportado(preview, arquivoNome);
+            setPreview(null);
+        } catch (e) {
+            toast({ type: 'error', message: 'Erro ao salvar extrato no banco de dados.' });
             console.error(e);
         } finally {
-            setSalvando(false);
+            setProcessando(false);
         }
     }
 
-    async function remover(id: number) {
-        try {
-            await removerPixExterno(id);
-            setLista(prev => prev.filter(p => p.id !== id));
-            toast({ type: 'success', message: 'PIX externo removido.' });
-            onSaved();
-        } catch (e: unknown) {
-            toast({ type: 'error', message: 'Erro ao remover PIX externo.' });
-            console.error(e);
-        }
-    }
+    if (preview) {
+        const creditos = preview.transacoes.filter(t => t.tipo === 'CREDIT');
+        const debitos = preview.transacoes.filter(t => t.tipo === 'DEBIT');
+        const totalCreditos = creditos.reduce((a, t) => a + t.valor, 0);
+        const totalDebitos = debitos.reduce((a, t) => a + t.valor, 0);
 
-    const totalPix = lista.reduce((a, p) => a + p.valor, 0);
-
-    return (
-        <div className="rounded-xl border border-blue-500/15 bg-blue-500/5 p-4 space-y-3">
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                    <CreditCard size={13} className="text-blue-400" />
-                    <span className="text-xs font-bold text-blue-300">PIX Externos Unitários</span>
-                </div>
-                {lista.length > 0 && (
-                    <span className="text-[10px] font-bold text-blue-400">
-                        Total: {totalPix.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                    </span>
-                )}
-            </div>
-
-            {carregando ? (
-                <div className="flex items-center gap-2 text-xs text-muted py-1">
-                    <Loader2 size={11} className="animate-spin" /> Carregando...
-                </div>
-            ) : lista.length > 0 ? (
-                <div className="space-y-1.5">
-                    {lista.map(p => (
-                        <div key={p.id} className="flex items-center justify-between bg-white/3 rounded-lg px-3 py-2">
-                            <div className="flex items-center gap-3">
-                                <span className="text-[10px] text-muted flex items-center gap-1">
-                                    <CalendarDays size={10} />
-                                    {p.data_pix.split('T')[0].split('-').reverse().join('/')}
-                                </span>
-                                <span className="text-xs font-semibold text-blue-300">
-                                    {p.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                </span>
-                                {p.descricao && <span className="text-[10px] text-muted">{p.descricao}</span>}
-                                {p.conciliado && (
-                                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-success/10 text-success">Conciliado</span>
-                                )}
-                            </div>
-                            <button
-                                onClick={() => remover(p.id)}
-                                className="p-1 hover:text-error transition-colors text-muted"
-                            >
-                                <Trash2 size={11} />
-                            </button>
-                        </div>
-                    ))}
-                </div>
-            ) : (
-                <p className="text-[10px] text-muted">Nenhum PIX externo registrado.</p>
-            )}
-
-            <div className="grid grid-cols-3 gap-2">
-                <div>
-                    <label className="block text-[10px] text-muted mb-1">Valor (R$)</label>
-                    <input
-                        type="number"
-                        step="0.01"
-                        placeholder="0,00"
-                        className="input w-full text-xs h-8"
-                        value={novoValor}
-                        onChange={e => setNovoValor(e.target.value)}
-                    />
-                </div>
-                <div>
-                    <label className="block text-[10px] text-muted mb-1">Data</label>
-                    <input
-                        type="date"
-                        className="input w-full text-xs h-8"
-                        value={novaData}
-                        onChange={e => setNovaData(e.target.value)}
-                    />
-                </div>
-                <div>
-                    <label className="block text-[10px] text-muted mb-1">Descrição</label>
-                    <input
-                        type="text"
-                        placeholder="Opcional"
-                        className="input w-full text-xs h-8"
-                        value={novaDescricao}
-                        onChange={e => setNovaDescricao(e.target.value)}
-                    />
-                </div>
-            </div>
-            <button
-                className="btn btn-ghost text-xs h-8 border border-blue-500/20 text-blue-300 hover:bg-blue-500/10 w-full"
-                onClick={adicionar}
-                disabled={salvando}
-            >
-                {salvando ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
-                Adicionar PIX Externo
-            </button>
-        </div>
-    );
-}
-
-function DepositoCofreForm({
-    sessaoId,
-    lojaId,
-    valorAtual,
-    onSaved,
-}: {
-    sessaoId: number;
-    lojaId: string;
-    valorAtual: number;
-    onSaved: () => void;
-}) {
-    const supabase = createBrowserSupabaseClient();
-    const { toast } = useToast();
-    const [valor, setValor] = useState(valorAtual > 0 ? String(valorAtual) : '');
-    const [salvando, setSalvando] = useState(false);
-    const [salvo, setSalvo] = useState(valorAtual > 0);
-
-    async function salvar() {
-        const v = parseFloat(valor.replace(',', '.'));
-        if (!v || v <= 0) {
-            toast({ type: 'warning', message: 'Informe um valor válido para o depósito.' });
-            return;
-        }
-        setSalvando(true);
-        try {
-            const { error } = await supabase
-                .from('caixa_sessoes')
-                .update({ valor_enviado_cofre: v })
-                .eq('id', sessaoId);
-            if (error) throw error;
-            setSalvo(true);
-            toast({ type: 'success', message: 'Depósito no cofre registrado.' });
-            onSaved();
-        } catch (e: unknown) {
-            toast({ type: 'error', message: 'Erro ao salvar depósito no cofre.' });
-            console.error(e);
-        } finally {
-            setSalvando(false);
-        }
-    }
-
-    return (
-        <div className="rounded-xl border border-warning/15 bg-warning/5 p-4 space-y-3">
-            <div className="flex items-center gap-2">
-                <Landmark size={13} className="text-warning" />
-                <span className="text-xs font-bold text-yellow-300">Depósito no Cofre</span>
-                {salvo && (
-                    <span className="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded bg-success/10 text-success">
-                        Registrado
-                    </span>
-                )}
-            </div>
-            <p className="text-[10px] text-muted">
-                Valor físico depositado no cofre ao final do turno. Aparecerá na conciliação bancária.
-            </p>
-            <div className="flex gap-2">
-                <input
-                    type="number"
-                    step="0.01"
-                    placeholder="0,00"
-                    className="input flex-1 text-xs h-8"
-                    value={valor}
-                    onChange={e => { setValor(e.target.value); setSalvo(false); }}
-                />
-                <button
-                    className="btn btn-ghost text-xs h-8 border border-warning/20 text-yellow-300 hover:bg-warning/10 px-4"
-                    onClick={salvar}
-                    disabled={salvando}
-                >
-                    {salvando ? <Loader2 size={11} className="animate-spin" /> : 'Salvar'}
-                </button>
-            </div>
-        </div>
-    );
-}
-
-function TFLAdicionaisForm({
-    tflId,
-    lojaId,
-    onSaved,
-}: {
-    tflId: string;
-    lojaId: string;
-    onSaved: () => void;
-}) {
-    const { toast } = useToast();
-    const [pixList, setPixList] = useState<PixExternoTFL[]>([]);
-    const [carregandoPix, setCarregandoPix] = useState(true);
-    const [novoPixValor, setNovoPixValor] = useState('');
-    const [novoPixData, setNovoPixData] = useState(new Date().toISOString().split('T')[0]);
-    const [novoPixDesc, setNovoPixDesc] = useState('');
-    const [salvandoPix, setSalvandoPix] = useState(false);
-    const [sangriaValor, setSangriaValor] = useState<string>('');
-    const [carregandoSangria, setCarregandoSangria] = useState(true);
-    const [salvandoSangria, setSalvandoSangria] = useState(false);
-
-    useEffect(() => {
-        const carregar = async () => {
-            try {
-                const pix = await getPixExternosPorTFL(tflId);
-                setPixList(pix);
-                const sangria = await getSangriaTFL(tflId);
-                setSangriaValor(sangria > 0 ? sangria.toString() : '');
-            } catch (err) {
-                console.error(err);
-                toast({ type: 'error', message: 'Erro ao carregar dados do TFL.' });
-            } finally {
-                setCarregandoPix(false);
-                setCarregandoSangria(false);
-            }
-        };
-        carregar();
-    }, [tflId, toast]);
-
-    async function adicionarPix() {
-        const valor = parseFloat(novoPixValor.replace(',', '.'));
-        if (!valor || valor <= 0) {
-            toast({ type: 'warning', message: 'Informe um valor válido para o PIX.' });
-            return;
-        }
-        if (!novoPixData) {
-            toast({ type: 'warning', message: 'Informe a data do PIX.' });
-            return;
-        }
-        setSalvandoPix(true);
-        try {
-            const novo = await adicionarPixExternoTFL(tflId, novoPixData, valor, novoPixDesc);
-            setPixList(prev => [novo, ...prev]);
-            setNovoPixValor('');
-            setNovoPixDesc('');
-            toast({ type: 'success', message: 'PIX externo adicionado ao TFL.' });
-            onSaved();
-        } catch (err) {
-            toast({ type: 'error', message: 'Erro ao adicionar PIX.' });
-            console.error(err);
-        } finally {
-            setSalvandoPix(false);
-        }
-    }
-
-    async function removerPix(id: number) {
-        try {
-            await removerPixExternoTFL(id);
-            setPixList(prev => prev.filter(p => p.id !== id));
-            toast({ type: 'success', message: 'PIX removido.' });
-            onSaved();
-        } catch (err) {
-            toast({ type: 'error', message: 'Erro ao remover PIX.' });
-            console.error(err);
-        }
-    }
-
-    async function salvarSangria() {
-        const valor = parseFloat(sangriaValor.replace(',', '.'));
-        if (isNaN(valor)) {
-            toast({ type: 'warning', message: 'Informe um valor numérico para a sangria (ou deixe vazio para zerar).' });
-            return;
-        }
-        setSalvandoSangria(true);
-        try {
-            await setSangriaTFL(tflId, valor || 0);
-            toast({ type: 'success', message: 'Sangria do TFL atualizada.' });
-            onSaved();
-        } catch (err) {
-            toast({ type: 'error', message: 'Erro ao salvar sangria.' });
-            console.error(err);
-        } finally {
-            setSalvandoSangria(false);
-        }
-    }
-
-    const totalPix = pixList.reduce((a, p) => a + p.valor, 0);
-
-    return (
-        <div className="space-y-6">
-            <div className="rounded-xl border border-blue-500/15 bg-blue-500/5 p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                        <CreditCard size={13} className="text-blue-400" />
-                        <span className="text-xs font-bold text-blue-300">PIX Externos Unitários (TFL)</span>
+        return (
+            <div className="card p-5 space-y-5">
+                <div className="flex items-start justify-between">
+                    <div>
+                        <h3 className="text-sm font-bold">Extrato OFX carregado</h3>
+                        <p className="text-xs text-muted mt-0.5">{arquivoNome}</p>
                     </div>
-                    {pixList.length > 0 && (
-                        <span className="text-[10px] font-bold text-blue-400">
-                            Total: {fmt(totalPix)}
-                        </span>
-                    )}
+                    <button className="btn btn-ghost p-1.5" onClick={() => setPreview(null)}>
+                        <X size={14} />
+                    </button>
                 </div>
 
-                {carregandoPix ? (
-                    <div className="flex items-center gap-2 text-xs text-muted py-1">
-                        <Loader2 size={11} className="animate-spin" /> Carregando...
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                        <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Banco</p>
+                        <p className="text-sm font-bold">{preview.bankid || '—'}</p>
                     </div>
-                ) : pixList.length > 0 ? (
-                    <div className="space-y-1.5 max-h-60 overflow-y-auto">
-                        {pixList.map(p => (
-                            <div key={p.id} className="flex items-center justify-between bg-white/3 rounded-lg px-3 py-2">
-                                <div className="flex items-center gap-3">
-                                    <span className="text-[10px] text-muted flex items-center gap-1">
-                                        <CalendarDays size={10} />
-                                        {p.data.split('T')[0].split('-').reverse().join('/')}
-                                    </span>
-                                    <span className="text-xs font-semibold text-blue-300">{fmt(p.valor)}</span>
-                                    {p.descricao && <span className="text-[10px] text-muted">{p.descricao}</span>}
-                                    {p.conciliado && (
-                                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-success/10 text-success">Conciliado</span>
-                                    )}
-                                </div>
-                                <button onClick={() => removerPix(p.id)} className="p-1 hover:text-error text-muted">
-                                    <Trash2 size={11} />
-                                </button>
-                            </div>
-                        ))}
+                    <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                        <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Período</p>
+                        <p className="text-sm font-bold">{fmtData(preview.dtstart)} – {fmtData(preview.dtend)}</p>
                     </div>
-                ) : (
-                    <p className="text-[10px] text-muted">Nenhum PIX externo registrado para este TFL.</p>
+                    <div className="rounded-xl border border-success/20 bg-success/5 p-3">
+                        <p className="text-[10px] text-success uppercase tracking-wider mb-1">{creditos.length} Créditos</p>
+                        <p className="text-sm font-bold text-success">{fmt(totalCreditos)}</p>
+                    </div>
+                    <div className="rounded-xl border border-error/20 bg-error/5 p-3">
+                        <p className="text-[10px] text-error uppercase tracking-wider mb-1">{debitos.length} Débitos</p>
+                        <p className="text-sm font-bold text-error">{fmt(totalDebitos)}</p>
+                    </div>
+                </div>
+
+                <div className="rounded-xl border border-white/5 overflow-hidden max-h-64 overflow-y-auto">
+                    <table className="w-full text-xs">
+                        <thead className="sticky top-0 bg-[var(--card-bg)]">
+                            <tr className="border-b border-white/5">
+                                <th className="text-left px-3 py-2 text-[10px] font-bold text-muted uppercase">Data</th>
+                                <th className="text-left px-3 py-2 text-[10px] font-bold text-muted uppercase">Descrição</th>
+                                <th className="text-right px-3 py-2 text-[10px] font-bold text-muted uppercase">Valor</th>
+                                <th className="text-center px-3 py-2 text-[10px] font-bold text-muted uppercase">Tipo</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {preview.transacoes.map((t, i) => (
+                                <tr key={i} className="border-b border-white/3 hover:bg-white/2">
+                                    <td className="px-3 py-2">{fmtData(t.data)}</td>
+                                    <td className="px-3 py-2 text-muted max-w-[200px] truncate">{t.memo || t.fitid}</td>
+                                    <td className={`px-3 py-2 text-right font-mono font-semibold ${t.tipo === 'CREDIT' ? 'text-success' : 'text-error'}`}>
+                                        {t.tipo === 'CREDIT' ? '+' : '-'}{fmt(t.valor)}
+                                    </td>
+                                    <td className="px-3 py-2 text-center">
+                                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${t.tipo === 'CREDIT' ? 'bg-success/10 text-success' : 'bg-error/10 text-error'}`}>
+                                            {t.tipo === 'CREDIT' ? 'C' : 'D'}
+                                        </span>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+
+                {contas.length > 0 && (
+                    <div>
+                        <label className="block text-xs font-semibold text-muted mb-1.5">Vincular à conta bancária</label>
+                        <select
+                            className="input w-full text-sm"
+                            value={contaSelecionada}
+                            onChange={e => setContaSelecionada(e.target.value)}
+                        >
+                            <option value="">Sem vínculo</option>
+                            {contas.map(c => (
+                                <option key={c.id} value={c.id}>{c.nome}{c.agencia ? ` — Ag. ${c.agencia}` : ''}</option>
+                            ))}
+                        </select>
+                    </div>
                 )}
 
-                <div className="grid grid-cols-3 gap-2">
-                    <div>
-                        <label className="block text-[10px] text-muted mb-1">Valor (R$)</label>
-                        <input type="number" step="0.01" placeholder="0,00" className="input w-full text-xs h-8" value={novoPixValor} onChange={e => setNovoPixValor(e.target.value)} />
-                    </div>
-                    <div>
-                        <label className="block text-[10px] text-muted mb-1">Data</label>
-                        <input type="date" className="input w-full text-xs h-8" value={novoPixData} onChange={e => setNovoPixData(e.target.value)} />
-                    </div>
-                    <div>
-                        <label className="block text-[10px] text-muted mb-1">Descrição</label>
-                        <input type="text" placeholder="Opcional" className="input w-full text-xs h-8" value={novoPixDesc} onChange={e => setNovoPixDesc(e.target.value)} />
-                    </div>
-                </div>
-                <button className="btn btn-ghost text-xs h-8 border border-blue-500/20 text-blue-300 hover:bg-blue-500/10 w-full" onClick={adicionarPix} disabled={salvandoPix}>
-                    {salvandoPix ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />} Adicionar PIX Externo
-                </button>
-            </div>
-
-            <div className="rounded-xl border border-warning/15 bg-warning/5 p-4 space-y-3">
-                <div className="flex items-center gap-2">
-                    <ArrowUpRight size={13} className="text-warning" />
-                    <span className="text-xs font-bold text-yellow-300">Sangria (retirada de caixa)</span>
-                </div>
-                <p className="text-[10px] text-muted">Valor retirado do caixa físico do terminal (não aparece automaticamente no TFL).</p>
-                <div className="flex gap-2">
-                    <input type="number" step="0.01" placeholder="0,00" className="input flex-1 text-xs h-8" value={sangriaValor} onChange={e => setSangriaValor(e.target.value)} />
-                    <button className="btn btn-ghost text-xs h-8 border border-warning/20 text-yellow-300 hover:bg-warning/10 px-4" onClick={salvarSangria} disabled={salvandoSangria}>
-                        {salvandoSangria ? <Loader2 size={11} className="animate-spin" /> : 'Salvar Sangria'}
+                <div className="flex gap-3">
+                    <button className="btn btn-ghost flex-1 text-xs" onClick={() => setPreview(null)}>
+                        Cancelar
+                    </button>
+                    <button
+                        className="btn btn-primary flex-1 text-xs"
+                        onClick={confirmarImport}
+                        disabled={processando}
+                    >
+                        {processando ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                        Importar {preview.transacoes.length} transações
                     </button>
                 </div>
             </div>
+        );
+    }
+
+    return (
+        <div
+            className={`card p-6 border-2 border-dashed transition-colors cursor-pointer ${dragging ? 'border-primary/50 bg-primary/5' : 'border-white/10 hover:border-white/20'}`}
+            onDragOver={e => { e.preventDefault(); setDragging(true); }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={onDrop}
+            onClick={() => fileRef.current?.click()}
+        >
+            <input ref={fileRef} type="file" accept=".ofx,.OFX" className="hidden" onChange={onFileChange} />
+            <div className="flex flex-col items-center text-center gap-3">
+                {processando
+                    ? <Loader2 size={28} className="animate-spin text-muted" />
+                    : <Upload size={28} className="text-muted" />
+                }
+                <div>
+                    <p className="text-sm font-semibold">
+                        {processando ? 'Processando arquivo...' : 'Arraste o arquivo OFX aqui'}
+                    </p>
+                    <p className="text-xs text-muted mt-1">ou clique para selecionar — formato .OFX do banco</p>
+                </div>
+            </div>
         </div>
     );
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Modal de auditoria
+// COMPONENTE: TabelaOFX
 // ──────────────────────────────────────────────────────────────────────────────
 
-interface ModalAuditoriaProps {
-    fechamento: Fechamento;
-    onClose: () => void;
-    onAprovar: (observacoes: string) => void;
-    onRejeitar: (dados: { justificativa: string }) => void;
-}
+function TabelaOFX({ transacoes }: { transacoes: OFXTransacaoSalva[] }) {
+    const [filtro, setFiltro] = useState<'todos' | 'CREDIT' | 'DEBIT' | 'sem_match'>('todos');
 
-function ModalAuditoria({ fechamento, onClose, onAprovar, onRejeitar }: ModalAuditoriaProps) {
-    const [modoRejeitar, setModoRejeitar] = useState(false);
-    const [justificativa, setJustificativa] = useState('');
-    const [observacoes, setObservacoes] = useState('');
-    const isTFL = fechamento.fonte === 'fechamento_tfl';
+    const filtradas = transacoes.filter(t => {
+        if (filtro === 'CREDIT') return t.tipo === 'CREDIT';
+        if (filtro === 'DEBIT') return t.tipo === 'DEBIT';
+        if (filtro === 'sem_match') return !t.conciliado;
+        return true;
+    });
+
+    if (transacoes.length === 0) return null;
 
     return (
-        <>
-            <div className="fixed inset-0 bg-black/80 z-[9998]" onClick={onClose} />
-            <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-2xl max-h-[90vh] overflow-y-auto bg-bg-card border border-border rounded-2xl z-[9999] p-6">
-                <div className="flex justify-between items-center mb-5">
-                    <div>
-                        <h2 className="text-xl font-bold">Auditoria de Fechamento</h2>
-                        <div className="flex items-center gap-2 mt-1">
-                            {isTFL
-                                ? <span className="inline-flex items-center gap-1 text-[10px] font-bold text-primary bg-primary/10 border border-primary/20 rounded px-2 py-0.5"><FileText size={10} /> RELATÓRIO TFL</span>
-                                : <span className="text-[10px] font-bold text-blue-400 bg-blue-500/10 border border-blue-500/20 rounded px-2 py-0.5">OPERADOR</span>
-                            }
-                            <span className="text-xs text-muted">
-                                Terminal {fechamento.terminal_id} • {formatarDataLocal(fechamento.data_turno)}
-                            </span>
-                        </div>
-                    </div>
-                    <button onClick={onClose} className="btn btn-ghost btn-sm"><X size={18} /></button>
+        <div className="card overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
+                <div className="flex items-center gap-2">
+                    <FileText size={14} className="text-muted" />
+                    <span className="text-xs font-bold">Transações Importadas ({transacoes.length})</span>
                 </div>
-
-                <div className="mb-6">
-                    {isTFL && fechamento.dados_extraidos
-                        ? <DetalhesTFL dados={fechamento.dados_extraidos} tflId={fechamento.id} refreshPixTrigger={0} />
-                        : <DetalhesOperador f={fechamento} refreshPixTrigger={0} />
-                    }
+                <div className="flex gap-1">
+                    {(['todos', 'CREDIT', 'DEBIT', 'sem_match'] as const).map(f => (
+                        <button
+                            key={f}
+                            onClick={() => setFiltro(f)}
+                            className={`text-[10px] px-2 py-1 rounded font-bold transition-colors ${filtro === f ? 'bg-primary/20 text-primary' : 'text-muted hover:text-foreground'}`}
+                        >
+                            {f === 'todos' ? 'Todos' : f === 'CREDIT' ? 'Créditos' : f === 'DEBIT' ? 'Débitos' : 'Sem Match'}
+                        </button>
+                    ))}
                 </div>
-
-                {fechamento.justificativa && (
-                    <div className="mb-5 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
-                        <span className="text-[9px] text-yellow-500 font-bold uppercase">
-                            {isTFL ? 'Observações' : 'Justificativa do Operador'}
-                        </span>
-                        <p className="text-xs text-yellow-600 dark:text-yellow-200 mt-1 italic">"{fechamento.justificativa}"</p>
-                    </div>
-                )}
-
-                {!modoRejeitar ? (
-                    <div className="flex gap-3 justify-end border-t border-border pt-4">
-                        <button className="btn btn-ghost text-sm" onClick={onClose}>Cancelar</button>
-                        <button className="btn bg-danger/10 text-danger hover:bg-danger/20 text-sm" onClick={() => setModoRejeitar(true)}>
-                            Rejeitar
-                        </button>
-                        <button className="btn btn-success text-sm" onClick={() => onAprovar(observacoes)}>
-                            <ShieldCheck size={14} /> Aprovar Fechamento
-                        </button>
-                    </div>
-                ) : (
-                    <div className="space-y-3 border-t border-border pt-4">
-                        <div className="form-group">
-                            <label className="text-xs font-bold">Justificativa da rejeição</label>
-                            <textarea
-                                className="input w-full text-sm"
-                                rows={3}
-                                value={justificativa}
-                                onChange={(e) => setJustificativa(e.target.value)}
-                                placeholder="Descreva o motivo da rejeição"
-                            />
-                        </div>
-                        <div className="flex gap-3 justify-end">
-                            <button className="btn btn-ghost text-sm" onClick={() => setModoRejeitar(false)}>Voltar</button>
-                            <button
-                                className="btn btn-danger text-sm"
-                                disabled={!justificativa.trim()}
-                                onClick={() => onRejeitar({ justificativa })}
-                            >
-                                Confirmar Rejeição
-                            </button>
-                        </div>
-                    </div>
-                )}
             </div>
-        </>
+            <div className="overflow-y-auto max-h-80">
+                <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-[var(--card-bg)]">
+                        <tr className="border-b border-white/5">
+                            <th className="text-left px-4 py-2 text-[10px] font-bold text-muted uppercase">Data</th>
+                            <th className="text-left px-4 py-2 text-[10px] font-bold text-muted uppercase">Descrição</th>
+                            <th className="text-right px-4 py-2 text-[10px] font-bold text-muted uppercase">Valor</th>
+                            <th className="text-center px-4 py-2 text-[10px] font-bold text-muted uppercase">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {filtradas.map(t => (
+                            <tr key={t.id} className="border-b border-white/3 hover:bg-white/2">
+                                <td className="px-4 py-2">{fmtData(t.data)}</td>
+                                <td className="px-4 py-2 text-muted max-w-[260px] truncate">{t.memo || t.fitid}</td>
+                                <td className={`px-4 py-2 text-right font-mono font-semibold ${t.tipo === 'CREDIT' ? 'text-success' : 'text-error'}`}>
+                                    {t.tipo === 'CREDIT' ? '+' : '-'}{fmt(t.valor)}
+                                </td>
+                                <td className="px-4 py-2 text-center">
+                                    {t.conciliado ? (
+                                        <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded bg-success/10 text-success">
+                                            <Check size={9} /> OK
+                                        </span>
+                                    ) : (
+                                        <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded bg-muted/10 text-muted">
+                                            <Clock size={9} /> Pendente
+                                        </span>
+                                    )}
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
     );
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Componente Principal
+// COMPONENTE: PainelConciliacaoIA (mantido igual)
 // ──────────────────────────────────────────────────────────────────────────────
 
-export function AuditoriaFechamentos() {
-    const supabase = createBrowserSupabaseClient();
+const NIVEL_COR = {
+    info: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
+    aviso: 'text-warning bg-warning/10 border-warning/20',
+    critico: 'text-error bg-error/10 border-error/20',
+} as const;
+
+const TIPO_COR: Record<string, string> = {
+    pix: 'text-success',
+    deposito: 'text-warning',
+    estorno: 'text-error',
+    debito: 'text-error',
+    outros: 'text-muted',
+};
+
+const STATUS_COR: Record<string, string> = {
+    conciliado: 'bg-success/10 text-success border-success/20',
+    pendente: 'bg-muted/10 text-muted border-muted/20',
+    divergente: 'bg-warning/10 text-warning border-warning/20',
+    suspeito: 'bg-error/10 text-error border-error/20',
+};
+
+function PainelConciliacaoIA({
+    resultado,
+    onFechar,
+}: {
+    resultado: ConciliacaoIAResultado;
+    onFechar: () => void;
+}) {
+    const [showItens, setShowItens] = useState(false);
+
+    const StatusIcon = resultado.status_geral === 'aprovado'
+        ? ShieldCheck
+        : resultado.status_geral === 'aprovado_com_ressalvas'
+            ? ShieldAlert
+            : ShieldX;
+
+    const statusColor = resultado.status_geral === 'aprovado'
+        ? 'text-success border-success/30 bg-success/5'
+        : resultado.status_geral === 'aprovado_com_ressalvas'
+            ? 'text-warning border-warning/30 bg-warning/5'
+            : 'text-error border-error/30 bg-error/5';
+
+    const risco = resultado.risco || 'medio';
+    const riscoColor = risco === 'baixo'
+        ? 'bg-success/10 text-success'
+        : risco === 'medio'
+            ? 'bg-warning/10 text-warning'
+            : 'bg-error/10 text-error';
+
+    const resumo = resultado.resumo_financeiro || {
+        total_creditos_ofx: 0,
+        total_debitos_ofx: 0,
+        total_pix_externos: 0,
+        total_depositos_cofre: 0,
+        total_estornos: 0,
+        saldo_tfl_periodo: 0,
+        diferenca_apurada: 0,
+    };
+    const criticos = (resultado.alertas || []).filter(a => a.nivel === 'critico');
+    const avisos = (resultado.alertas || []).filter(a => a.nivel === 'aviso');
+    const infos = (resultado.alertas || []).filter(a => a.nivel === 'info');
+
+    return (
+        <div className="card p-5 space-y-5">
+            <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
+                        <Sparkles size={16} className="text-primary" />
+                    </div>
+                    <div>
+                        <h3 className="text-sm font-bold">Conciliação por IA — Auditor Fiscal</h3>
+                        <p className="text-[10px] text-muted mt-0.5">Análise gerada pelo agente Claude</p>
+                    </div>
+                </div>
+                <div className="flex items-center gap-2">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${riscoColor}`}>
+                        RISCO {risco.toUpperCase()}
+                    </span>
+                    <button className="btn btn-ghost p-1.5" onClick={onFechar}><X size={14} /></button>
+                </div>
+            </div>
+
+            <div className={`rounded-xl border p-4 ${statusColor}`}>
+                <div className="flex items-center gap-2 mb-2">
+                    <StatusIcon size={16} />
+                    <span className="text-xs font-bold uppercase tracking-wider">
+                        {resultado.status_geral === 'aprovado' ? 'Aprovado'
+                            : resultado.status_geral === 'aprovado_com_ressalvas' ? 'Aprovado com Ressalvas'
+                                : 'Rejeitado'}
+                    </span>
+                </div>
+                <p className="text-xs leading-relaxed">{resultado.parecer_geral || 'Sem parecer disponível.'}</p>
+            </div>
+
+            <div>
+                <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">Resumo Financeiro</p>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="rounded-xl border border-success/20 bg-success/5 p-3">
+                        <p className="text-[10px] text-success uppercase tracking-wider mb-1">Créditos OFX</p>
+                        <p className="text-sm font-bold text-success">{fmt(resumo.total_creditos_ofx)}</p>
+                    </div>
+                    <div className="rounded-xl border border-error/20 bg-error/5 p-3">
+                        <p className="text-[10px] text-error uppercase tracking-wider mb-1">Débitos OFX</p>
+                        <p className="text-sm font-bold text-error">{fmt(resumo.total_debitos_ofx)}</p>
+                    </div>
+                    <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-3">
+                        <p className="text-[10px] text-blue-400 uppercase tracking-wider mb-1">PIX Externos</p>
+                        <p className="text-sm font-bold text-blue-400">{fmt(resumo.total_pix_externos)}</p>
+                    </div>
+                    <div className="rounded-xl border border-warning/20 bg-warning/5 p-3">
+                        <p className="text-[10px] text-warning uppercase tracking-wider mb-1">Depósitos Cofre</p>
+                        <p className="text-sm font-bold text-warning">{fmt(resumo.total_depositos_cofre)}</p>
+                    </div>
+                    <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                        <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Estornos</p>
+                        <p className="text-sm font-bold">{fmt(resumo.total_estornos)}</p>
+                    </div>
+                    <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                        <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Saldo TFL</p>
+                        <p className="text-sm font-bold">{fmt(resumo.saldo_tfl_periodo)}</p>
+                    </div>
+                    <div className={`rounded-xl border p-3 col-span-2 ${Math.abs(resumo.diferenca_apurada) > 0.02 ? 'border-error/30 bg-error/5' : 'border-success/20 bg-success/5'}`}>
+                        <p className={`text-[10px] uppercase tracking-wider mb-1 ${Math.abs(resumo.diferenca_apurada) > 0.02 ? 'text-error' : 'text-success'}`}>
+                            Diferença Apurada
+                        </p>
+                        <p className={`text-sm font-bold ${Math.abs(resumo.diferenca_apurada) > 0.02 ? 'text-error' : 'text-success'}`}>
+                            {fmt(resumo.diferenca_apurada)}
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            {resultado.alertas && resultado.alertas.length > 0 && (
+                <div className="space-y-2">
+                    <p className="text-[10px] font-bold text-muted uppercase tracking-wider">Alertas</p>
+                    {[...criticos, ...avisos, ...infos].map((alerta, i) => (
+                        <div key={i} className={`flex items-start gap-2 rounded-lg border px-3 py-2 ${NIVEL_COR[alerta.nivel]}`}>
+                            {alerta.nivel === 'critico' ? <ShieldX size={12} className="mt-0.5 shrink-0" />
+                                : alerta.nivel === 'aviso' ? <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                                    : <Info size={12} className="mt-0.5 shrink-0" />}
+                            <p className="text-xs">{alerta.mensagem}</p>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {resultado.itens_conciliados && resultado.itens_conciliados.length > 0 && (
+                <div>
+                    <button
+                        className="flex items-center gap-2 text-[10px] font-bold text-muted uppercase tracking-wider hover:text-foreground transition-colors"
+                        onClick={() => setShowItens(v => !v)}
+                    >
+                        <ChevronDown size={12} className={`transition-transform ${showItens ? 'rotate-180' : ''}`} />
+                        Itens Conciliados ({resultado.itens_conciliados.length})
+                    </button>
+                    {showItens && (
+                        <div className="mt-3 rounded-xl border border-white/5 overflow-hidden">
+                            <div className="overflow-y-auto max-h-72">
+                                <table className="w-full text-xs">
+                                    <thead className="sticky top-0 bg-[var(--card-bg)]">
+                                        <tr className="border-b border-white/5">
+                                            <th className="text-left px-3 py-2 text-[10px] font-bold text-muted uppercase">Data</th>
+                                            <th className="text-left px-3 py-2 text-[10px] font-bold text-muted uppercase">Tipo</th>
+                                            <th className="text-left px-3 py-2 text-[10px] font-bold text-muted uppercase">Descrição</th>
+                                            <th className="text-right px-3 py-2 text-[10px] font-bold text-muted uppercase">Valor</th>
+                                            <th className="text-center px-3 py-2 text-[10px] font-bold text-muted uppercase">Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {resultado.itens_conciliados.map((item, i) => (
+                                            <tr key={i} className="border-b border-white/3 hover:bg-white/2">
+                                                <td className="px-3 py-2">{fmtData(item.data)}</td>
+                                                <td className={`px-3 py-2 font-semibold capitalize ${TIPO_COR[item.tipo] ?? 'text-muted'}`}>{item.tipo}</td>
+                                                <td className="px-3 py-2 text-muted max-w-[200px] truncate" title={item.observacao ?? item.descricao_ofx}>
+                                                    {item.descricao_ofx}
+                                                    {item.observacao && (
+                                                        <span className="block text-[9px] text-warning truncate">{item.observacao}</span>
+                                                    )}
+                                                </td>
+                                                <td className={`px-3 py-2 text-right font-mono font-semibold ${TIPO_COR[item.tipo] ?? ''}`}>
+                                                    {fmt(item.valor)}
+                                                </td>
+                                                <td className="px-3 py-2 text-center">
+                                                    <span className={`inline-block text-[9px] font-bold px-1.5 py-0.5 rounded border ${STATUS_COR[item.status]}`}>
+                                                        {item.status === 'conciliado' ? 'OK'
+                                                            : item.status === 'pendente' ? 'Pend.'
+                                                            : item.status === 'divergente' ? 'Diverg.'
+                                                            : 'Suspeito'}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {resultado.recomendacoes && resultado.recomendacoes.length > 0 && (
+                <div className="space-y-1">
+                    <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">Recomendações</p>
+                    {resultado.recomendacoes.map((rec, i) => (
+                        <div key={i} className="flex items-start gap-2 text-xs text-muted">
+                            <span className="text-primary mt-0.5">•</span>
+                            <span>{rec}</span>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            <div className="rounded-xl border border-white/5 bg-white/2 px-4 py-3">
+                <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Conclusão do Auditor</p>
+                <p className="text-xs font-semibold">{resultado.conclusao || 'Conciliação finalizada.'}</p>
+            </div>
+        </div>
+    );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// COMPONENTE: TabelaFechamentos (COM DETALHES EXPANDIDOS)
+// ──────────────────────────────────────────────────────────────────────────────
+
+function TabelaFechamentos({
+    fechamentos,
+    selectedIds = [],
+    onToggleSelect,
+    onSelectAll,
+}: {
+    fechamentos: FechamentoPendente[];
+    selectedIds?: string[];
+    onToggleSelect?: (uid: string) => void;
+    onSelectAll?: (selected: boolean) => void;
+}) {
+    const [aberto, setAberto] = useState<string | null>(null);
+    const [detalhes, setDetalhes] = useState<Record<string, any>>({});
+
+    // Carrega detalhes sob demanda quando um fechamento é expandido
+    useEffect(() => {
+        if (!aberto) return;
+        if (detalhes[aberto]) return;
+        const fech = fechamentos.find(f => f.uid === aberto);
+        if (!fech) return;
+        const carregarDetalhes = async () => {
+            if (fech.fonte === 'caixa_sessoes') {
+                const pix = await getPixExternosSessao(fech.id);
+                const deposito = await getDepositoCofre(fech.id);
+                setDetalhes(prev => ({ ...prev, [aberto]: { pix, deposito } }));
+            } else {
+                const pix = await getPixExternosTFL(fech.id);
+                const sangria = await getSangriaTFL(fech.id);
+                setDetalhes(prev => ({ ...prev, [aberto]: { pix, sangria } }));
+            }
+        };
+        carregarDetalhes();
+    }, [aberto, fechamentos, detalhes]);
+
+    const allSelected = fechamentos.length > 0 && fechamentos.every(f => selectedIds.includes(f.uid));
+    const someSelected = selectedIds.length > 0 && !allSelected;
+
+    if (fechamentos.length === 0) {
+        return (
+            <div className="card p-12 text-center">
+                <CheckCircle2 size={32} className="mx-auto mb-3 text-success opacity-50" />
+                <p className="text-sm font-semibold">Nenhum fechamento pendente de auditoria</p>
+                <p className="text-xs text-muted mt-1">Todos os fechamentos foram auditados.</p>
+            </div>
+        );
+    }
+
+    const totalEntradas = fechamentos.reduce((a, f) => a + (f.resumo_total_entradas ?? 0), 0);
+    const totalCofre = fechamentos.reduce((a, f) => a + (f.valor_enviado_cofre ?? 0), 0);
+    const totalPix = fechamentos.reduce((a, f) => a + (f.pix_externo_informado ?? 0), 0);
+
+    return (
+        <div className="card overflow-hidden">
+            <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                    {onSelectAll && (
+                        <label className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                className="w-3.5 h-3.5 rounded border-white/20 bg-white/5 accent-primary"
+                                checked={allSelected}
+                                ref={input => { if (input) input.indeterminate = someSelected; }}
+                                onChange={(e) => onSelectAll(e.target.checked)}
+                            />
+                            <span className="text-[10px] text-muted">Todos</span>
+                        </label>
+                    )}
+                    <div className="flex items-center gap-2">
+                        <Search size={13} className="text-muted" />
+                        <span className="text-xs font-bold">Fechamentos Pendentes de Auditoria ({fechamentos.length})</span>
+                    </div>
+                </div>
+                <div className="flex gap-4 text-[10px] text-muted">
+                    <span>PIX Ext.: <span className="font-bold text-foreground">{fmt(totalPix)}</span></span>
+                    <span>Cofre: <span className="font-bold text-foreground">{fmt(totalCofre)}</span></span>
+                    <span>Total: <span className="font-bold text-foreground">{fmt(totalEntradas)}</span></span>
+                </div>
+            </div>
+            <table className="w-full text-xs">
+                <thead>
+                    <tr className="border-b border-white/5">
+                        {onToggleSelect && <th className="w-8 px-2 py-3"></th>}
+                        <th className="text-left px-4 py-3 text-[10px] font-bold text-muted uppercase">Tipo</th>
+                        <th className="text-left px-4 py-3 text-[10px] font-bold text-muted uppercase">Data / Terminal</th>
+                        <th className="text-left px-4 py-3 text-[10px] font-bold text-muted uppercase">Operador / Arquivo</th>
+                        <th className="text-right px-4 py-3 text-[10px] font-bold text-muted uppercase">PIX Externo</th>
+                        <th className="text-right px-4 py-3 text-[10px] font-bold text-muted uppercase">Depósito Cofre</th>
+                        <th className="text-right px-4 py-3 text-[10px] font-bold text-muted uppercase">Total / Saldo</th>
+                        <th className="px-4 py-3"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {fechamentos.map((f) => {
+                        const isTFL = f.fonte === 'fechamento_tfl';
+                        const isOpen = aberto === f.uid;
+                        const valorPrincipal = isTFL ? f.saldo_final : f.resumo_total_entradas;
+                        const isSelected = selectedIds.includes(f.uid);
+                        const detalhe = detalhes[f.uid];
+                        return (
+                            <React.Fragment key={f.uid}>
+                                <tr
+                                    className="border-b border-white/3 hover:bg-white/2 cursor-pointer transition-colors"
+                                    onClick={() => setAberto(isOpen ? null : f.uid)}
+                                >
+                                    {onToggleSelect && (
+                                        <td className="px-2 py-3" onClick={(e) => e.stopPropagation()}>
+                                            <input
+                                                type="checkbox"
+                                                className="w-3.5 h-3.5 rounded border-white/20 bg-white/5 accent-primary"
+                                                checked={isSelected}
+                                                onChange={() => onToggleSelect(f.uid)}
+                                            />
+                                        </td>
+                                    )}
+                                    <td className="px-4 py-3">
+                                        {isTFL ? (
+                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-primary/10 text-primary border border-primary/20">
+                                                <FileText size={9} /> TFL
+                                            </span>
+                                        ) : (
+                                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                                OP
+                                            </span>
+                                        )}
+                                    </td>
+                                    <td className="px-4 py-3">
+                                        <div className="flex items-center gap-2">
+                                            <Calendar size={11} className="text-muted" />
+                                            <div>
+                                                <p className="font-semibold">{fmtData(f.data_turno)}</p>
+                                                <p className="text-muted text-[10px]">{f.terminal_id}</p>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td className="px-4 py-3 text-muted max-w-[160px] truncate">
+                                        {isTFL ? (f.arquivo_nome || '—') : (f.operador_nome || '—')}
+                                    </td>
+                                    <td className="px-4 py-3 text-right font-mono">
+                                        {isTFL ? (
+                                            <span className="text-muted">—</span>
+                                        ) : (
+                                            <span className={f.pix_externo_informado > 0 ? 'text-blue-400 font-semibold' : 'text-muted'}>
+                                                {fmt(f.pix_externo_informado)}
+                                            </span>
+                                        )}
+                                    </td>
+                                    <td className="px-4 py-3 text-right font-mono">
+                                        {isTFL ? (
+                                            <span className="text-muted">—</span>
+                                        ) : (
+                                            <span className={f.valor_enviado_cofre > 0 ? 'text-warning font-semibold' : 'text-muted'}>
+                                                {fmt(f.valor_enviado_cofre)}
+                                            </span>
+                                        )}
+                                    </td>
+                                    <td className={`px-4 py-3 text-right font-mono font-semibold ${(valorPrincipal ?? 0) >= 0 ? 'text-success' : 'text-danger'}`}>
+                                        {fmt(valorPrincipal)}
+                                    </td>
+                                    <td className="px-4 py-3">
+                                        <ChevronRight size={13} className={`text-muted transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+                                    </td>
+                                </tr>
+                                {isOpen && (
+                                    <tr className="bg-white/1">
+                                        <td colSpan={onToggleSelect ? 8 : 7} className="px-6 py-4">
+                                            {isTFL ? (
+                                                <div className="space-y-4">
+                                                    <div className="grid grid-cols-3 gap-3">
+                                                        <div className="rounded-xl border border-success/20 bg-success/5 p-3">
+                                                            <p className="text-[10px] text-success uppercase tracking-wider mb-1">Créditos TFL</p>
+                                                            <p className="text-sm font-bold text-success">{fmt(f.total_creditos)}</p>
+                                                        </div>
+                                                        <div className="rounded-xl border border-danger/20 bg-danger/5 p-3">
+                                                            <p className="text-[10px] text-danger uppercase tracking-wider mb-1">Débitos TFL</p>
+                                                            <p className="text-sm font-bold text-danger">{fmt(f.total_debitos)}</p>
+                                                        </div>
+                                                        <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                                                            <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Saldo Final</p>
+                                                            <p className="text-sm font-bold">{fmt(f.saldo_final)}</p>
+                                                        </div>
+                                                    </div>
+                                                    {detalhe?.pix && detalhe.pix.length > 0 && (
+                                                        <div className="rounded-xl border border-blue-500/15 bg-blue-500/5 p-3">
+                                                            <div className="flex items-center justify-between mb-2">
+                                                                <div className="flex items-center gap-2">
+                                                                    <CreditCard size={12} className="text-blue-400" />
+                                                                    <span className="text-[10px] font-bold text-blue-300 uppercase tracking-wider">PIX Externos Unitários (TFL)</span>
+                                                                </div>
+                                                                <span className="text-xs font-bold text-blue-300">
+                                                                    {fmt(detalhe.pix.reduce((a: any, p: any) => a + p.valor, 0))}
+                                                                </span>
+                                                            </div>
+                                                            <div className="space-y-1.5">
+                                                                {detalhe.pix.map((p: any) => (
+                                                                    <div key={p.id} className="flex items-center justify-between text-xs border-b border-white/5 pb-1 last:border-0">
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span className="text-muted text-[10px]">{p.data.split('T')[0].split('-').reverse().join('/')}</span>
+                                                                            <span>{fmt(p.valor)}</span>
+                                                                            {p.descricao && <span className="text-muted text-[10px]">({p.descricao})</span>}
+                                                                        </div>
+                                                                        {p.conciliado && <span className="text-[9px] text-success">✓ conciliado</span>}
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {detalhe?.sangria && detalhe.sangria > 0 && (
+                                                        <div className="rounded-xl border border-warning/15 bg-warning/5 p-3 flex items-center justify-between">
+                                                            <div className="flex items-center gap-2">
+                                                                <ArrowUpRight size={12} className="text-warning" />
+                                                                <span className="text-[10px] font-bold text-yellow-300 uppercase">Sangria (TFL)</span>
+                                                            </div>
+                                                            <span className="text-sm font-bold text-yellow-300">{fmt(detalhe.sangria)}</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <div className="space-y-4">
+                                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                                        <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                                                            <p className="text-[10px] text-muted uppercase tracking-wider mb-1">PIX Entradas</p>
+                                                            <p className="text-sm font-bold">{fmt(f.resumo_entradas_pix)}</p>
+                                                        </div>
+                                                        <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                                                            <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Dinheiro</p>
+                                                            <p className="text-sm font-bold">{fmt(f.resumo_entradas_dinheiro)}</p>
+                                                        </div>
+                                                        <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                                                            <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Sangrias</p>
+                                                            <p className="text-sm font-bold">{fmt(f.resumo_saidas_sangria)}</p>
+                                                        </div>
+                                                        <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                                                            <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Diferença Caixa</p>
+                                                            <p className={`text-sm font-bold ${(f.diferenca_caixa ?? 0) !== 0 ? 'text-warning' : 'text-success'}`}>
+                                                                {fmt(f.diferenca_caixa)}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    {detalhe?.pix && detalhe.pix.length > 0 && (
+                                                        <div className="rounded-xl border border-blue-500/15 bg-blue-500/5 p-3">
+                                                            <div className="flex items-center justify-between mb-2">
+                                                                <div className="flex items-center gap-2">
+                                                                    <CreditCard size={12} className="text-blue-400" />
+                                                                    <span className="text-[10px] font-bold text-blue-300 uppercase tracking-wider">PIX Externos Unitários</span>
+                                                                </div>
+                                                                <span className="text-xs font-bold text-blue-300">
+                                                                    {fmt(detalhe.pix.reduce((a: any, p: any) => a + p.valor, 0))}
+                                                                </span>
+                                                            </div>
+                                                            <div className="space-y-1.5">
+                                                                {detalhe.pix.map((p: any) => (
+                                                                    <div key={p.id} className="flex items-center justify-between text-xs border-b border-white/5 pb-1 last:border-0">
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span className="text-muted text-[10px]">{p.data_pix.split('T')[0].split('-').reverse().join('/')}</span>
+                                                                            <span>{fmt(p.valor)}</span>
+                                                                            {p.descricao && <span className="text-muted text-[10px]">({p.descricao})</span>}
+                                                                        </div>
+                                                                        {p.conciliado && <span className="text-[9px] text-success">✓ conciliado</span>}
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {detalhe?.deposito && detalhe.deposito > 0 && (
+                                                        <div className="rounded-xl border border-warning/15 bg-warning/5 p-3 flex items-center justify-between">
+                                                            <div className="flex items-center gap-2">
+                                                                <Landmark size={12} className="text-warning" />
+                                                                <span className="text-[10px] font-bold text-yellow-300 uppercase">Depósito no Cofre</span>
+                                                            </div>
+                                                            <span className="text-sm font-bold text-yellow-300">{fmt(detalhe.deposito)}</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </td>
+                                    </tr>
+                                )}
+                            </React.Fragment>
+                        );
+                    })}
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// COMPONENTE: GerenciadorExtratosOFX (seleção e exclusão)
+// ──────────────────────────────────────────────────────────────────────────────
+function GerenciadorExtratosOFX({
+    lojaId,
+    onSelecionadosChange,
+    onDelete,
+}: {
+    lojaId: string;
+    onSelecionadosChange: (arquivos: string[]) => void;
+    onDelete: () => void;
+}) {
+    const [arquivos, setArquivos] = useState<{ nome: string; data: string; total: number }[]>([]);
+    const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
+    const [carregando, setCarregando] = useState(true);
+    const [deletando, setDeletando] = useState<string | null>(null);
     const { toast } = useToast();
 
+    const carregar = async () => {
+        if (!lojaId) return;
+        setCarregando(true);
+        try {
+            const lista = await getArquivosOFX(lojaId);
+            setArquivos(lista);
+            // Por padrão, seleciona todos
+            if (selecionados.size === 0 && lista.length > 0) {
+                const todos = new Set(lista.map(a => a.nome));
+                setSelecionados(todos);
+                onSelecionadosChange(Array.from(todos));
+            }
+        } catch (err) {
+            toast({ type: 'error', message: 'Erro ao carregar extratos OFX.' });
+        } finally {
+            setCarregando(false);
+        }
+    };
+
+    useEffect(() => { carregar(); }, [lojaId]);
+
+    const toggleSelecionado = (nome: string) => {
+        const novo = new Set(selecionados);
+        if (novo.has(nome)) novo.delete(nome);
+        else novo.add(nome);
+        setSelecionados(novo);
+        onSelecionadosChange(Array.from(novo));
+    };
+
+    const selecionarTodos = () => {
+        const todos = new Set(arquivos.map(a => a.nome));
+        setSelecionados(todos);
+        onSelecionadosChange(Array.from(todos));
+    };
+
+    const deletarArquivo = async (nome: string) => {
+        if (!confirm(`Tem certeza que deseja excluir o extrato "${nome}" e todas as suas transações?`)) return;
+        setDeletando(nome);
+        try {
+            await deletarArquivoOFX(lojaId, nome);
+            toast({ type: 'success', message: `Extrato "${nome}" excluído.` });
+            await carregar();
+            onDelete();
+        } catch (err) {
+            toast({ type: 'error', message: 'Erro ao excluir extrato.' });
+        } finally {
+            setDeletando(null);
+        }
+    };
+
+    if (carregando) return <div className="card p-3 text-center"><Loader2 size={16} className="animate-spin text-muted" /></div>;
+    if (arquivos.length === 0) return null;
+
+    return (
+        <div className="card p-4 space-y-3">
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                    <FileText size={14} className="text-muted" />
+                    <span className="text-xs font-bold">Extratos OFX disponíveis</span>
+                </div>
+                <button onClick={selecionarTodos} className="text-[10px] text-primary hover:underline">Selecionar todos</button>
+            </div>
+            <div className="space-y-2">
+                {arquivos.map(arq => (
+                    <div key={arq.nome} className="flex items-center justify-between border-b border-white/5 pb-2">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={selecionados.has(arq.nome)}
+                                onChange={() => toggleSelecionado(arq.nome)}
+                                className="w-3.5 h-3.5 rounded border-white/20 bg-white/5 accent-primary"
+                            />
+                            <div>
+                                <p className="text-xs font-semibold">{arq.nome}</p>
+                                <p className="text-[10px] text-muted">
+                                    {fmtData(arq.data)} • {arq.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                </p>
+                            </div>
+                        </label>
+                        <button
+                            onClick={() => deletarArquivo(arq.nome)}
+                            disabled={deletando === arq.nome}
+                            className="text-muted hover:text-error transition-colors"
+                        >
+                            {deletando === arq.nome ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                        </button>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// COMPONENTE PRINCIPAL: ExtratosConciliacao (modificado)
+// ──────────────────────────────────────────────────────────────────────────────
+
+export function ExtratosConciliacao() {
+    const { lojaAtual } = useLoja();
+    const lojaId = lojaAtual?.id ?? '';
+
+    const [fechamentos, setFechamentos] = useState<FechamentoPendente[]>([]);
+    const [transacoesOFX, setTransacoesOFX] = useState<OFXTransacaoSalva[]>([]);
+    const [contas, setContas] = useState<ContaBancaria[]>([]);
     const [loading, setLoading] = useState(true);
-    const [fechamentos, setFechamentos] = useState<Fechamento[]>([]);
-    const [selectedFechamento, setSelectedFechamento] = useState<Fechamento | null>(null);
-    const [showValidationModal, setShowValidationModal] = useState(false);
-    const [showAdicionaisModal, setShowAdicionaisModal] = useState(false);
-    const [showAdicionaisTFLModal, setShowAdicionaisTFLModal] = useState(false);
-    const [filtroStatus, setFiltroStatus] = useState<'todos' | 'pendente' | 'aprovado' | 'rejeitado'>('todos');
-    const [filtroDataInicio, setFiltroDataInicio] = useState('');
-    const [filtroDataFim, setFiltroDataFim] = useState('');
+    const [processando, setProcessando] = useState(false);
+    const [resultado, setResultado] = useState<ConciliacaoIAResultado | null>(null);
+    const [selectedFechamentoIds, setSelectedFechamentoIds] = useState<string[]>([]);
+    const [selectedArquivosOFX, setSelectedArquivosOFX] = useState<string[]>([]);
+    const [periodoManual, setPeriodoManual] = useState<{ inicio: string; fim: string }>({ inicio: '', fim: '' });
+    const { toast } = useToast();
+    const supabase = createBrowserSupabaseClient();
 
-    const [analisandoIA, setAnalisandoIA] = useState(false);
-    const [resultadoIA, setResultadoIA] = useState<ResultadoAnalise | null>(null);
-    const [refreshPixTrigger, setRefreshPixTrigger] = useState(0);
-
-    const fetchHistorico = useCallback(async () => {
+    const carregarDados = useCallback(async () => {
         setLoading(true);
         try {
-            const sessoesBruto = await getFechamentosAuditoria({
-                status: filtroStatus !== 'todos' ? filtroStatus : undefined,
-                dataInicio: filtroDataInicio || undefined,
-                dataFim: filtroDataFim || undefined,
-            });
-
-            const deSessoes: Fechamento[] = sessoesBruto.map((f: any) => {
-                const totalPix = (f.resumo_entradas_pix || 0) + (f.resumo_entradas_bolao_pix || 0);
-                const totalDinheiro = (f.resumo_entradas_dinheiro || 0) + (f.resumo_entradas_bolao_dinheiro || 0);
-                const totalEntradas = totalPix + totalDinheiro;
-                const totalSaidas =
-                    (f.resumo_saidas_sangria || 0) +
-                    (f.resumo_saidas_deposito || 0) +
-                    (f.resumo_saidas_boleto || 0) +
-                    (f.resumo_saidas_trocados || 0);
-                const totalLancamentos = totalEntradas - totalSaidas;
-                const valorNaConta = (f.pix_externo_informado || 0) + totalLancamentos;
-
-                return {
-                    id: String(f.id),
-                    fonte: 'caixa_sessoes' as FonteRegistro,
-                    data_turno: f.data_turno || '',
-                    data_fechamento: f.data_fechamento,
-                    terminal_id: f.terminal_id || 'TFL-WEB',
-                    operador_id: f.operador_id || 'Sistema',
-                    operador_nome: f.operador_nome || 'Sistema',
-                    valor_inicial: f.valor_inicial || 0,
-                    total_lancamentos: totalLancamentos,
-                    saldo_no_caixa: f.valor_final_declarado || 0,
-                    divergencia: f.diferenca_caixa || 0,
-                    valor_na_conta: valorNaConta,
-                    total_pix: totalPix,
-                    total_dinheiro: totalDinheiro,
-                    total_sangrias: f.resumo_saidas_sangria || 0,
-                    total_depositos: f.resumo_saidas_deposito || 0,
-                    total_boletos: f.resumo_saidas_boleto || 0,
-                    total_trocados: f.resumo_saidas_trocados || 0,
-                    status_validacao: f.auditoria_status || f.status,
-                    justificativa: f.observacoes_operador,
-                    valor_cofre: f.valor_enviado_cofre || 0,
-                    valor_pix_externo: f.pix_externo_informado || 0,
-                    fundo_caixa_devolvido: f.fundo_caixa_devolvido,
-                    saldo_esperado: (f.valor_inicial || 0) + totalLancamentos,
-                    loja_id: f.loja_id,
-                };
-            });
-
-            let tflQuery = supabase
+            // Carrega fechamentos pendentes
+            const sessoesRaw = await getFechamentosAuditoria({ status: 'pendente' });
+            const { data: tflRaw } = await supabase
                 .from('fechamento_tfl')
-                .select('id, data_referencia, terminal, total_creditos, total_debitos, saldo_final, arquivo_nome, status_auditoria, observacoes_auditoria, dados_extraidos, created_at, sangria_valor')
-                .order('created_at', { ascending: false })
+                .select('id, data_referencia, terminal, total_creditos, total_debitos, saldo_final, arquivo_nome, status_auditoria, loja_id')
+                .eq('status_auditoria', 'pendente')
+                .order('data_referencia', { ascending: false })
                 .limit(100);
 
-            if (filtroStatus !== 'todos') tflQuery = tflQuery.eq('status_auditoria', filtroStatus);
-            if (filtroDataInicio) tflQuery = tflQuery.gte('data_referencia', filtroDataInicio);
-            if (filtroDataFim) tflQuery = tflQuery.lte('data_referencia', filtroDataFim);
+            const { data: contasData } = await supabase
+                .from('financeiro_contas_bancarias')
+                .select('id, nome, agencia, conta_numero')
+                .eq('ativo', true);
 
-            const { data: tflBruto, error: tflError } = await tflQuery;
-            if (tflError) throw tflError;
+            const deSessoes: FechamentoPendente[] = (sessoesRaw as any[]).map(f => ({
+                uid: `sessao-${f.id}`,
+                id: String(f.id),
+                fonte: 'caixa_sessoes',
+                data_turno: f.data_turno || '',
+                terminal_id: f.terminal_id || '—',
+                operador_nome: f.operador_nome || '—',
+                resumo_entradas_pix: f.resumo_entradas_pix || 0,
+                resumo_entradas_dinheiro: f.resumo_entradas_dinheiro || 0,
+                resumo_saidas_deposito: f.resumo_saidas_deposito || 0,
+                resumo_saidas_sangria: f.resumo_saidas_sangria || 0,
+                valor_enviado_cofre: f.valor_enviado_cofre || 0,
+                pix_externo_informado: f.pix_externo_informado || 0,
+                resumo_total_entradas: f.resumo_total_entradas || 0,
+                valor_final_declarado: f.valor_final_declarado || 0,
+                diferenca_caixa: f.diferenca_caixa || 0,
+                total_creditos: 0,
+                total_debitos: 0,
+                saldo_final: 0,
+                arquivo_nome: '',
+                auditoria_status: f.auditoria_status || 'pendente',
+                loja_id: f.loja_id || '',
+            }));
 
-            const deTFL: Fechamento[] = (tflBruto ?? []).map((r: any) => ({
+            const deTFL: FechamentoPendente[] = (tflRaw ?? []).map((r: any) => ({
+                uid: `tfl-${r.id}`,
                 id: String(r.id),
-                fonte: 'fechamento_tfl' as FonteRegistro,
+                fonte: 'fechamento_tfl',
                 data_turno: r.data_referencia || '',
-                data_fechamento: r.created_at,
                 terminal_id: r.terminal || '—',
-                operador_id: '',
                 operador_nome: r.arquivo_nome || '—',
-                valor_inicial: 0,
-                total_lancamentos: (r.total_creditos || 0) - (r.total_debitos || 0),
-                saldo_no_caixa: r.saldo_final || 0,
-                divergencia: 0,
-                valor_na_conta: r.saldo_final || 0,
-                total_pix: 0,
-                total_dinheiro: 0,
-                total_sangrias: 0,
-                total_depositos: 0,
-                total_boletos: 0,
-                total_trocados: 0,
-                status_validacao: r.status_auditoria || 'pendente',
-                justificativa: r.observacoes_auditoria,
-                valor_cofre: 0,
-                valor_pix_externo: 0,
+                resumo_entradas_pix: 0,
+                resumo_entradas_dinheiro: 0,
+                resumo_saidas_deposito: 0,
+                resumo_saidas_sangria: 0,
+                valor_enviado_cofre: 0,
+                pix_externo_informado: 0,
+                resumo_total_entradas: r.total_creditos || 0,
+                valor_final_declarado: r.saldo_final || 0,
+                diferenca_caixa: 0,
                 total_creditos: r.total_creditos || 0,
                 total_debitos: r.total_debitos || 0,
                 saldo_final: r.saldo_final || 0,
-                arquivo_nome: r.arquivo_nome,
-                dados_extraidos: r.dados_extraidos ?? undefined,
-                sangria_valor: r.sangria_valor || 0,
+                arquivo_nome: r.arquivo_nome || '',
+                auditoria_status: r.status_auditoria || 'pendente',
+                loja_id: r.loja_id || '',
             }));
 
-            const todos = [...deSessoes, ...deTFL].sort((a, b) => {
-                const da = a.data_fechamento || a.data_turno;
-                const db = b.data_fechamento || b.data_turno;
-                return db.localeCompare(da);
-            });
-
+            const todos = [...deSessoes, ...deTFL].sort((a, b) =>
+                (b.data_turno || '').localeCompare(a.data_turno || '')
+            );
             setFechamentos(todos);
-        } catch (err: any) {
-            toast({ message: 'Erro ao carregar fechamentos: ' + (err.message || 'Erro desconhecido'), type: 'error' });
+            setContas((contasData ?? []) as ContaBancaria[]);
+
+            // Carrega transações OFX com base no período (manual ou automático)
+            if (todos.length > 0 && lojaId) {
+                let inicio = periodoManual.inicio;
+                let fim = periodoManual.fim;
+                if (!inicio || !fim) {
+                    const datas = todos.map(f => f.data_turno).filter(Boolean).sort();
+                    inicio = datas[0] ?? '';
+                    fim = datas[datas.length - 1] ?? '';
+                }
+                if (inicio && fim) {
+                    const transacoes = await getTransacoesOFX(lojaId, inicio, fim);
+                    setTransacoesOFX(transacoes);
+                } else {
+                    setTransacoesOFX([]);
+                }
+            } else {
+                setTransacoesOFX([]);
+            }
+
+            setSelectedFechamentoIds([]);
+        } catch (err) {
+            toast({ type: 'error', message: 'Erro ao carregar dados.' });
+            console.error(err);
         } finally {
             setLoading(false);
         }
-    }, [filtroStatus, filtroDataInicio, filtroDataFim, toast, supabase]);
+    }, [supabase, toast, lojaId, periodoManual]);
 
-    useEffect(() => { fetchHistorico(); }, [fetchHistorico]);
+    useEffect(() => { carregarDados(); }, [carregarDados]);
 
-    const handleAprovar = async (fechamento: Fechamento, observacoes: string) => {
-        try {
-            if (fechamento.fonte === 'caixa_sessoes') {
-                await aprovarFechamento(parseInt(fechamento.id), observacoes);
-            } else {
-                const { error } = await supabase.from('fechamento_tfl').update({
-                    status_auditoria: 'aprovado',
-                    observacoes_auditoria: observacoes,
-                    auditado_em: new Date().toISOString(),
-                }).eq('id', fechamento.id);
-                if (error) throw error;
-            }
-            toast({ message: 'Fechamento aprovado com sucesso!', type: 'success' });
-            await fetchHistorico();
-            setSelectedFechamento(null);
-        } catch (error: any) {
-            toast({ message: error.message || 'Erro ao aprovar', type: 'error' });
-        }
-        setShowValidationModal(false);
+    const toggleSelect = (uid: string) => {
+        setSelectedFechamentoIds(prev =>
+            prev.includes(uid) ? prev.filter(id => id !== uid) : [...prev, uid]
+        );
     };
 
-    const handleRejeitar = async (fechamento: Fechamento, justificativa: string) => {
-        try {
-            if (fechamento.fonte === 'caixa_sessoes') {
-                await rejeitarFechamento(parseInt(fechamento.id), justificativa, false);
-            } else {
-                const { error } = await supabase.from('fechamento_tfl').update({
-                    status_auditoria: 'rejeitado',
-                    observacoes_auditoria: justificativa,
-                    auditado_em: new Date().toISOString(),
-                }).eq('id', fechamento.id);
-                if (error) throw error;
-            }
-            toast({ message: 'Fechamento rejeitado!', type: 'warning' });
-            await fetchHistorico();
-            setSelectedFechamento(null);
-        } catch (error: any) {
-            toast({ message: error.message || 'Erro ao rejeitar', type: 'error' });
-        }
-        setShowValidationModal(false);
+    const selectAll = (select: boolean) => {
+        setSelectedFechamentoIds(select ? fechamentos.map(f => f.uid) : []);
     };
 
-    const fazerAnaliseIA = useCallback(async () => {
-        const pendentes = fechamentos.filter(f => f.status_validacao === 'pendente');
-        if (pendentes.length === 0) {
-            toast({ message: 'Nenhum fechamento pendente para analisar.', type: 'warning' });
+    async function fazerConciliacaoIA() {
+        if (!lojaId) {
+            toast({ type: 'error', message: 'Selecione uma loja para continuar.' });
             return;
         }
-        setAnalisandoIA(true);
-        setResultadoIA(null);
+        if (selectedArquivosOFX.length === 0 && transacoesOFX.length === 0) {
+            toast({ type: 'warning', message: 'Importe ou selecione pelo menos um extrato OFX para conciliar.' });
+            return;
+        }
+        if (selectedFechamentoIds.length === 0) {
+            toast({ type: 'warning', message: 'Selecione pelo menos um fechamento para conciliar.' });
+            return;
+        }
+
+        setProcessando(true);
+        setResultado(null);
         try {
-            const payload = pendentes.map(f => {
-                const isTFL = f.fonte === 'fechamento_tfl';
-                if (isTFL) {
-                    return {
+            const fechamentosSelecionados = fechamentos.filter(f => selectedFechamentoIds.includes(f.uid));
+
+            // Filtra transações OFX apenas dos arquivos selecionados
+            let transacoesParaIA = transacoesOFX;
+            if (selectedArquivosOFX.length > 0) {
+                transacoesParaIA = transacoesOFX.filter(t => selectedArquivosOFX.includes(t.arquivo_nome || ''));
+            }
+
+            const fechamentosTFLComDetalhes = await Promise.all(
+                fechamentosSelecionados
+                    .filter(f => f.fonte === 'fechamento_tfl')
+                    .map(async (f) => ({
                         id: f.id,
-                        tipo: 'tfl' as const,
+                        data_referencia: f.data_turno,
+                        terminal: f.terminal_id,
+                        arquivo_nome: f.arquivo_nome,
+                        total_creditos: f.total_creditos,
+                        total_debitos: f.total_debitos,
+                        saldo_final: f.saldo_final,
+                        pix_externos: await getPixExternosTFL(f.id),
+                        sangria_valor: await getSangriaTFL(f.id),
+                    }))
+            );
+
+            const fechamentosCaixaComDetalhes = await Promise.all(
+                fechamentosSelecionados
+                    .filter(f => f.fonte === 'caixa_sessoes')
+                    .map(async (f) => ({
+                        id: f.id,
                         data_turno: f.data_turno,
                         terminal_id: f.terminal_id,
-                        operador_nome: f.arquivo_nome ?? '—',
-                        justificativa: f.justificativa,
-                        dados_tfl: f.dados_extraidos ? {
-                            total_creditos: f.dados_extraidos.total_creditos,
-                            total_debitos: f.dados_extraidos.total_debitos,
-                            saldo_final: f.dados_extraidos.saldo_final,
-                            recebimentos: {
-                                jogos: f.dados_extraidos.recebimentos?.jogos ?? [],
-                                total_jogos_valor: f.dados_extraidos.recebimentos?.total_jogos_valor,
-                                contas: f.dados_extraidos.recebimentos?.contas ?? [],
-                                total_contas_valor: f.dados_extraidos.recebimentos?.total_contas_valor,
-                                total_recebimentos_valor: f.dados_extraidos.recebimentos?.total_recebimentos_valor,
-                            },
-                            premios_pagos: {
-                                itens: f.dados_extraidos.premios_pagos?.itens ?? [],
-                                total_valor: f.dados_extraidos.premios_pagos?.total_valor,
-                            },
-                            pagamentos: {
-                                itens: f.dados_extraidos.pagamentos?.itens ?? [],
-                                total_valor: f.dados_extraidos.pagamentos?.total_valor,
-                            },
-                            servicos_conta: {
-                                itens: f.dados_extraidos.servicos_conta?.itens ?? [],
-                                total_valor: f.dados_extraidos.servicos_conta?.total_valor,
-                            },
-                            totais_finais: f.dados_extraidos.totais_finais,
-                        } : {
-                            total_creditos: f.total_creditos ?? 0,
-                            total_debitos: f.total_debitos ?? 0,
-                            saldo_final: f.saldo_final ?? 0,
-                        },
-                    };
-                }
-                return {
-                    id: f.id,
-                    tipo: 'operador' as const,
-                    data_turno: f.data_turno,
-                    terminal_id: f.terminal_id,
-                    operador_nome: f.operador_nome ?? 'Sistema',
-                    justificativa: f.justificativa,
-                    valor_inicial: f.valor_inicial || 0,
-                    saldo_esperado: f.saldo_esperado ?? 0,
-                    saldo_declarado: f.saldo_no_caixa || 0,
-                    divergencia: f.divergencia || 0,
-                    total_pix: f.total_pix || 0,
-                    total_dinheiro: f.total_dinheiro || 0,
-                    total_sangrias: f.total_sangrias || 0,
-                    total_depositos: f.total_depositos || 0,
-                    total_boletos: f.total_boletos || 0,
-                    total_trocados: f.total_trocados || 0,
-                    valor_cofre: f.valor_cofre || 0,
-                    valor_pix_externo: f.valor_pix_externo || 0,
-                    valor_na_conta: f.valor_na_conta || 0,
-                };
-            });
-            const res = await fetch('/api/caixa/analise-auditoria', {
+                        operador_nome: f.operador_nome,
+                        resumo_entradas_pix: f.resumo_entradas_pix,
+                        resumo_entradas_dinheiro: f.resumo_entradas_dinheiro,
+                        resumo_saidas_sangria: f.resumo_saidas_sangria,
+                        resumo_saidas_deposito: f.resumo_saidas_deposito,
+                        valor_enviado_cofre: await getDepositoCofre(f.id),
+                        pix_externo_informado: f.pix_externo_informado,
+                        resumo_total_entradas: f.resumo_total_entradas,
+                        valor_final_declarado: f.valor_final_declarado,
+                        diferenca_caixa: f.diferenca_caixa,
+                        pix_externos_unitarios: await getPixExternosSessao(f.id),
+                        sangria_valor: f.resumo_saidas_sangria,
+                    }))
+            );
+
+            // Usa o período manual se fornecido, senão calcula dos fechamentos
+            let inicio = periodoManual.inicio;
+            let fim = periodoManual.fim;
+            if (!inicio || !fim) {
+                const datas = [
+                    ...transacoesParaIA.map(t => t.data),
+                    ...fechamentosSelecionados.map(f => f.data_turno).filter(Boolean),
+                ].sort();
+                inicio = datas[0] ?? '';
+                fim = datas[datas.length - 1] ?? '';
+            }
+
+            const response = await fetch('/api/caixa/conciliacao-ia', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fechamentos: payload }),
+                body: JSON.stringify({
+                    lojaId,
+                    periodo: { inicio, fim },
+                    transacoesOFX: transacoesParaIA.map(t => ({
+                        fitid: t.fitid,
+                        tipo: t.tipo,
+                        data: t.data,
+                        valor: t.valor,
+                        memo: t.memo,
+                    })),
+                    fechamentosTFL: fechamentosTFLComDetalhes,
+                    fechamentosCaixa: fechamentosCaixaComDetalhes,
+                }),
             });
-            if (!res.ok) throw new Error((await res.json()).error ?? 'Erro na API');
-            const resultado: ResultadoAnalise = await res.json();
-            setResultadoIA(resultado);
-            toast({ message: `Análise concluída para ${pendentes.length} fechamento(s)!`, type: 'success' });
-        } catch (err: unknown) {
-            toast({ message: 'Erro na análise IA: ' + (err instanceof Error ? err.message : 'Erro desconhecido'), type: 'error' });
+
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.error ?? 'Erro na API');
+            }
+
+            const res: ConciliacaoIAResultado = await response.json();
+            setResultado(res);
+            toast({
+                type: res.status_geral === 'rejeitado' ? 'error'
+                    : res.status_geral === 'aprovado_com_ressalvas' ? 'warning' : 'success',
+                message: `Conciliação IA concluída — ${res.status_geral === 'aprovado' ? 'Aprovado' : res.status_geral === 'aprovado_com_ressalvas' ? 'Aprovado com ressalvas' : 'Rejeitado'}.`,
+            });
+        } catch (err) {
+            toast({ type: 'error', message: 'Erro ao executar conciliação por IA.' });
+            console.error(err);
         } finally {
-            setAnalisandoIA(false);
+            setProcessando(false);
         }
-    }, [fechamentos, toast]);
-
-    const getStatusBadge = (status: string) => {
-        const labels: Record<string, string> = { pendente: 'PENDENTE', aprovado: 'APROVADO', rejeitado: 'REJEITADO', correcao_solicitada: 'CORREÇÃO' };
-        const colors: Record<string, string> = {
-            pendente: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-            aprovado: 'bg-green-500/10 text-green-400 border-green-500/20',
-            rejeitado: 'bg-red-500/10 text-red-400 border-red-500/20',
-            correcao_solicitada: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
-        };
-        return (
-            <span className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase border ${colors[status] ?? colors.pendente}`}>
-                {labels[status] ?? status}
-            </span>
-        );
-    };
-
-    const getFonteBadge = (fonte: FonteRegistro) =>
-        fonte === 'fechamento_tfl' ? (
-            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-primary/10 text-primary border border-primary/20 flex items-center gap-0.5">
-                <FileText size={9} /> TFL
-            </span>
-        ) : (
-            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                OP
-            </span>
-        );
-
-    const valorPrincipal = (f: Fechamento) =>
-        f.fonte === 'fechamento_tfl' ? (f.saldo_final ?? 0) : (f.valor_na_conta || 0);
-
-    if (loading) {
-        return (
-            <div className="flex items-center justify-center p-12">
-                <Loader2 className="animate-spin text-primary" size={32} />
-            </div>
-        );
     }
 
+    const totalPendentes = fechamentos.length;
+    const totalOFX = transacoesOFX.length;
+    const ofxConciliados = transacoesOFX.filter(t => t.conciliado).length;
+    const totalCreditosOFX = transacoesOFX.filter(t => t.tipo === 'CREDIT').reduce((a, t) => a + t.valor, 0);
+
+    if (loading) return (
+        <div className="flex items-center justify-center py-20">
+            <Loader2 size={24} className="animate-spin text-muted" />
+        </div>
+    );
+
     return (
-        <div className="auditoria-fechamentos">
-            <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                        <ShieldCheck className="text-primary" size={20} />
-                    </div>
-                    <div>
-                        <h3 className="text-lg font-bold">Auditoria de Fechamentos</h3>
-                        <p className="text-xs text-muted">Operadores (OP) e Relatórios TFL unificados</p>
-                    </div>
+        <div className="space-y-6">
+            {/* Header */}
+            <div className="flex items-center justify-between">
+                <div>
+                    <h2 className="text-sm font-bold">Extratos & Conciliação Bancária</h2>
+                    <p className="text-xs text-muted mt-0.5">
+                        Selecione os fechamentos e use o auditor IA para cruzar com o extrato OFX
+                    </p>
                 </div>
-                <div className="flex gap-2 flex-wrap justify-end">
-                    <select
-                        className="input text-xs"
-                        value={filtroStatus}
-                        onChange={(e) => setFiltroStatus(e.target.value as any)}
-                    >
-                        <option value="todos">Todos</option>
-                        <option value="pendente">Pendentes</option>
-                        <option value="aprovado">Aprovados</option>
-                        <option value="rejeitado">Rejeitados</option>
-                    </select>
-                    <button onClick={fetchHistorico} className="btn btn-ghost btn-sm">
-                        <RefreshCw size={14} /> Atualizar
+                <div className="flex gap-2">
+                    <button className="btn btn-ghost text-xs" onClick={carregarDados} disabled={loading}>
+                        <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Atualizar
                     </button>
                     <button
-                        onClick={fazerAnaliseIA}
-                        disabled={analisandoIA || fechamentos.filter(f => f.status_validacao === 'pendente').length === 0}
-                        className="btn btn-primary btn-sm disabled:opacity-50"
+                        className="btn btn-primary text-xs"
+                        onClick={fazerConciliacaoIA}
+                        disabled={processando || totalOFX === 0 || selectedFechamentoIds.length === 0}
                     >
-                        {analisandoIA
-                            ? <><Loader2 size={14} className="animate-spin" /> Analisando...</>
-                            : <><Brain size={14} /> Fazer análise</>
+                        {processando
+                            ? <><Loader2 size={13} className="animate-spin" /> Analisando...</>
+                            : <><Sparkles size={13} /> Conciliar {selectedFechamentoIds.length} selecionado(s)</>
                         }
                     </button>
                 </div>
             </div>
 
-            <div className="mb-6 p-4 rounded-xl bg-surface-subtle border border-border">
-                <div className="flex items-center gap-2 mb-3">
-                    <Filter size={16} className="text-primary-blue-light" />
-                    <h4 className="text-sm font-bold">Filtrar por Período</h4>
+            {/* KPIs */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="card p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                        <div className="w-7 h-7 rounded-lg bg-muted/10 flex items-center justify-center">
+                            <Clock size={13} className="text-muted" />
+                        </div>
+                        <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Fechamentos Pend.</span>
+                    </div>
+                    <p className="text-2xl font-bold">{totalPendentes}</p>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="card p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                        <div className="w-7 h-7 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                            <FileText size={13} className="text-blue-400" />
+                        </div>
+                        <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Transações OFX</span>
+                    </div>
+                    <p className="text-2xl font-bold">{totalOFX}</p>
+                    {ofxConciliados > 0 && <p className="text-[10px] text-success mt-0.5">{ofxConciliados} conciliadas</p>}
+                </div>
+                <div className="card p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                        <div className="w-7 h-7 rounded-lg bg-success/10 flex items-center justify-center">
+                            <TrendingUp size={13} className="text-success" />
+                        </div>
+                        <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Total Créditos OFX</span>
+                    </div>
+                    <p className="text-sm font-bold">{fmt(totalCreditosOFX)}</p>
+                </div>
+                <div className="card p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                        <div className="w-7 h-7 rounded-lg bg-warning/10 flex items-center justify-center">
+                            <Landmark size={13} className="text-warning" />
+                        </div>
+                        <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Depósitos Cofre</span>
+                    </div>
+                    <p className="text-sm font-bold">
+                        {fmt(fechamentos.reduce((a, f) => a + (f.valor_enviado_cofre ?? 0), 0))}
+                    </p>
+                </div>
+            </div>
+
+            {/* Seletor de período manual */}
+            <div className="card p-4">
+                <div className="flex items-center gap-2 mb-3">
+                    <Calendar size={14} className="text-muted" />
+                    <span className="text-xs font-bold">Período para filtro dos extratos OFX</span>
+                    <button
+                        onClick={() => setPeriodoManual({ inicio: '', fim: '' })}
+                        className="text-[10px] text-muted hover:text-foreground ml-auto"
+                    >
+                        Usar período automático
+                    </button>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
                     <div>
-                        <label className="text-[10px] font-bold text-muted uppercase block mb-1">Data Início</label>
-                        <input type="date" value={filtroDataInicio} onChange={e => setFiltroDataInicio(e.target.value)} className="input w-full text-sm" />
+                        <label className="block text-[10px] text-muted mb-1">Data início</label>
+                        <input
+                            type="date"
+                            className="input w-full text-sm"
+                            value={periodoManual.inicio}
+                            onChange={e => setPeriodoManual(prev => ({ ...prev, inicio: e.target.value }))}
+                        />
                     </div>
                     <div>
-                        <label className="text-[10px] font-bold text-muted uppercase block mb-1">Data Fim</label>
-                        <input type="date" value={filtroDataFim} onChange={e => setFiltroDataFim(e.target.value)} className="input w-full text-sm" />
+                        <label className="block text-[10px] text-muted mb-1">Data fim</label>
+                        <input
+                            type="date"
+                            className="input w-full text-sm"
+                            value={periodoManual.fim}
+                            onChange={e => setPeriodoManual(prev => ({ ...prev, fim: e.target.value }))}
+                        />
                     </div>
                 </div>
                 <div className="flex justify-end mt-3">
-                    <button onClick={() => { setFiltroDataInicio(''); setFiltroDataFim(''); setFiltroStatus('todos'); }} className="btn btn-ghost btn-sm text-xs">
-                        <X size={12} /> Limpar Filtros
+                    <button
+                        className="btn btn-ghost text-xs"
+                        onClick={() => { setPeriodoManual({ inicio: '', fim: '' }); carregarDados(); }}
+                    >
+                        Aplicar
                     </button>
                 </div>
             </div>
 
-            {resultadoIA && (
-                <div className="mb-6 rounded-xl border border-border bg-bg-card overflow-hidden">
-                    <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-surface-subtle">
-                        <div className="flex items-center gap-2">
-                            <Brain size={16} className="text-primary" />
-                            <span className="text-sm font-bold">Resultado da Análise IA</span>
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary/10 text-primary">
-                                {resultadoIA.analises.length} fechamento(s)
-                            </span>
-                        </div>
-                        <button onClick={() => setResultadoIA(null)} className="btn btn-ghost btn-sm px-2"><X size={14} /></button>
-                    </div>
-                    {resultadoIA.resumo && (
-                        <div className="px-4 py-3 border-b border-border text-sm text-muted bg-surface-subtle/50">{resultadoIA.resumo}</div>
-                    )}
-                    <div className="divide-y divide-border">
-                        {resultadoIA.analises.map((analise) => {
-                            const fech = fechamentos.find(f => f.id === analise.id);
-                            const corReco = analise.recomendacao === 'APROVAR' ? 'text-success' : analise.recomendacao === 'REJEITAR' ? 'text-danger' : 'text-warning';
-                            const bgReco = analise.recomendacao === 'APROVAR' ? 'bg-success/10 border-success/20' : analise.recomendacao === 'REJEITAR' ? 'bg-danger/10 border-danger/20' : 'bg-warning/10 border-warning/20';
-                            const IconReco = analise.recomendacao === 'APROVAR' ? CheckCircle : analise.recomendacao === 'REJEITAR' ? AlertCircle : AlertTriangleIcon;
-                            return (
-                                <div key={analise.id} className="px-4 py-3">
-                                    <div className="flex items-start gap-3">
-                                        <div className={`mt-0.5 flex-shrink-0 p-1.5 rounded-lg border ${bgReco}`}>
-                                            <IconReco size={14} className={corReco} />
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                                <span className="text-xs font-bold">
-                                                    {fech ? `${fech.terminal_id} — ${formatarDataLocal(fech.data_turno)}` : `ID: ${analise.id}`}
-                                                </span>
-                                                {fech && getFonteBadge(fech.fonte)}
-                                                <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${bgReco} ${corReco}`}>{analise.recomendacao}</span>
-                                                <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${analise.risco === 'ALTO' ? 'bg-danger/10 text-danger' : analise.risco === 'MEDIO' ? 'bg-warning/10 text-warning' : 'bg-success/10 text-success'}`}>
-                                                    Risco {analise.risco}
-                                                </span>
-                                            </div>
-                                            <p className="text-xs text-muted">{analise.parecer}</p>
-                                            {analise.alertas?.length > 0 && (
-                                                <ul className="mt-1.5 space-y-0.5">
-                                                    {analise.alertas.map((a, i) => (
-                                                        <li key={i} className="text-[11px] text-warning flex items-center gap-1">
-                                                            <AlertTriangle size={10} /> {a}
-                                                        </li>
-                                                    ))}
-                                                </ul>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
+            {/* Upload OFX e Gerenciador */}
+            {lojaId ? (
+                <div className="space-y-4">
+                    <OFXUploadPanel
+                        lojaId={lojaId}
+                        contas={contas}
+                        onImportado={async () => { await carregarDados(); }}
+                    />
+                    <GerenciadorExtratosOFX
+                        lojaId={lojaId}
+                        onSelecionadosChange={setSelectedArquivosOFX}
+                        onDelete={carregarDados}
+                    />
+                </div>
+            ) : (
+                <div className="card p-6 text-center">
+                    <p className="text-xs text-muted">Selecione uma loja para importar o extrato OFX.</p>
                 </div>
             )}
 
-            <div style={{ display: 'grid', gridTemplateColumns: selectedFechamento ? '1fr 520px' : '1fr', gap: '1.5rem' }}>
-                <div className="card p-0 overflow-hidden">
-                    {fechamentos.length === 0 ? (
-                        <div className="p-12 text-center border-dashed">
-                            <CheckCircle2 className="mx-auto mb-4 text-success opacity-20" size={48} />
-                            <p className="font-bold text-muted">Nenhum encerramento encontrado</p>
-                        </div>
-                    ) : (
-                        <div className="table-container pt-0">
-                            <table className="w-full">
-                                <thead>
-                                    <tr className="border-b border-border">
-                                        <th className="text-left py-2 px-2 text-xs font-bold text-muted uppercase">Tipo</th>
-                                        <th className="text-left py-2 px-2 text-xs font-bold text-muted uppercase">Data</th>
-                                        <th className="text-left py-2 px-2 text-xs font-bold text-muted uppercase">Terminal</th>
-                                        <th className="text-left py-2 px-2 text-xs font-bold text-muted uppercase">Operador / Arquivo</th>
-                                        <th className="text-left py-2 px-2 text-xs font-bold text-muted uppercase">Status</th>
-                                        <th className="text-right py-2 px-2 text-xs font-bold text-muted uppercase">Valor</th>
-                                        <th style={{ width: '50px' }}></th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {fechamentos.map((f) => (
-                                        <tr
-                                            key={`${f.fonte}-${f.id}`}
-                                            onClick={() => setSelectedFechamento(f)}
-                                            className={`cursor-pointer hover:bg-bg-card-hover transition-colors ${
-                                                selectedFechamento?.id === f.id && selectedFechamento?.fonte === f.fonte
-                                                    ? 'bg-primary/5 border-l-4 border-primary'
-                                                    : ''
-                                            }`}
-                                        >
-                                            <td className="py-2 px-2">{getFonteBadge(f.fonte)}</td>
-                                            <td className="text-xs py-2 px-2">{formatarDataLocal(f.data_turno)}</td>
-                                            <td className="py-2 px-2">
-                                                <span className="px-2 py-1 rounded-lg text-xs font-black bg-blue-500/10 text-blue-400">{f.terminal_id}</span>
-                                            </td>
-                                            <td className="text-xs py-2 px-2 opacity-60 max-w-[140px] truncate">
-                                                {f.fonte === 'fechamento_tfl' ? (f.arquivo_nome ?? '—') : f.operador_nome}
-                                            </td>
-                                            <td className="py-2 px-2">{getStatusBadge(f.status_validacao)}</td>
-                                            <td className={`font-bold text-right py-2 px-2 tabular-nums ${valorPrincipal(f) >= 0 ? 'text-success' : 'text-danger'}`}>
-                                                {fmt(valorPrincipal(f))}
-                                            </td>
-                                            <td className="text-right py-2 px-2">
-                                                <ChevronRight size={16} className="text-muted" />
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    )}
-                </div>
-
-                {selectedFechamento && (
-                    <div className="card flex flex-col overflow-y-auto max-h-[85vh]">
-                        <div className="flex items-center justify-between mb-4">
-                            <div className="flex items-center gap-2">
-                                <h3 className="text-sm font-bold uppercase tracking-wider text-muted">Detalhes</h3>
-                                {getFonteBadge(selectedFechamento.fonte)}
-                            </div>
-                            <button onClick={() => setSelectedFechamento(null)} className="btn btn-ghost btn-sm px-2">fechar</button>
-                        </div>
-
-                        <div className="flex items-center gap-3 mb-5 p-3 rounded-xl bg-surface-subtle border border-border">
-                            <div className="w-10 h-10 rounded-full flex items-center justify-center bg-warning/10 text-warning flex-shrink-0">
-                                <ShieldCheck size={20} />
-                            </div>
-                            <div className="min-w-0">
-                                <div className="flex items-center gap-2">
-                                    <span className="text-base font-bold">{selectedFechamento.terminal_id}</span>
-                                    {getStatusBadge(selectedFechamento.status_validacao)}
-                                </div>
-                                <div className="text-xs text-muted truncate">
-                                    {selectedFechamento.fonte === 'fechamento_tfl'
-                                        ? selectedFechamento.arquivo_nome
-                                        : selectedFechamento.operador_nome}
-                                    {' • '}{formatarDataLocal(selectedFechamento.data_turno)}
-                                    {selectedFechamento.data_fechamento && ` • ${formatarDataHoraLocal(selectedFechamento.data_fechamento)}`}
-                                </div>
-                            </div>
-                        </div>
-
-                        {selectedFechamento.fonte === 'fechamento_tfl' && selectedFechamento.dados_extraidos
-                            ? <DetalhesTFL dados={selectedFechamento.dados_extraidos} tflId={selectedFechamento.id} refreshPixTrigger={refreshPixTrigger} />
-                            : <DetalhesOperador f={selectedFechamento} refreshPixTrigger={refreshPixTrigger} />
-                        }
-
-                        {selectedFechamento.justificativa && (
-                            <div className="mt-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
-                                <span className="text-[9px] text-yellow-500 font-bold uppercase">
-                                    {selectedFechamento.fonte === 'fechamento_tfl' ? 'Observações' : 'Justificativa do Operador'}
-                                </span>
-                                <p className="text-xs text-yellow-600 dark:text-yellow-200 mt-1 italic">
-                                    "{selectedFechamento.justificativa}"
-                                </p>
-                            </div>
-                        )}
-
-                        {selectedFechamento.status_validacao === 'pendente' && (
-                            <div className="mt-5 flex gap-2">
-                                <button
-                                    className="btn btn-ghost flex-1 py-2.5 text-sm font-semibold border border-blue-500/20 text-blue-300 hover:bg-blue-500/10"
-                                    onClick={() => {
-                                        if (selectedFechamento.fonte === 'caixa_sessoes') {
-                                            setShowAdicionaisModal(true);
-                                        } else {
-                                            setShowAdicionaisTFLModal(true);
-                                        }
-                                    }}
-                                >
-                                    <Plus size={14} />
-                                    Adicionais
-                                </button>
-                                <button
-                                    className={`btn btn-primary py-2.5 text-sm font-bold ${selectedFechamento.fonte === 'caixa_sessoes' ? 'flex-1' : 'w-full'}`}
-                                    onClick={() => setShowValidationModal(true)}
-                                >
-                                    <ShieldCheck size={14} />
-                                    Auditar Agora
-                                </button>
-                            </div>
-                        )}
-                    </div>
-                )}
-            </div>
-
-            {showValidationModal && selectedFechamento && (
-                <ModalAuditoria
-                    fechamento={selectedFechamento}
-                    onClose={() => setShowValidationModal(false)}
-                    onAprovar={(obs) => handleAprovar(selectedFechamento, obs)}
-                    onRejeitar={({ justificativa }) => handleRejeitar(selectedFechamento, justificativa)}
+            {/* Resultado da conciliação IA */}
+            {resultado && (
+                <PainelConciliacaoIA
+                    resultado={resultado}
+                    onFechar={() => setResultado(null)}
                 />
             )}
 
-            {showAdicionaisModal && selectedFechamento && selectedFechamento.fonte === 'caixa_sessoes' && (
-                <>
-                    <div className="fixed inset-0 bg-black/80 z-[9998]" onClick={async () => { setShowAdicionaisModal(false); await fetchHistorico(); setRefreshPixTrigger(prev => prev + 1); }} />
-                    <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-xl max-h-[90vh] overflow-y-auto bg-bg-card border border-border rounded-2xl z-[9999] p-6">
-                        <div className="flex justify-between items-center mb-5">
-                            <div>
-                                <h2 className="text-lg font-bold">Adicionais do Fechamento</h2>
-                                <p className="text-xs text-muted mt-0.5">
-                                    Terminal {selectedFechamento.terminal_id} &bull; {formatarDataLocal(selectedFechamento.data_turno)}
-                                </p>
-                            </div>
-                            <button onClick={async () => { setShowAdicionaisModal(false); await fetchHistorico(); setRefreshPixTrigger(prev => prev + 1); }} className="btn btn-ghost btn-sm">
-                                <X size={18} />
-                            </button>
-                        </div>
-                        <div className="space-y-4">
-                            <p className="text-[10px] font-bold text-muted uppercase tracking-wider">Dados para Conciliação Bancária</p>
-                            <PixExternosFormOperador
-                                sessaoId={parseInt(selectedFechamento.id)}
-                                lojaId={selectedFechamento.loja_id ?? ''}
-                                dataTurno={selectedFechamento.data_turno}
-                                onSaved={() => { setRefreshPixTrigger(prev => prev + 1); }}
-                            />
-                            <DepositoCofreForm
-                                sessaoId={parseInt(selectedFechamento.id)}
-                                lojaId={selectedFechamento.loja_id ?? ''}
-                                valorAtual={selectedFechamento.valor_cofre ?? 0}
-                                onSaved={() => { setRefreshPixTrigger(prev => prev + 1); }}
-                            />
-                        </div>
-                        <div className="flex justify-end mt-5 pt-4 border-t border-border">
-                            <button className="btn btn-primary text-sm" onClick={async () => { setShowAdicionaisModal(false); await fetchHistorico(); setRefreshPixTrigger(prev => prev + 1); }}>
-                                Concluir
-                            </button>
-                        </div>
-                    </div>
-                </>
-            )}
+            {/* Transações OFX importadas */}
+            {transacoesOFX.length > 0 && <TabelaOFX transacoes={transacoesOFX} />}
 
-            {showAdicionaisTFLModal && selectedFechamento && selectedFechamento.fonte === 'fechamento_tfl' && (
-                <>
-                    <div className="fixed inset-0 bg-black/80 z-[9998]" onClick={async () => { setShowAdicionaisTFLModal(false); await fetchHistorico(); setRefreshPixTrigger(prev => prev + 1); }} />
-                    <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-xl max-h-[90vh] overflow-y-auto bg-bg-card border border-border rounded-2xl z-[9999] p-6">
-                        <div className="flex justify-between items-center mb-5">
-                            <div>
-                                <h2 className="text-lg font-bold">Adicionais do TFL</h2>
-                                <p className="text-xs text-muted mt-0.5">
-                                    Terminal {selectedFechamento.terminal_id} &bull; {formatarDataLocal(selectedFechamento.data_turno)}
-                                </p>
-                            </div>
-                            <button onClick={async () => { setShowAdicionaisTFLModal(false); await fetchHistorico(); setRefreshPixTrigger(prev => prev + 1); }} className="btn btn-ghost btn-sm">
-                                <X size={18} />
-                            </button>
-                        </div>
-                        <TFLAdicionaisForm
-                            tflId={selectedFechamento.id}
-                            lojaId={selectedFechamento.loja_id ?? ''}
-                            onSaved={() => { setRefreshPixTrigger(prev => prev + 1); }}
-                        />
-                        <div className="flex justify-end mt-5 pt-4 border-t border-border">
-                            <button className="btn btn-primary text-sm" onClick={async () => { setShowAdicionaisTFLModal(false); await fetchHistorico(); setRefreshPixTrigger(prev => prev + 1); }}>
-                                Concluir
-                            </button>
-                        </div>
-                    </div>
-                </>
-            )}
+            {/* Fechamentos pendentes com seleção e detalhes expandidos */}
+            <TabelaFechamentos
+                fechamentos={fechamentos}
+                selectedIds={selectedFechamentoIds}
+                onToggleSelect={toggleSelect}
+                onSelectAll={selectAll}
+            />
         </div>
     );
 }
