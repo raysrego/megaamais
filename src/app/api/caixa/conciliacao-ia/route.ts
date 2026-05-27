@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { anthropic } from '@ai-sdk/anthropic';
 import { generateText } from 'ai';
-import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 
 // ──────────────────────────────────────────────────────────────────────────────
-// TYPES (mantidos iguais aos originais)
+// TYPES
 // ──────────────────────────────────────────────────────────────────────────────
 
 interface TransacaoOFX {
@@ -84,7 +83,8 @@ export interface ConciliacaoIAResultado {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// ─── Prompt ───────────────────────────────────────────────────────────────────
+// PROMPT
+// ──────────────────────────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = `Você é o gerente financeiro, experiência há mais trinta anos em casas lotéricas e terminais de loteria federal (TFL).
 Sua função é realizar o fechamento de caixa dos TFL's, analisando o relatório de fechamento e comparando com o extrato bancário, fazendo verificação completa 
@@ -203,7 +203,34 @@ Retorne APENAS o JSON no seguinte schema, sem nenhum texto adicional:
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// ROUTE HANDLER (sem alterações na chamada da IA, apenas prepara os dados)
+// FUNÇÃO AUXILIAR: limpar JSON de markdown e lixo
+// ──────────────────────────────────────────────────────────────────────────────
+
+function cleanJSONResponse(text: string): string {
+    let cleaned = text.trim();
+    // Remove blocos de código markdown (```json ... ``` ou ``` ... ```)
+    cleaned = cleaned.replace(/^```json\s*\n?/i, '');
+    cleaned = cleaned.replace(/^```\s*\n?/, '');
+    cleaned = cleaned.replace(/\n?```\s*$/, '');
+    // Se ainda houver crases no início ou fim, remove manualmente
+    if (cleaned.startsWith('`')) cleaned = cleaned.slice(1);
+    if (cleaned.endsWith('`')) cleaned = cleaned.slice(0, -1);
+    // Encontra o primeiro { ou [ e o último } ou ]
+    const firstBrace = cleaned.indexOf('{');
+    const firstBracket = cleaned.indexOf('[');
+    let start = 0;
+    if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) start = firstBrace;
+    else if (firstBracket !== -1) start = firstBracket;
+    const lastBrace = cleaned.lastIndexOf('}');
+    const lastBracket = cleaned.lastIndexOf(']');
+    const end = Math.max(lastBrace, lastBracket);
+    if (end > start && end < cleaned.length - 1) cleaned = cleaned.slice(start, end + 1);
+    else if (start > 0) cleaned = cleaned.slice(start);
+    return cleaned;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ROUTE HANDLER
 // ──────────────────────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
@@ -219,8 +246,8 @@ export async function POST(request: NextRequest) {
 
         const userPrompt = construirPrompt(payload);
 
-        // Modelo válido e disponível
-        const model = anthropic('claude-opus-4-5'); 
+        // Modelo válido e disponível (use claude-3-5-sonnet-latest ou claude-3-opus-latest)
+        const model = anthropic('claude-3-5-sonnet-latest');
 
         const { text } = await generateText({
             model,
@@ -229,11 +256,15 @@ export async function POST(request: NextRequest) {
             maxOutputTokens: 8000,
         });
 
-        let jsonText = text.trim();
-        const fenceMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
-        if (fenceMatch) jsonText = fenceMatch[1].trim();
+        let jsonText = cleanJSONResponse(text);
 
-        const parsed: Partial<ConciliacaoIAResultado> = JSON.parse(jsonText);
+        let parsed: Partial<ConciliacaoIAResultado>;
+        try {
+            parsed = JSON.parse(jsonText);
+        } catch (parseErr) {
+            console.error('[CONCILIACAO-IA] JSON inválido após limpeza. Texto:', jsonText);
+            throw new Error('Resposta da IA não é um JSON válido');
+        }
 
         const safeResultado: ConciliacaoIAResultado = {
             parecer_geral: parsed.parecer_geral || 'Não foi possível gerar um parecer completo.',
@@ -258,6 +289,9 @@ export async function POST(request: NextRequest) {
     } catch (error: unknown) {
         const msg = error instanceof Error ? error.message : 'Erro desconhecido';
         console.error('[CONCILIACAO-IA] Erro:', msg);
-        return NextResponse.json({ error: `Erro ao processar conciliação: ${msg}` }, { status: 500 });
+        return NextResponse.json(
+            { error: `Erro ao processar conciliação: ${msg}` },
+            { status: 500 }
+        );
     }
 }
