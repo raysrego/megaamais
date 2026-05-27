@@ -250,11 +250,22 @@ export async function POST(request: NextRequest) {
         const fenceMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
         if (fenceMatch) jsonText = fenceMatch[1].trim();
 
-        const resultado: ConciliacaoIAResultado = JSON.parse(jsonText);
-        return NextResponse.json(resultado);
-    } catch (error: unknown) {
-        const msg = error instanceof Error ? error.message : 'Erro desconhecido';
-        console.error('[CONCILIACAO-IA] Erro:', msg);
-        return NextResponse.json({ error: `Erro ao processar conciliação: ${msg}` }, { status: 500 });
-    }
-}
+        const safeResultado: ConciliacaoIAResultado = {
+    parecer_geral: resultado.parecer_geral || 'Análise não disponível',
+    status_geral: resultado.status_geral || 'rejeitado',
+    risco: resultado.risco || 'medio',
+    resumo_financeiro: {
+        total_creditos_ofx: resultado.resumo_financeiro?.total_creditos_ofx ?? 0,
+        total_debitos_ofx: resultado.resumo_financeiro?.total_debitos_ofx ?? 0,
+        total_pix_externos: resultado.resumo_financeiro?.total_pix_externos ?? 0,
+        total_depositos_cofre: resultado.resumo_financeiro?.total_depositos_cofre ?? 0,
+        total_estornos: resultado.resumo_financeiro?.total_estornos ?? 0,
+        saldo_tfl_periodo: resultado.resumo_financeiro?.saldo_tfl_periodo ?? 0,
+        diferenca_apurada: resultado.resumo_financeiro?.diferenca_apurada ?? 0,
+    },
+    itens_conciliados: resultado.itens_conciliados || [],
+    alertas: resultado.alertas || [],
+    recomendacoes: resultado.recomendacoes || [],
+    conclusao: resultado.conclusao || 'Conciliação finalizada.',
+};
+return NextResponse.json(safeResultado);
