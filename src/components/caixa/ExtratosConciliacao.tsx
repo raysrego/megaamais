@@ -470,7 +470,6 @@ function PainelConciliacaoIA({
             ? 'text-warning border-warning/30 bg-warning/5'
             : 'text-error border-error/30 bg-error/5';
 
-    // 🔧 CORREÇÃO: fallback para risco
     const risco = resultado.risco || 'medio';
     const riscoColor = risco === 'baixo'
         ? 'bg-success/10 text-success'
@@ -595,7 +594,7 @@ function PainelConciliacaoIA({
                                             <th className="text-left px-3 py-2 text-[10px] font-bold text-muted uppercase">Descrição</th>
                                             <th className="text-right px-3 py-2 text-[10px] font-bold text-muted uppercase">Valor</th>
                                             <th className="text-center px-3 py-2 text-[10px] font-bold text-muted uppercase">Status</th>
-                                        </table>
+                                        </tr>
                                     </thead>
                                     <tbody>
                                         {resultado.itens_conciliados.map((item, i) => (
@@ -615,8 +614,8 @@ function PainelConciliacaoIA({
                                                     <span className={`inline-block text-[9px] font-bold px-1.5 py-0.5 rounded border ${STATUS_COR[item.status]}`}>
                                                         {item.status === 'conciliado' ? 'OK'
                                                             : item.status === 'pendente' ? 'Pend.'
-                                                                : item.status === 'divergente' ? 'Diverg.'
-                                                                    : 'Suspeito'}
+                                                            : item.status === 'divergente' ? 'Diverg.'
+                                                            : 'Suspeito'}
                                                     </span>
                                                 </td>
                                             </tr>
@@ -648,7 +647,6 @@ function PainelConciliacaoIA({
         </div>
     );
 }
-
 // ──────────────────────────────────────────────────────────────────────────────
 // COMPONENTE: TabelaFechamentos
 // ──────────────────────────────────────────────────────────────────────────────
