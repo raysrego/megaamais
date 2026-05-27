@@ -4,9 +4,9 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
     RefreshCw, Loader as Loader2, CircleCheck as CheckCircle2, TriangleAlert as AlertTriangle,
     Clock, ChevronRight, X, Landmark, TrendingUp, Upload, FileText, Calendar, Check, Search,
-    Info, Sparkles, ShieldCheck, ShieldAlert, ShieldX, ChevronDown, Eye, EyeOff, Trash2, Plus,
+    Info, Sparkles, ShieldCheck, ShieldAlert, ShieldX, ChevronDown, Trash2, Plus,
     CalendarDays, CreditCard, Banknote, Wallet, ArrowDownLeft, ArrowUpRight, Receipt, Coins,
-    Filter, Brain, CircleAlert as AlertCircle, Loader
+    Filter, Brain, CircleAlert as AlertCircle
 } from 'lucide-react';
 import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import React from 'react';
@@ -67,9 +67,10 @@ interface PixExternoDetalhado {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// FUNÇÕES AUXILIARES (BUSCA DETALHADA DE PIX E MOVIMENTAÇÕES DE COFRE)
+// FUNÇÕES AUXILIARES (BUSCA UNIFICADA DE PIX E MOVIMENTAÇÕES COFRE)
 // ──────────────────────────────────────────────────────────────────────────────
 
+// Busca PIX externos de uma sessão de caixa (tabela original)
 async function getPixExternosSessao(sessaoId: string): Promise<PixExternoDetalhado[]> {
     const supabase = createBrowserSupabaseClient();
     const { data, error } = await supabase
@@ -84,6 +85,7 @@ async function getPixExternosSessao(sessaoId: string): Promise<PixExternoDetalha
     return (data || []).map(p => ({ data: p.data_pix, valor: p.valor, descricao: p.descricao || '' }));
 }
 
+// Busca PIX externos de um TFL (tabela original)
 async function getPixExternosTFL(tflId: string): Promise<PixExternoDetalhado[]> {
     const supabase = createBrowserSupabaseClient();
     const { data, error } = await supabase
@@ -98,28 +100,35 @@ async function getPixExternosTFL(tflId: string): Promise<PixExternoDetalhado[]> 
     return (data || []).map(p => ({ data: p.data, valor: p.valor, descricao: p.descricao || '' }));
 }
 
-// NOVAS FUNÇÕES UNIFICADAS PARA MOVIMENTAÇÕES DE COFRE (usando view)
-async function getMovimentacoesCofre(entidadeId: string, tipoEntidade: 'tfl' | 'sessao'): Promise<{ valor: number; tipo: string; data: string }[]> {
+// --- NOVAS FUNÇÕES USANDO A VIEW UNIFICADA movimentacoes_cofre ---
+interface MovimentacaoCofre {
+    valor: number;
+    tipo: 'entrada_sangria' | 'saida_deposito';
+    data: string;
+}
+
+async function getMovimentacoesCofre(entidadeId: string, tipoEntidade: 'tfl' | 'sessao'): Promise<MovimentacaoCofre[]> {
     const supabase = createBrowserSupabaseClient();
+    const origem = tipoEntidade === 'tfl' ? 'tfl' : 'caixa';
     const { data, error } = await supabase
         .from('movimentacoes_cofre')
         .select('valor, tipo, data')
         .eq('entidade_id', entidadeId)
-        .eq('origem', tipoEntidade === 'tfl' ? 'tfl' : 'caixa');
+        .eq('origem', origem);
     if (error) {
         console.error('Erro ao buscar movimentações de cofre:', error);
         return [];
     }
-    return data || [];
+    return (data || []).map(m => ({ valor: m.valor, tipo: m.tipo, data: m.data }));
 }
 
-// Mantém compatibilidade: retorna total de sangrias (entrada_sangria) para TFL
+// Reimplementação da função getSangriaTFL para manter compatibilidade
 async function getSangriaTFL(tflId: string): Promise<number> {
     const movs = await getMovimentacoesCofre(tflId, 'tfl');
     return movs.filter(m => m.tipo === 'entrada_sangria').reduce((acc, m) => acc + m.valor, 0);
 }
 
-// Mantém compatibilidade: retorna total de depósitos (saida_deposito) para sessão de caixa
+// Nova função para obter depósitos de cofre (saída) de uma sessão
 async function getDepositoCofre(sessaoId: string): Promise<number> {
     const movs = await getMovimentacoesCofre(sessaoId, 'sessao');
     return movs.filter(m => m.tipo === 'saida_deposito').reduce((acc, m) => acc + m.valor, 0);
@@ -162,7 +171,7 @@ function StatusBadge({ status }: { status: 'pendente' | 'conciliado' | 'divergen
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// COMPONENTE: OFXUploadPanel (sem alterações)
+// COMPONENTE: OFXUploadPanel
 // ──────────────────────────────────────────────────────────────────────────────
 
 function OFXUploadPanel({
@@ -288,7 +297,7 @@ function OFXUploadPanel({
                                 <th className="text-left px-3 py-2 text-[10px] font-bold text-muted uppercase">Descrição</th>
                                 <th className="text-right px-3 py-2 text-[10px] font-bold text-muted uppercase">Valor</th>
                                 <th className="text-center px-3 py-2 text-[10px] font-bold text-muted uppercase">Tipo</th>
-                            </table>
+                            </tr>
                         </thead>
                         <tbody>
                             {preview.transacoes.map((t, i) => (
@@ -368,7 +377,7 @@ function OFXUploadPanel({
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// COMPONENTE: TabelaOFX (sem alterações)
+// COMPONENTE: TabelaOFX
 // ──────────────────────────────────────────────────────────────────────────────
 
 function TabelaOFX({ transacoes }: { transacoes: OFXTransacaoSalva[] }) {
@@ -441,7 +450,7 @@ function TabelaOFX({ transacoes }: { transacoes: OFXTransacaoSalva[] }) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// COMPONENTE: PainelConciliacaoIA (sem alterações)
+// COMPONENTE: PainelConciliacaoIA
 // ──────────────────────────────────────────────────────────────────────────────
 
 const NIVEL_COR = {
@@ -665,7 +674,7 @@ function PainelConciliacaoIA({
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// COMPONENTE: TabelaFechamentos (sem alterações)
+// COMPONENTE: TabelaFechamentos
 // ──────────────────────────────────────────────────────────────────────────────
 
 function TabelaFechamentos({
@@ -995,7 +1004,7 @@ export function ExtratosConciliacao() {
         try {
             const fechamentosSelecionados = fechamentos.filter(f => selectedFechamentoIds.includes(f.uid));
 
-            // Busca detalhada para TFL (compatível com a view)
+            // Busca detalhada para TFL (usando nova função getSangriaTFL que lê da view)
             const fechamentosTFLComDetalhes = await Promise.all(
                 fechamentosSelecionados
                     .filter(f => f.fonte === 'fechamento_tfl')
@@ -1008,11 +1017,11 @@ export function ExtratosConciliacao() {
                         total_debitos: f.total_debitos,
                         saldo_final: f.saldo_final,
                         pix_externos: await getPixExternosTFL(f.id),
-                        sangria_valor: await getSangriaTFL(f.id), // agora usando view
+                        sangria_valor: await getSangriaTFL(f.id),
                     }))
             );
 
-            // Busca detalhada para CAIXA SESSÕES (compatível com a view)
+            // Busca detalhada para CAIXA SESSÕES (usando nova função getDepositoCofre)
             const fechamentosCaixaComDetalhes = await Promise.all(
                 fechamentosSelecionados
                     .filter(f => f.fonte === 'caixa_sessoes')
@@ -1025,7 +1034,7 @@ export function ExtratosConciliacao() {
                         resumo_entradas_dinheiro: f.resumo_entradas_dinheiro,
                         resumo_saidas_sangria: f.resumo_saidas_sangria,
                         resumo_saidas_deposito: f.resumo_saidas_deposito,
-                        valor_enviado_cofre: await getDepositoCofre(f.id), // agora usando view
+                        valor_enviado_cofre: await getDepositoCofre(f.id), // substituído
                         pix_externo_informado: f.pix_externo_informado,
                         resumo_total_entradas: f.resumo_total_entradas,
                         valor_final_declarado: f.valor_final_declarado,
