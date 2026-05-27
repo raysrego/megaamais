@@ -470,16 +470,26 @@ function PainelConciliacaoIA({
             ? 'text-warning border-warning/30 bg-warning/5'
             : 'text-error border-error/30 bg-error/5';
 
-    const riscoColor = resultado.risco === 'baixo'
+    // 🔧 CORREÇÃO: fallback para risco
+    const risco = resultado.risco || 'medio';
+    const riscoColor = risco === 'baixo'
         ? 'bg-success/10 text-success'
-        : resultado.risco === 'medio'
+        : risco === 'medio'
             ? 'bg-warning/10 text-warning'
             : 'bg-error/10 text-error';
 
-    const resumo = resultado.resumo_financeiro;
-    const criticos = resultado.alertas.filter(a => a.nivel === 'critico');
-    const avisos = resultado.alertas.filter(a => a.nivel === 'aviso');
-    const infos = resultado.alertas.filter(a => a.nivel === 'info');
+    const resumo = resultado.resumo_financeiro || {
+        total_creditos_ofx: 0,
+        total_debitos_ofx: 0,
+        total_pix_externos: 0,
+        total_depositos_cofre: 0,
+        total_estornos: 0,
+        saldo_tfl_periodo: 0,
+        diferenca_apurada: 0,
+    };
+    const criticos = (resultado.alertas || []).filter(a => a.nivel === 'critico');
+    const avisos = (resultado.alertas || []).filter(a => a.nivel === 'aviso');
+    const infos = (resultado.alertas || []).filter(a => a.nivel === 'info');
 
     return (
         <div className="card p-5 space-y-5">
@@ -495,7 +505,7 @@ function PainelConciliacaoIA({
                 </div>
                 <div className="flex items-center gap-2">
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${riscoColor}`}>
-                        RISCO {resultado.risco.toUpperCase()}
+                        RISCO {risco.toUpperCase()}
                     </span>
                     <button className="btn btn-ghost p-1.5" onClick={onFechar}><X size={14} /></button>
                 </div>
@@ -510,7 +520,7 @@ function PainelConciliacaoIA({
                                 : 'Rejeitado'}
                     </span>
                 </div>
-                <p className="text-xs leading-relaxed">{resultado.parecer_geral}</p>
+                <p className="text-xs leading-relaxed">{resultado.parecer_geral || 'Sem parecer disponível.'}</p>
             </div>
 
             <div>
@@ -551,7 +561,7 @@ function PainelConciliacaoIA({
                 </div>
             </div>
 
-            {resultado.alertas.length > 0 && (
+            {resultado.alertas && resultado.alertas.length > 0 && (
                 <div className="space-y-2">
                     <p className="text-[10px] font-bold text-muted uppercase tracking-wider">Alertas</p>
                     {[...criticos, ...avisos, ...infos].map((alerta, i) => (
@@ -565,7 +575,7 @@ function PainelConciliacaoIA({
                 </div>
             )}
 
-            {resultado.itens_conciliados.length > 0 && (
+            {resultado.itens_conciliados && resultado.itens_conciliados.length > 0 && (
                 <div>
                     <button
                         className="flex items-center gap-2 text-[10px] font-bold text-muted uppercase tracking-wider hover:text-foreground transition-colors"
@@ -585,7 +595,7 @@ function PainelConciliacaoIA({
                                             <th className="text-left px-3 py-2 text-[10px] font-bold text-muted uppercase">Descrição</th>
                                             <th className="text-right px-3 py-2 text-[10px] font-bold text-muted uppercase">Valor</th>
                                             <th className="text-center px-3 py-2 text-[10px] font-bold text-muted uppercase">Status</th>
-                                        </tr>
+                                        </table>
                                     </thead>
                                     <tbody>
                                         {resultado.itens_conciliados.map((item, i) => (
@@ -619,7 +629,7 @@ function PainelConciliacaoIA({
                 </div>
             )}
 
-            {resultado.recomendacoes.length > 0 && (
+            {resultado.recomendacoes && resultado.recomendacoes.length > 0 && (
                 <div className="space-y-1">
                     <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">Recomendações</p>
                     {resultado.recomendacoes.map((rec, i) => (
@@ -633,7 +643,7 @@ function PainelConciliacaoIA({
 
             <div className="rounded-xl border border-white/5 bg-white/2 px-4 py-3">
                 <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Conclusão do Auditor</p>
-                <p className="text-xs font-semibold">{resultado.conclusao}</p>
+                <p className="text-xs font-semibold">{resultado.conclusao || 'Conciliação finalizada.'}</p>
             </div>
         </div>
     );
