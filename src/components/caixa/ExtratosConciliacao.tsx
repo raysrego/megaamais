@@ -67,7 +67,7 @@ interface PixExternoDetalhado {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// FUNÇÕES AUXILIARES (BUSCA DETALHADA DE PIX E SANGRIA)
+// FUNÇÕES AUXILIARES (BUSCA DETALHADA DE PIX E MOVIMENTAÇÕES DE COFRE)
 // ──────────────────────────────────────────────────────────────────────────────
 
 async function getPixExternosSessao(sessaoId: string): Promise<PixExternoDetalhado[]> {
@@ -98,15 +98,31 @@ async function getPixExternosTFL(tflId: string): Promise<PixExternoDetalhado[]> 
     return (data || []).map(p => ({ data: p.data, valor: p.valor, descricao: p.descricao || '' }));
 }
 
-async function getSangriaTFL(tflId: string): Promise<number> {
+// NOVAS FUNÇÕES UNIFICADAS PARA MOVIMENTAÇÕES DE COFRE (usando view)
+async function getMovimentacoesCofre(entidadeId: string, tipoEntidade: 'tfl' | 'sessao'): Promise<{ valor: number; tipo: string; data: string }[]> {
     const supabase = createBrowserSupabaseClient();
     const { data, error } = await supabase
-        .from('fechamento_tfl')
-        .select('sangria_valor')
-        .eq('id', tflId)
-        .single();
-    if (error) return 0;
-    return data?.sangria_valor || 0;
+        .from('movimentacoes_cofre')
+        .select('valor, tipo, data')
+        .eq('entidade_id', entidadeId)
+        .eq('origem', tipoEntidade === 'tfl' ? 'tfl' : 'caixa');
+    if (error) {
+        console.error('Erro ao buscar movimentações de cofre:', error);
+        return [];
+    }
+    return data || [];
+}
+
+// Mantém compatibilidade: retorna total de sangrias (entrada_sangria) para TFL
+async function getSangriaTFL(tflId: string): Promise<number> {
+    const movs = await getMovimentacoesCofre(tflId, 'tfl');
+    return movs.filter(m => m.tipo === 'entrada_sangria').reduce((acc, m) => acc + m.valor, 0);
+}
+
+// Mantém compatibilidade: retorna total de depósitos (saida_deposito) para sessão de caixa
+async function getDepositoCofre(sessaoId: string): Promise<number> {
+    const movs = await getMovimentacoesCofre(sessaoId, 'sessao');
+    return movs.filter(m => m.tipo === 'saida_deposito').reduce((acc, m) => acc + m.valor, 0);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -146,7 +162,7 @@ function StatusBadge({ status }: { status: 'pendente' | 'conciliado' | 'divergen
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// COMPONENTE: OFXUploadPanel
+// COMPONENTE: OFXUploadPanel (sem alterações)
 // ──────────────────────────────────────────────────────────────────────────────
 
 function OFXUploadPanel({
@@ -272,7 +288,7 @@ function OFXUploadPanel({
                                 <th className="text-left px-3 py-2 text-[10px] font-bold text-muted uppercase">Descrição</th>
                                 <th className="text-right px-3 py-2 text-[10px] font-bold text-muted uppercase">Valor</th>
                                 <th className="text-center px-3 py-2 text-[10px] font-bold text-muted uppercase">Tipo</th>
-                            </tr>
+                            </table>
                         </thead>
                         <tbody>
                             {preview.transacoes.map((t, i) => (
@@ -352,7 +368,7 @@ function OFXUploadPanel({
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// COMPONENTE: TabelaOFX
+// COMPONENTE: TabelaOFX (sem alterações)
 // ──────────────────────────────────────────────────────────────────────────────
 
 function TabelaOFX({ transacoes }: { transacoes: OFXTransacaoSalva[] }) {
@@ -425,7 +441,7 @@ function TabelaOFX({ transacoes }: { transacoes: OFXTransacaoSalva[] }) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// COMPONENTE: PainelConciliacaoIA
+// COMPONENTE: PainelConciliacaoIA (sem alterações)
 // ──────────────────────────────────────────────────────────────────────────────
 
 const NIVEL_COR = {
@@ -647,8 +663,9 @@ function PainelConciliacaoIA({
         </div>
     );
 }
+
 // ──────────────────────────────────────────────────────────────────────────────
-// COMPONENTE: TabelaFechamentos
+// COMPONENTE: TabelaFechamentos (sem alterações)
 // ──────────────────────────────────────────────────────────────────────────────
 
 function TabelaFechamentos({
@@ -846,7 +863,7 @@ function TabelaFechamentos({
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// COMPONENTE PRINCIPAL: ExtratosConciliacao (MODIFICADO)
+// COMPONENTE PRINCIPAL: ExtratosConciliacao
 // ──────────────────────────────────────────────────────────────────────────────
 
 export function ExtratosConciliacao() {
@@ -978,7 +995,7 @@ export function ExtratosConciliacao() {
         try {
             const fechamentosSelecionados = fechamentos.filter(f => selectedFechamentoIds.includes(f.uid));
 
-            // Busca detalhada para TFL
+            // Busca detalhada para TFL (compatível com a view)
             const fechamentosTFLComDetalhes = await Promise.all(
                 fechamentosSelecionados
                     .filter(f => f.fonte === 'fechamento_tfl')
@@ -991,11 +1008,11 @@ export function ExtratosConciliacao() {
                         total_debitos: f.total_debitos,
                         saldo_final: f.saldo_final,
                         pix_externos: await getPixExternosTFL(f.id),
-                        sangria_valor: await getSangriaTFL(f.id),
+                        sangria_valor: await getSangriaTFL(f.id), // agora usando view
                     }))
             );
 
-            // Busca detalhada para CAIXA SESSÕES
+            // Busca detalhada para CAIXA SESSÕES (compatível com a view)
             const fechamentosCaixaComDetalhes = await Promise.all(
                 fechamentosSelecionados
                     .filter(f => f.fonte === 'caixa_sessoes')
@@ -1008,7 +1025,7 @@ export function ExtratosConciliacao() {
                         resumo_entradas_dinheiro: f.resumo_entradas_dinheiro,
                         resumo_saidas_sangria: f.resumo_saidas_sangria,
                         resumo_saidas_deposito: f.resumo_saidas_deposito,
-                        valor_enviado_cofre: f.valor_enviado_cofre,
+                        valor_enviado_cofre: await getDepositoCofre(f.id), // agora usando view
                         pix_externo_informado: f.pix_externo_informado,
                         resumo_total_entradas: f.resumo_total_entradas,
                         valor_final_declarado: f.valor_final_declarado,
