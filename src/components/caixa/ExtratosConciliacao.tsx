@@ -86,20 +86,21 @@ async function getPixExternosSessao(sessaoId: string): Promise<PixExternoDetalha
 }
 
 // Busca PIX externos de um TFL (tabela original)
-async function getPixExternosTFL(tflId: string): Promise<{ id: number; data: string; valor: number; descricao: string | null; conciliado: boolean }[]> {
+async function getPixExternosTFL(tflId: string): Promise<PixExternoDetalhado[]> {
     const supabase = createBrowserSupabaseClient();
     const { data, error } = await supabase
         .from('pix_externos_tfl')
-        .select('*')
+        .select('data, valor, descricao')
         .eq('tfl_id', tflId)
         .order('data', { ascending: true });
     if (error) {
         console.error('Erro ao buscar PIX externos do TFL:', error);
         return [];
     }
-    return data || [];
+    return (data || []).map(p => ({ data: p.data, valor: p.valor, descricao: p.descricao || '' }));
 }
 
+// --- NOVAS FUNÇÕES USANDO A VIEW UNIFICADA movimentacoes_cofre ---
 interface MovimentacaoCofre {
     valor: number;
     tipo: 'entrada_sangria' | 'saida_deposito';
@@ -121,50 +122,16 @@ async function getMovimentacoesCofre(entidadeId: string, tipoEntidade: 'tfl' | '
     return (data || []).map(m => ({ valor: m.valor, tipo: m.tipo, data: m.data }));
 }
 
+// Reimplementação da função getSangriaTFL para manter compatibilidade
 async function getSangriaTFL(tflId: string): Promise<number> {
     const movs = await getMovimentacoesCofre(tflId, 'tfl');
     return movs.filter(m => m.tipo === 'entrada_sangria').reduce((acc, m) => acc + m.valor, 0);
 }
 
+// Nova função para obter depósitos de cofre (saída) de uma sessão
 async function getDepositoCofre(sessaoId: string): Promise<number> {
     const movs = await getMovimentacoesCofre(sessaoId, 'sessao');
     return movs.filter(m => m.tipo === 'saida_deposito').reduce((acc, m) => acc + m.valor, 0);
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// FUNÇÕES PARA GERENCIAR EXTRATOS OFX (LISTAR E DELETAR)
-// ──────────────────────────────────────────────────────────────────────────────
-async function getArquivosOFX(lojaId: string): Promise<{ nome: string; data: string; total: number }[]> {
-    const supabase = createBrowserSupabaseClient();
-    const { data, error } = await supabase
-        .from('transacoes_ofx')
-        .select('arquivo_nome, data, valor')
-        .eq('loja_id', lojaId)
-        .order('data', { ascending: false });
-    if (error) throw error;
-    const map = new Map<string, { data: string; total: number; count: number }>();
-    for (const t of data || []) {
-        const nome = t.arquivo_nome || 'Sem nome';
-        const existing = map.get(nome);
-        if (existing) {
-            existing.total += t.valor;
-            existing.count++;
-            if (t.data > existing.data) existing.data = t.data;
-        } else {
-            map.set(nome, { data: t.data, total: t.valor, count: 1 });
-        }
-    }
-    return Array.from(map.entries()).map(([nome, { data, total }]) => ({ nome, data, total }));
-}
-
-async function deletarArquivoOFX(lojaId: string, arquivoNome: string): Promise<void> {
-    const supabase = createBrowserSupabaseClient();
-    const { error } = await supabase
-        .from('transacoes_ofx')
-        .delete()
-        .eq('loja_id', lojaId)
-        .eq('arquivo_nome', arquivoNome);
-    if (error) throw error;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -483,7 +450,7 @@ function TabelaOFX({ transacoes }: { transacoes: OFXTransacaoSalva[] }) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// COMPONENTE: PainelConciliacaoIA (mantido igual)
+// COMPONENTE: PainelConciliacaoIA
 // ──────────────────────────────────────────────────────────────────────────────
 
 const NIVEL_COR = {
@@ -707,7 +674,7 @@ function PainelConciliacaoIA({
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// COMPONENTE: TabelaFechamentos (COM DETALHES EXPANDIDOS)
+// COMPONENTE: TabelaFechamentos
 // ──────────────────────────────────────────────────────────────────────────────
 
 function TabelaFechamentos({
@@ -722,27 +689,6 @@ function TabelaFechamentos({
     onSelectAll?: (selected: boolean) => void;
 }) {
     const [aberto, setAberto] = useState<string | null>(null);
-    const [detalhes, setDetalhes] = useState<Record<string, any>>({});
-
-    // Carrega detalhes sob demanda quando um fechamento é expandido
-    useEffect(() => {
-        if (!aberto) return;
-        if (detalhes[aberto]) return;
-        const fech = fechamentos.find(f => f.uid === aberto);
-        if (!fech) return;
-        const carregarDetalhes = async () => {
-            if (fech.fonte === 'caixa_sessoes') {
-                const pix = await getPixExternosSessao(fech.id);
-                const deposito = await getDepositoCofre(fech.id);
-                setDetalhes(prev => ({ ...prev, [aberto]: { pix, deposito } }));
-            } else {
-                const pix = await getPixExternosTFL(fech.id);
-                const sangria = await getSangriaTFL(fech.id);
-                setDetalhes(prev => ({ ...prev, [aberto]: { pix, sangria } }));
-            }
-        };
-        carregarDetalhes();
-    }, [aberto, fechamentos, detalhes]);
 
     const allSelected = fechamentos.length > 0 && fechamentos.every(f => selectedIds.includes(f.uid));
     const someSelected = selectedIds.length > 0 && !allSelected;
@@ -771,7 +717,9 @@ function TabelaFechamentos({
                                 type="checkbox"
                                 className="w-3.5 h-3.5 rounded border-white/20 bg-white/5 accent-primary"
                                 checked={allSelected}
-                                ref={input => { if (input) input.indeterminate = someSelected; }}
+                                ref={input => {
+                                    if (input) input.indeterminate = someSelected;
+                                }}
                                 onChange={(e) => onSelectAll(e.target.checked)}
                             />
                             <span className="text-[10px] text-muted">Todos</span>
@@ -807,7 +755,6 @@ function TabelaFechamentos({
                         const isOpen = aberto === f.uid;
                         const valorPrincipal = isTFL ? f.saldo_final : f.resumo_total_entradas;
                         const isSelected = selectedIds.includes(f.uid);
-                        const detalhe = detalhes[f.uid];
                         return (
                             <React.Fragment key={f.uid}>
                                 <tr
@@ -876,112 +823,40 @@ function TabelaFechamentos({
                                     <tr className="bg-white/1">
                                         <td colSpan={onToggleSelect ? 8 : 7} className="px-6 py-4">
                                             {isTFL ? (
-                                                <div className="space-y-4">
-                                                    <div className="grid grid-cols-3 gap-3">
-                                                        <div className="rounded-xl border border-success/20 bg-success/5 p-3">
-                                                            <p className="text-[10px] text-success uppercase tracking-wider mb-1">Créditos TFL</p>
-                                                            <p className="text-sm font-bold text-success">{fmt(f.total_creditos)}</p>
-                                                        </div>
-                                                        <div className="rounded-xl border border-danger/20 bg-danger/5 p-3">
-                                                            <p className="text-[10px] text-danger uppercase tracking-wider mb-1">Débitos TFL</p>
-                                                            <p className="text-sm font-bold text-danger">{fmt(f.total_debitos)}</p>
-                                                        </div>
-                                                        <div className="rounded-xl border border-white/5 bg-white/2 p-3">
-                                                            <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Saldo Final</p>
-                                                            <p className="text-sm font-bold">{fmt(f.saldo_final)}</p>
-                                                        </div>
+                                                <div className="grid grid-cols-3 gap-3">
+                                                    <div className="rounded-xl border border-success/20 bg-success/5 p-3">
+                                                        <p className="text-[10px] text-success uppercase tracking-wider mb-1">Créditos TFL</p>
+                                                        <p className="text-sm font-bold text-success">{fmt(f.total_creditos)}</p>
                                                     </div>
-                                                    {detalhe?.pix && detalhe.pix.length > 0 && (
-                                                        <div className="rounded-xl border border-blue-500/15 bg-blue-500/5 p-3">
-                                                            <div className="flex items-center justify-between mb-2">
-                                                                <div className="flex items-center gap-2">
-                                                                    <CreditCard size={12} className="text-blue-400" />
-                                                                    <span className="text-[10px] font-bold text-blue-300 uppercase tracking-wider">PIX Externos Unitários (TFL)</span>
-                                                                </div>
-                                                                <span className="text-xs font-bold text-blue-300">
-                                                                    {fmt(detalhe.pix.reduce((a: any, p: any) => a + p.valor, 0))}
-                                                                </span>
-                                                            </div>
-                                                            <div className="space-y-1.5">
-                                                                {detalhe.pix.map((p: any) => (
-                                                                    <div key={p.id} className="flex items-center justify-between text-xs border-b border-white/5 pb-1 last:border-0">
-                                                                        <div className="flex items-center gap-2">
-                                                                            <span className="text-muted text-[10px]">{p.data.split('T')[0].split('-').reverse().join('/')}</span>
-                                                                            <span>{fmt(p.valor)}</span>
-                                                                            {p.descricao && <span className="text-muted text-[10px]">({p.descricao})</span>}
-                                                                        </div>
-                                                                        {p.conciliado && <span className="text-[9px] text-success">✓ conciliado</span>}
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                    {detalhe?.sangria && detalhe.sangria > 0 && (
-                                                        <div className="rounded-xl border border-warning/15 bg-warning/5 p-3 flex items-center justify-between">
-                                                            <div className="flex items-center gap-2">
-                                                                <ArrowUpRight size={12} className="text-warning" />
-                                                                <span className="text-[10px] font-bold text-yellow-300 uppercase">Sangria (TFL)</span>
-                                                            </div>
-                                                            <span className="text-sm font-bold text-yellow-300">{fmt(detalhe.sangria)}</span>
-                                                        </div>
-                                                    )}
+                                                    <div className="rounded-xl border border-danger/20 bg-danger/5 p-3">
+                                                        <p className="text-[10px] text-danger uppercase tracking-wider mb-1">Débitos TFL</p>
+                                                        <p className="text-sm font-bold text-danger">{fmt(f.total_debitos)}</p>
+                                                    </div>
+                                                    <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                                                        <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Saldo Final</p>
+                                                        <p className="text-sm font-bold">{fmt(f.saldo_final)}</p>
+                                                    </div>
                                                 </div>
                                             ) : (
-                                                <div className="space-y-4">
-                                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                                                        <div className="rounded-xl border border-white/5 bg-white/2 p-3">
-                                                            <p className="text-[10px] text-muted uppercase tracking-wider mb-1">PIX Entradas</p>
-                                                            <p className="text-sm font-bold">{fmt(f.resumo_entradas_pix)}</p>
-                                                        </div>
-                                                        <div className="rounded-xl border border-white/5 bg-white/2 p-3">
-                                                            <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Dinheiro</p>
-                                                            <p className="text-sm font-bold">{fmt(f.resumo_entradas_dinheiro)}</p>
-                                                        </div>
-                                                        <div className="rounded-xl border border-white/5 bg-white/2 p-3">
-                                                            <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Sangrias</p>
-                                                            <p className="text-sm font-bold">{fmt(f.resumo_saidas_sangria)}</p>
-                                                        </div>
-                                                        <div className="rounded-xl border border-white/5 bg-white/2 p-3">
-                                                            <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Diferença Caixa</p>
-                                                            <p className={`text-sm font-bold ${(f.diferenca_caixa ?? 0) !== 0 ? 'text-warning' : 'text-success'}`}>
-                                                                {fmt(f.diferenca_caixa)}
-                                                            </p>
-                                                        </div>
+                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                                    <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                                                        <p className="text-[10px] text-muted uppercase tracking-wider mb-1">PIX Entradas</p>
+                                                        <p className="text-sm font-bold">{fmt(f.resumo_entradas_pix)}</p>
                                                     </div>
-                                                    {detalhe?.pix && detalhe.pix.length > 0 && (
-                                                        <div className="rounded-xl border border-blue-500/15 bg-blue-500/5 p-3">
-                                                            <div className="flex items-center justify-between mb-2">
-                                                                <div className="flex items-center gap-2">
-                                                                    <CreditCard size={12} className="text-blue-400" />
-                                                                    <span className="text-[10px] font-bold text-blue-300 uppercase tracking-wider">PIX Externos Unitários</span>
-                                                                </div>
-                                                                <span className="text-xs font-bold text-blue-300">
-                                                                    {fmt(detalhe.pix.reduce((a: any, p: any) => a + p.valor, 0))}
-                                                                </span>
-                                                            </div>
-                                                            <div className="space-y-1.5">
-                                                                {detalhe.pix.map((p: any) => (
-                                                                    <div key={p.id} className="flex items-center justify-between text-xs border-b border-white/5 pb-1 last:border-0">
-                                                                        <div className="flex items-center gap-2">
-                                                                            <span className="text-muted text-[10px]">{p.data_pix.split('T')[0].split('-').reverse().join('/')}</span>
-                                                                            <span>{fmt(p.valor)}</span>
-                                                                            {p.descricao && <span className="text-muted text-[10px]">({p.descricao})</span>}
-                                                                        </div>
-                                                                        {p.conciliado && <span className="text-[9px] text-success">✓ conciliado</span>}
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                    {detalhe?.deposito && detalhe.deposito > 0 && (
-                                                        <div className="rounded-xl border border-warning/15 bg-warning/5 p-3 flex items-center justify-between">
-                                                            <div className="flex items-center gap-2">
-                                                                <Landmark size={12} className="text-warning" />
-                                                                <span className="text-[10px] font-bold text-yellow-300 uppercase">Depósito no Cofre</span>
-                                                            </div>
-                                                            <span className="text-sm font-bold text-yellow-300">{fmt(detalhe.deposito)}</span>
-                                                        </div>
-                                                    )}
+                                                    <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                                                        <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Dinheiro</p>
+                                                        <p className="text-sm font-bold">{fmt(f.resumo_entradas_dinheiro)}</p>
+                                                    </div>
+                                                    <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                                                        <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Sangrias</p>
+                                                        <p className="text-sm font-bold">{fmt(f.resumo_saidas_sangria)}</p>
+                                                    </div>
+                                                    <div className="rounded-xl border border-white/5 bg-white/2 p-3">
+                                                        <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Diferença Caixa</p>
+                                                        <p className={`text-sm font-bold ${(f.diferenca_caixa ?? 0) !== 0 ? 'text-warning' : 'text-success'}`}>
+                                                            {fmt(f.diferenca_caixa)}
+                                                        </p>
+                                                    </div>
                                                 </div>
                                             )}
                                         </td>
@@ -997,118 +872,7 @@ function TabelaFechamentos({
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// COMPONENTE: GerenciadorExtratosOFX (seleção e exclusão)
-// ──────────────────────────────────────────────────────────────────────────────
-function GerenciadorExtratosOFX({
-    lojaId,
-    onSelecionadosChange,
-    onDelete,
-}: {
-    lojaId: string;
-    onSelecionadosChange: (arquivos: string[]) => void;
-    onDelete: () => void;
-}) {
-    const [arquivos, setArquivos] = useState<{ nome: string; data: string; total: number }[]>([]);
-    const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
-    const [carregando, setCarregando] = useState(true);
-    const [deletando, setDeletando] = useState<string | null>(null);
-    const { toast } = useToast();
-
-    const carregar = async () => {
-        if (!lojaId) return;
-        setCarregando(true);
-        try {
-            const lista = await getArquivosOFX(lojaId);
-            setArquivos(lista);
-            // Por padrão, seleciona todos
-            if (selecionados.size === 0 && lista.length > 0) {
-                const todos = new Set(lista.map(a => a.nome));
-                setSelecionados(todos);
-                onSelecionadosChange(Array.from(todos));
-            }
-        } catch (err) {
-            toast({ type: 'error', message: 'Erro ao carregar extratos OFX.' });
-        } finally {
-            setCarregando(false);
-        }
-    };
-
-    useEffect(() => { carregar(); }, [lojaId]);
-
-    const toggleSelecionado = (nome: string) => {
-        const novo = new Set(selecionados);
-        if (novo.has(nome)) novo.delete(nome);
-        else novo.add(nome);
-        setSelecionados(novo);
-        onSelecionadosChange(Array.from(novo));
-    };
-
-    const selecionarTodos = () => {
-        const todos = new Set(arquivos.map(a => a.nome));
-        setSelecionados(todos);
-        onSelecionadosChange(Array.from(todos));
-    };
-
-    const deletarArquivo = async (nome: string) => {
-        if (!confirm(`Tem certeza que deseja excluir o extrato "${nome}" e todas as suas transações?`)) return;
-        setDeletando(nome);
-        try {
-            await deletarArquivoOFX(lojaId, nome);
-            toast({ type: 'success', message: `Extrato "${nome}" excluído.` });
-            await carregar();
-            onDelete();
-        } catch (err) {
-            toast({ type: 'error', message: 'Erro ao excluir extrato.' });
-        } finally {
-            setDeletando(null);
-        }
-    };
-
-    if (carregando) return <div className="card p-3 text-center"><Loader2 size={16} className="animate-spin text-muted" /></div>;
-    if (arquivos.length === 0) return null;
-
-    return (
-        <div className="card p-4 space-y-3">
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                    <FileText size={14} className="text-muted" />
-                    <span className="text-xs font-bold">Extratos OFX disponíveis</span>
-                </div>
-                <button onClick={selecionarTodos} className="text-[10px] text-primary hover:underline">Selecionar todos</button>
-            </div>
-            <div className="space-y-2">
-                {arquivos.map(arq => (
-                    <div key={arq.nome} className="flex items-center justify-between border-b border-white/5 pb-2">
-                        <label className="flex items-center gap-2 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={selecionados.has(arq.nome)}
-                                onChange={() => toggleSelecionado(arq.nome)}
-                                className="w-3.5 h-3.5 rounded border-white/20 bg-white/5 accent-primary"
-                            />
-                            <div>
-                                <p className="text-xs font-semibold">{arq.nome}</p>
-                                <p className="text-[10px] text-muted">
-                                    {fmtData(arq.data)} • {arq.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                </p>
-                            </div>
-                        </label>
-                        <button
-                            onClick={() => deletarArquivo(arq.nome)}
-                            disabled={deletando === arq.nome}
-                            className="text-muted hover:text-error transition-colors"
-                        >
-                            {deletando === arq.nome ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-                        </button>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// COMPONENTE PRINCIPAL: ExtratosConciliacao (modificado)
+// COMPONENTE PRINCIPAL: ExtratosConciliacao
 // ──────────────────────────────────────────────────────────────────────────────
 
 export function ExtratosConciliacao() {
@@ -1122,32 +886,27 @@ export function ExtratosConciliacao() {
     const [processando, setProcessando] = useState(false);
     const [resultado, setResultado] = useState<ConciliacaoIAResultado | null>(null);
     const [selectedFechamentoIds, setSelectedFechamentoIds] = useState<string[]>([]);
-    const [selectedArquivosOFX, setSelectedArquivosOFX] = useState<string[]>([]);
-    const [periodoManual, setPeriodoManual] = useState<{ inicio: string; fim: string }>({ inicio: '', fim: '' });
     const { toast } = useToast();
     const supabase = createBrowserSupabaseClient();
 
     const carregarDados = useCallback(async () => {
         setLoading(true);
         try {
-            // Carrega fechamentos pendentes
-            const sessoesRaw = await getFechamentosAuditoria({ status: 'pendente' });
-            const { data: tflRaw } = await supabase
-                .from('fechamento_tfl')
-                .select('id, data_referencia, terminal, total_creditos, total_debitos, saldo_final, arquivo_nome, status_auditoria, loja_id')
-                .eq('status_auditoria', 'pendente')
-                .order('data_referencia', { ascending: false })
-                .limit(100);
-
-            const { data: contasData } = await supabase
-                .from('financeiro_contas_bancarias')
-                .select('id, nome, agencia, conta_numero')
-                .eq('ativo', true);
+            const [sessoesRaw, { data: tflRaw }, { data: contasData }] = await Promise.all([
+                getFechamentosAuditoria({ status: 'pendente' }),
+                supabase
+                    .from('fechamento_tfl')
+                    .select('id, data_referencia, terminal, total_creditos, total_debitos, saldo_final, arquivo_nome, status_auditoria, loja_id')
+                    .eq('status_auditoria', 'pendente')
+                    .order('data_referencia', { ascending: false })
+                    .limit(100),
+                supabase.from('financeiro_contas_bancarias').select('id, nome, agencia, conta_numero').eq('ativo', true),
+            ]);
 
             const deSessoes: FechamentoPendente[] = (sessoesRaw as any[]).map(f => ({
                 uid: `sessao-${f.id}`,
                 id: String(f.id),
-                fonte: 'caixa_sessoes',
+                fonte: 'caixa_sessoes' as FonteFechamento,
                 data_turno: f.data_turno || '',
                 terminal_id: f.terminal_id || '—',
                 operador_nome: f.operador_nome || '—',
@@ -1171,7 +930,7 @@ export function ExtratosConciliacao() {
             const deTFL: FechamentoPendente[] = (tflRaw ?? []).map((r: any) => ({
                 uid: `tfl-${r.id}`,
                 id: String(r.id),
-                fonte: 'fechamento_tfl',
+                fonte: 'fechamento_tfl' as FonteFechamento,
                 data_turno: r.data_referencia || '',
                 terminal_id: r.terminal || '—',
                 operador_nome: r.arquivo_nome || '—',
@@ -1195,26 +954,14 @@ export function ExtratosConciliacao() {
             const todos = [...deSessoes, ...deTFL].sort((a, b) =>
                 (b.data_turno || '').localeCompare(a.data_turno || '')
             );
+
             setFechamentos(todos);
             setContas((contasData ?? []) as ContaBancaria[]);
 
-            // Carrega transações OFX com base no período (manual ou automático)
             if (todos.length > 0 && lojaId) {
-                let inicio = periodoManual.inicio;
-                let fim = periodoManual.fim;
-                if (!inicio || !fim) {
-                    const datas = todos.map(f => f.data_turno).filter(Boolean).sort();
-                    inicio = datas[0] ?? '';
-                    fim = datas[datas.length - 1] ?? '';
-                }
-                if (inicio && fim) {
-                    const transacoes = await getTransacoesOFX(lojaId, inicio, fim);
-                    setTransacoesOFX(transacoes);
-                } else {
-                    setTransacoesOFX([]);
-                }
-            } else {
-                setTransacoesOFX([]);
+                const datas = todos.map(f => f.data_turno).filter(Boolean).sort();
+                const transacoes = await getTransacoesOFX(lojaId, datas[0], datas[datas.length - 1]);
+                setTransacoesOFX(transacoes);
             }
 
             setSelectedFechamentoIds([]);
@@ -1224,7 +971,7 @@ export function ExtratosConciliacao() {
         } finally {
             setLoading(false);
         }
-    }, [supabase, toast, lojaId, periodoManual]);
+    }, [supabase, toast, lojaId]);
 
     useEffect(() => { carregarDados(); }, [carregarDados]);
 
@@ -1243,8 +990,8 @@ export function ExtratosConciliacao() {
             toast({ type: 'error', message: 'Selecione uma loja para continuar.' });
             return;
         }
-        if (selectedArquivosOFX.length === 0 && transacoesOFX.length === 0) {
-            toast({ type: 'warning', message: 'Importe ou selecione pelo menos um extrato OFX para conciliar.' });
+        if (transacoesOFX.length === 0) {
+            toast({ type: 'warning', message: 'Importe um extrato OFX antes de conciliar.' });
             return;
         }
         if (selectedFechamentoIds.length === 0) {
@@ -1257,12 +1004,7 @@ export function ExtratosConciliacao() {
         try {
             const fechamentosSelecionados = fechamentos.filter(f => selectedFechamentoIds.includes(f.uid));
 
-            // Filtra transações OFX apenas dos arquivos selecionados
-            let transacoesParaIA = transacoesOFX;
-            if (selectedArquivosOFX.length > 0) {
-                transacoesParaIA = transacoesOFX.filter(t => selectedArquivosOFX.includes(t.arquivo_nome || ''));
-            }
-
+            // Busca detalhada para TFL (usando nova função getSangriaTFL que lê da view)
             const fechamentosTFLComDetalhes = await Promise.all(
                 fechamentosSelecionados
                     .filter(f => f.fonte === 'fechamento_tfl')
@@ -1279,6 +1021,7 @@ export function ExtratosConciliacao() {
                     }))
             );
 
+            // Busca detalhada para CAIXA SESSÕES (usando nova função getDepositoCofre)
             const fechamentosCaixaComDetalhes = await Promise.all(
                 fechamentosSelecionados
                     .filter(f => f.fonte === 'caixa_sessoes')
@@ -1291,7 +1034,7 @@ export function ExtratosConciliacao() {
                         resumo_entradas_dinheiro: f.resumo_entradas_dinheiro,
                         resumo_saidas_sangria: f.resumo_saidas_sangria,
                         resumo_saidas_deposito: f.resumo_saidas_deposito,
-                        valor_enviado_cofre: await getDepositoCofre(f.id),
+                        valor_enviado_cofre: await getDepositoCofre(f.id), // substituído
                         pix_externo_informado: f.pix_externo_informado,
                         resumo_total_entradas: f.resumo_total_entradas,
                         valor_final_declarado: f.valor_final_declarado,
@@ -1301,17 +1044,12 @@ export function ExtratosConciliacao() {
                     }))
             );
 
-            // Usa o período manual se fornecido, senão calcula dos fechamentos
-            let inicio = periodoManual.inicio;
-            let fim = periodoManual.fim;
-            if (!inicio || !fim) {
-                const datas = [
-                    ...transacoesParaIA.map(t => t.data),
-                    ...fechamentosSelecionados.map(f => f.data_turno).filter(Boolean),
-                ].sort();
-                inicio = datas[0] ?? '';
-                fim = datas[datas.length - 1] ?? '';
-            }
+            const datas = [
+                ...transacoesOFX.map(t => t.data),
+                ...fechamentosSelecionados.map(f => f.data_turno).filter(Boolean),
+            ].sort();
+            const inicio = datas[0] ?? '';
+            const fim = datas[datas.length - 1] ?? '';
 
             const response = await fetch('/api/caixa/conciliacao-ia', {
                 method: 'POST',
@@ -1319,7 +1057,7 @@ export function ExtratosConciliacao() {
                 body: JSON.stringify({
                     lojaId,
                     periodo: { inicio, fim },
-                    transacoesOFX: transacoesParaIA.map(t => ({
+                    transacoesOFX: transacoesOFX.map(t => ({
                         fitid: t.fitid,
                         tipo: t.tipo,
                         data: t.data,
@@ -1432,62 +1170,13 @@ export function ExtratosConciliacao() {
                 </div>
             </div>
 
-            {/* Seletor de período manual */}
-            <div className="card p-4">
-                <div className="flex items-center gap-2 mb-3">
-                    <Calendar size={14} className="text-muted" />
-                    <span className="text-xs font-bold">Período para filtro dos extratos OFX</span>
-                    <button
-                        onClick={() => setPeriodoManual({ inicio: '', fim: '' })}
-                        className="text-[10px] text-muted hover:text-foreground ml-auto"
-                    >
-                        Usar período automático
-                    </button>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                    <div>
-                        <label className="block text-[10px] text-muted mb-1">Data início</label>
-                        <input
-                            type="date"
-                            className="input w-full text-sm"
-                            value={periodoManual.inicio}
-                            onChange={e => setPeriodoManual(prev => ({ ...prev, inicio: e.target.value }))}
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-[10px] text-muted mb-1">Data fim</label>
-                        <input
-                            type="date"
-                            className="input w-full text-sm"
-                            value={periodoManual.fim}
-                            onChange={e => setPeriodoManual(prev => ({ ...prev, fim: e.target.value }))}
-                        />
-                    </div>
-                </div>
-                <div className="flex justify-end mt-3">
-                    <button
-                        className="btn btn-ghost text-xs"
-                        onClick={() => { setPeriodoManual({ inicio: '', fim: '' }); carregarDados(); }}
-                    >
-                        Aplicar
-                    </button>
-                </div>
-            </div>
-
-            {/* Upload OFX e Gerenciador */}
+            {/* Upload OFX */}
             {lojaId ? (
-                <div className="space-y-4">
-                    <OFXUploadPanel
-                        lojaId={lojaId}
-                        contas={contas}
-                        onImportado={async () => { await carregarDados(); }}
-                    />
-                    <GerenciadorExtratosOFX
-                        lojaId={lojaId}
-                        onSelecionadosChange={setSelectedArquivosOFX}
-                        onDelete={carregarDados}
-                    />
-                </div>
+                <OFXUploadPanel
+                    lojaId={lojaId}
+                    contas={contas}
+                    onImportado={async () => { await carregarDados(); }}
+                />
             ) : (
                 <div className="card p-6 text-center">
                     <p className="text-xs text-muted">Selecione uma loja para importar o extrato OFX.</p>
@@ -1505,7 +1194,7 @@ export function ExtratosConciliacao() {
             {/* Transações OFX importadas */}
             {transacoesOFX.length > 0 && <TabelaOFX transacoes={transacoesOFX} />}
 
-            {/* Fechamentos pendentes com seleção e detalhes expandidos */}
+            {/* Fechamentos pendentes com seleção */}
             <TabelaFechamentos
                 fechamentos={fechamentos}
                 selectedIds={selectedFechamentoIds}
