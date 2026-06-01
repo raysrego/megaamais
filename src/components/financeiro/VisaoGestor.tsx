@@ -303,15 +303,19 @@ export function VisaoGestor() {
         setCategoriaPaiFilter('all');
     }, [abaAtiva]);
 
-    // Resumo para KPIs
+    // Resumo para KPIs (separando despesas pagas e pendentes)
     const resumoCalculado = useMemo(() => {
         const receitas = transacoesDoPeriodo.filter(t => t.tipo === 'receita');
         const despesas = transacoesDoPeriodo.filter(t => t.tipo === 'despesa');
+        const despesasRealizadas = despesas.filter(d => d.status === 'pago');
+        const despesasProjecao = despesas.filter(d => d.status === 'pendente');
 
         const sum = (list: any[]) => list.reduce((acc, t) => acc + (t.valor || 0), 0);
         return {
             receitas: sum(receitas),
-            despesas: sum(despesas)
+            despesas: sum(despesas),           // total bruto (mantido para referência)
+            despesasRealizadas: sum(despesasRealizadas),
+            despesasProjecao: sum(despesasProjecao)
         };
     }, [transacoesDoPeriodo]);
 
@@ -418,8 +422,9 @@ export function VisaoGestor() {
         })).sort((a, b) => b.total - a.total);
     }, [transacoesDoPeriodoDRE, categorias]);
 
-    // Agrupar despesas por categoria pai e subcategoria
-    const despesasPorCategoriaRaiz = useMemo(() => {
+    // Despesas REALIZADAS (pagas) para o DRE
+    const despesasRealizadasPorCategoriaRaiz = useMemo(() => {
+        const despesasPagas = transacoesDoPeriodoDRE.filter(t => t.tipo === 'despesa' && t.status === 'pago');
         const grupos = new Map<number, {
             id: number;
             nome: string;
@@ -427,7 +432,58 @@ export function VisaoGestor() {
             subcategorias: Map<number, { id: number; nome: string; total: number; itens: any[] }>;
         }>();
 
-        transacoesDoPeriodoDRE.filter(t => t.tipo === 'despesa').forEach(d => {
+        despesasPagas.forEach(d => {
+            const cat = categorias.find(c => c.id === d.item_financeiro_id);
+            if (!cat) return;
+            const raizId = cat.parent_id || cat.id;
+            const raizNome = cat.parent_id ? (categorias.find(c => c.id === cat.parent_id)?.item || cat.item) : cat.item;
+            if (!grupos.has(raizId)) {
+                grupos.set(raizId, {
+                    id: raizId,
+                    nome: raizNome,
+                    total: 0,
+                    subcategorias: new Map()
+                });
+            }
+            const grupo = grupos.get(raizId)!;
+            grupo.total += d.valor;
+
+            const subId = cat.id;
+            if (!grupo.subcategorias.has(subId)) {
+                grupo.subcategorias.set(subId, {
+                    id: subId,
+                    nome: cat.item,
+                    total: 0,
+                    itens: []
+                });
+            }
+            const sub = grupo.subcategorias.get(subId)!;
+            sub.total += d.valor;
+            sub.itens.push({
+                id: d.id,
+                detalhe: d.item || d.descricao || 'Sem detalhe',
+                valor: d.valor,
+                data: d.data_vencimento || ''
+            });
+        });
+
+        return Array.from(grupos.values()).map(g => ({
+            ...g,
+            subcategorias: Array.from(g.subcategorias.values()).sort((a, b) => b.total - a.total)
+        })).sort((a, b) => b.total - a.total);
+    }, [transacoesDoPeriodoDRE, categorias]);
+
+    // Despesas PROJETADAS (pendentes) para o DRE
+    const despesasProjetadasPorCategoriaRaiz = useMemo(() => {
+        const despesasPendentes = transacoesDoPeriodoDRE.filter(t => t.tipo === 'despesa' && t.status === 'pendente');
+        const grupos = new Map<number, {
+            id: number;
+            nome: string;
+            total: number;
+            subcategorias: Map<number, { id: number; nome: string; total: number; itens: any[] }>;
+        }>();
+
+        despesasPendentes.forEach(d => {
             const cat = categorias.find(c => c.id === d.item_financeiro_id);
             if (!cat) return;
             const raizId = cat.parent_id || cat.id;
@@ -469,8 +525,9 @@ export function VisaoGestor() {
     }, [transacoesDoPeriodoDRE, categorias]);
 
     const totalReceitasDRE = receitasPorCategoriaRaiz.reduce((acc, cat) => acc + cat.total, 0);
-    const totalDespesasDRE = despesasPorCategoriaRaiz.reduce((acc, cat) => acc + cat.total, 0);
-    const lucroLiquidoDRE = totalReceitasDRE - totalDespesasDRE;
+    const totalDespesasRealizadasDRE = despesasRealizadasPorCategoriaRaiz.reduce((acc, cat) => acc + cat.total, 0);
+    const totalDespesasProjetadasDRE = despesasProjetadasPorCategoriaRaiz.reduce((acc, cat) => acc + cat.total, 0);
+    const lucroLiquidoDRE = totalReceitasDRE - totalDespesasRealizadasDRE;
 
     // CRUD Handlers
     const handleOpenModalNew = (tipo: 'receita' | 'despesa') => {
@@ -737,7 +794,7 @@ export function VisaoGestor() {
         printWindow.onafterprint = () => printWindow.close();
     };
 
-    // Impressão DRE (agora com hierarquia)
+    // Impressão DRE (agora com hierarquia e projeção)
     const handlePrintDRE = () => {
         if (transacoesDoPeriodoDRE.length === 0) {
             toast({ message: 'Nenhum dado no período selecionado.', type: 'warning' });
@@ -805,12 +862,12 @@ export function VisaoGestor() {
                 <body>
                     <h1>Demonstração de Resultados - ${periodoDescricao}</h1>
                     
-                    <h2>Resultado Líquido</h2>
+                    <h2>Resultado Líquido (Realizado)</h2>
                     <table>
                         <thead><tr><th>Descrição</th><th class="valor">Valor (R$)</th></tr></thead>
                         <tbody>
                             <tr><td>Total de Entradas</td><td class="valor">R$ ${totalReceitasDRE.toFixed(2).replace('.', ',')}</td></tr>
-                            <tr><td>Total de Saídas</td><td class="valor">R$ ${totalDespesasDRE.toFixed(2).replace('.', ',')}</td></tr>
+                            <tr><td>Total de Saídas (Pagas)</td><td class="valor">R$ ${totalDespesasRealizadasDRE.toFixed(2).replace('.', ',')}</td></tr>
                             <tr class="total ${lucroLiquidoDRE >= 0 ? 'lucro' : 'prejuizo'}">
                                 <td><strong>Resultado</strong></td>
                                 <td class="valor"><strong>R$ ${lucroLiquidoDRE.toFixed(2).replace('.', ',')}</strong></td>
@@ -830,14 +887,26 @@ export function VisaoGestor() {
                         </tbody>
                     </table>
 
-                    <h2>Saídas (Despesas)</h2>
+                    <h2>Saídas Realizadas (Pagas)</h2>
                     <table>
                         <thead><tr><th>Categoria / Subcategoria / Detalhe</th><th class="valor">Valor (R$)</th></tr></thead>
                         <tbody>
-                            ${renderCategorias(despesasPorCategoriaRaiz, 'despesa')}
+                            ${renderCategorias(despesasRealizadasPorCategoriaRaiz, 'despesa')}
                             <tr class="total">
-                                <td><strong>Total de Saídas</strong></td>
-                                <td class="valor"><strong>R$ ${totalDespesasDRE.toFixed(2).replace('.', ',')}</strong></td>
+                                <td><strong>Total de Saídas Pagas</strong></td>
+                                <td class="valor"><strong>R$ ${totalDespesasRealizadasDRE.toFixed(2).replace('.', ',')}</strong></td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <h2>Projeção de Despesas (Pendentes)</h2>
+                    <table>
+                        <thead><tr><th>Categoria / Subcategoria / Detalhe</th><th class="valor">Valor (R$)</th></tr></thead>
+                        <tbody>
+                            ${renderCategorias(despesasProjetadasPorCategoriaRaiz, 'despesa')}
+                            <tr class="total">
+                                <td><strong>Total de Despesas Pendentes</strong></td>
+                                <td class="valor"><strong>R$ ${totalDespesasProjetadasDRE.toFixed(2).replace('.', ',')}</strong></td>
                             </tr>
                         </tbody>
                     </table>
@@ -858,7 +927,7 @@ export function VisaoGestor() {
 
     const isBeingDeleted = (id: number) => exclusaoState.emProgresso && exclusaoState.id === id;
 
-    const lucroLiquidoReal = resumoCalculado.receitas - resumoCalculado.despesas;
+    const lucroLiquidoReal = resumoCalculado.receitas - resumoCalculado.despesasRealizadas;
 
     const toggleCategoriaExpandida = (prefixo: string, nome: string) => {
         const key = `${prefixo}_${nome}`;
@@ -902,8 +971,8 @@ export function VisaoGestor() {
                 )}
             </PageHeader>
 
-            {/* KPIs */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            {/* KPIs - 4 cards */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
                 <KPICard
                     label="Receitas"
                     value={`R$ ${resumoCalculado.receitas.toLocaleString('pt-BR')}`}
@@ -913,15 +982,23 @@ export function VisaoGestor() {
                     trend={{ value: 'Entrada', direction: 'up', description: 'Total do período' }}
                 />
                 <KPICard
-                    label="Custos Fixos / Variáveis"
-                    value={`R$ ${resumoCalculado.despesas.toLocaleString('pt-BR')}`}
+                    label="Despesas Realizadas"
+                    value={`R$ ${resumoCalculado.despesasRealizadas.toLocaleString('pt-BR')}`}
                     icon={TrendingDown}
                     variant="danger"
                     loading={loading}
-                    trend={{ value: 'Saída', direction: 'down', description: 'Total do período' }}
+                    trend={{ value: 'Pago', direction: 'down', description: 'Despesas liquidadas' }}
                 />
                 <KPICard
-                    label="Resultado Líquido"
+                    label="Projeção de Despesas"
+                    value={`R$ ${resumoCalculado.despesasProjecao.toLocaleString('pt-BR')}`}
+                    icon={Calendar}
+                    variant="warning"
+                    loading={loading}
+                    trend={{ value: 'Pendente', direction: 'down', description: 'A vencer' }}
+                />
+                <KPICard
+                    label="Resultado Líquido Real"
                     value={`R$ ${lucroLiquidoReal.toLocaleString('pt-BR')}`}
                     icon={Scale}
                     variant={lucroLiquidoReal >= 0 ? 'default' : 'danger'}
@@ -929,7 +1006,7 @@ export function VisaoGestor() {
                     trend={{
                         value: lucroLiquidoReal >= 0 ? 'Lucro' : 'Prejuízo',
                         direction: lucroLiquidoReal >= 0 ? 'up' : 'down',
-                        description: 'Resultado real'
+                        description: 'Resultado real (receitas - despesas pagas)'
                     }}
                 />
             </div>
@@ -982,7 +1059,6 @@ export function VisaoGestor() {
                                 <option value="VARIAVEL">⚡ Variável ({modalidadeCounts.VARIAVEL})</option>
                             </select>
 
-                            {/* 🔧 CORREÇÃO: Filtro de categoria usando categoriasPaiFiltro (baseado na aba) */}
                             {abaAtiva === 'despesas' && categoriasPaiFiltro.length > 0 && (
                                 <select
                                     className="input input-sm font-medium text-xs px-2 py-1 bg-purple/5 border border-white/10 rounded-md min-w-[180px]"
@@ -1041,17 +1117,19 @@ export function VisaoGestor() {
                 {loading ? (
                     <LoadingState type="list" />
                 ) : abaAtiva === 'fechamento' ? (
-                    // DRE com resultado líquido acima e grid de receitas/despesas
+                    // NOVO DRE: resultado líquido (com despesas pagas), grid de receitas e despesas realizadas, e card de projeção
                     <div className="flex flex-col gap-6">
-                        {/* Resultado Líquido */}
+                        {/* Resultado Líquido Real */}
                         <div className="flex flex-col bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
-                            <div className="p-4 bg-slate-800 border-b border-slate-700 flex items-center gap-2 text-slate-200"><Scale size={20} /><h3 className="font-bold uppercase tracking-wider text-sm">Resultado Líquido</h3></div>
+                            <div className="p-4 bg-slate-800 border-b border-slate-700 flex items-center gap-2 text-slate-200">
+                                <Scale size={20} /><h3 className="font-bold uppercase tracking-wider text-sm">Resultado Líquido Real</h3>
+                            </div>
                             <div className="flex-1 flex flex-col items-center justify-center p-8 gap-6">
                                 <div className={`flex items-center justify-center w-24 h-24 rounded-full ${lucroLiquidoDRE>=0?'bg-emerald-500/20 text-emerald-400':'bg-red-500/20 text-red-400'}`}>
                                     {lucroLiquidoDRE>=0?<TrendingUp size={48}/>:<TrendingDown size={48}/>}
                                 </div>
                                 <div className="text-center">
-                                    <p className="text-sm text-muted uppercase font-bold mb-2">Saldo do Período</p>
+                                    <p className="text-sm text-muted uppercase font-bold mb-2">Saldo do Período (Receitas - Despesas Pagas)</p>
                                     <h2 className={`text-4xl font-black ${lucroLiquidoDRE>=0?'text-emerald-400':'text-red-400'}`}>
                                         R$ {Math.abs(lucroLiquidoDRE).toLocaleString('pt-BR')}
                                     </h2>
@@ -1066,7 +1144,7 @@ export function VisaoGestor() {
                             </div>
                         </div>
 
-                        {/* Grid de Receitas e Despesas */}
+                        {/* Grid de Receitas e Despesas Realizadas */}
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                             {/* Receitas */}
                             <div className="flex flex-col bg-emerald-500/5 rounded-xl border border-emerald-500/10 overflow-hidden">
@@ -1121,24 +1199,24 @@ export function VisaoGestor() {
                                 </div>
                             </div>
 
-                            {/* Despesas */}
+                            {/* Despesas Realizadas (Pagas) */}
                             <div className="flex flex-col bg-red-500/5 rounded-xl border border-red-500/10 overflow-hidden">
                                 <div className="p-4 bg-red-500/10 border-b border-red-500/10 flex justify-between items-center">
-                                    <div className="flex items-center gap-2 text-red-400"><TrendingDown size={20} /><h3 className="font-bold uppercase tracking-wider text-sm">Saídas (Despesas)</h3></div>
-                                    <span className="font-black text-lg text-red-400">R$ {totalDespesasDRE.toLocaleString('pt-BR')}</span>
+                                    <div className="flex items-center gap-2 text-red-400"><TrendingDown size={20} /><h3 className="font-bold uppercase tracking-wider text-sm">Saídas Realizadas (Pagas)</h3></div>
+                                    <span className="font-black text-lg text-red-400">R$ {totalDespesasRealizadasDRE.toLocaleString('pt-BR')}</span>
                                 </div>
                                 <div className="p-4 space-y-2 overflow-y-auto max-h-[500px]">
-                                    {despesasPorCategoriaRaiz.length === 0 ? (
-                                        <p className="text-center text-muted text-sm py-10">Nenhuma despesa no período.</p>
+                                    {despesasRealizadasPorCategoriaRaiz.length === 0 ? (
+                                        <p className="text-center text-muted text-sm py-10">Nenhuma despesa paga no período.</p>
                                     ) : (
-                                        despesasPorCategoriaRaiz.map(raiz => {
-                                            const key = `despesa_${raiz.nome}`;
+                                        despesasRealizadasPorCategoriaRaiz.map(raiz => {
+                                            const key = `despesa_real_${raiz.nome}`;
                                             const isExpanded = categoriasExpandidas.has(key);
                                             return (
                                                 <div key={raiz.id} className="border border-white/10 rounded-lg overflow-hidden">
                                                     <div 
                                                         className="flex justify-between items-center p-3 bg-red-500/5 cursor-pointer hover:bg-red-500/10 transition-colors"
-                                                        onClick={() => toggleCategoriaExpandida('despesa', raiz.nome)}
+                                                        onClick={() => toggleCategoriaExpandida('despesa_real', raiz.nome)}
                                                     >
                                                         <div className="flex items-center gap-2">
                                                             {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
@@ -1172,6 +1250,59 @@ export function VisaoGestor() {
                                         })
                                     )}
                                 </div>
+                            </div>
+                        </div>
+
+                        {/* Card separado para Projeção de Despesas (Pendentes) */}
+                        <div className="bg-yellow-500/5 rounded-xl border border-yellow-500/20 overflow-hidden">
+                            <div className="p-4 bg-yellow-500/10 border-b border-yellow-500/20 flex justify-between items-center">
+                                <div className="flex items-center gap-2 text-yellow-400"><Calendar size={20} /><h3 className="font-bold uppercase tracking-wider text-sm">Projeção de Despesas (Pendentes)</h3></div>
+                                <span className="font-black text-lg text-yellow-400">R$ {totalDespesasProjetadasDRE.toLocaleString('pt-BR')}</span>
+                            </div>
+                            <div className="p-4 space-y-2 max-h-[400px] overflow-y-auto">
+                                {despesasProjetadasPorCategoriaRaiz.length === 0 ? (
+                                    <p className="text-center text-muted text-sm py-6">Nenhuma despesa pendente no período.</p>
+                                ) : (
+                                    despesasProjetadasPorCategoriaRaiz.map(raiz => {
+                                        const key = `despesa_proj_${raiz.nome}`;
+                                        const isExpanded = categoriasExpandidas.has(key);
+                                        return (
+                                            <div key={raiz.id} className="border border-yellow-500/20 rounded-lg overflow-hidden">
+                                                <div 
+                                                    className="flex justify-between items-center p-3 bg-yellow-500/5 cursor-pointer hover:bg-yellow-500/10 transition-colors"
+                                                    onClick={() => toggleCategoriaExpandida('despesa_proj', raiz.nome)}
+                                                >
+                                                    <div className="flex items-center gap-2">
+                                                        {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                                                        <span className="font-bold text-yellow-100">{raiz.nome}</span>
+                                                        <span className="text-xs text-muted">({raiz.subcategorias.reduce((acc, sub) => acc + sub.itens.length, 0)} item(s))</span>
+                                                    </div>
+                                                    <span className="font-bold text-yellow-400">R$ {raiz.total.toLocaleString('pt-BR')}</span>
+                                                </div>
+                                                {isExpanded && (
+                                                    <div className="p-3 space-y-2 border-t border-yellow-500/20">
+                                                        {raiz.subcategorias.map(sub => (
+                                                            <div key={sub.id} className="ml-4">
+                                                                <div className="flex justify-between items-center text-sm font-semibold text-yellow-200/80">
+                                                                    <span>└ {sub.nome}</span>
+                                                                    <span>R$ {sub.total.toLocaleString('pt-BR')}</span>
+                                                                </div>
+                                                                <div className="ml-4 space-y-1 mt-1">
+                                                                    {sub.itens.map(item => (
+                                                                        <div key={item.id} className="flex justify-between items-center text-xs pl-2 text-muted">
+                                                                            <span>{item.detalhe}</span>
+                                                                            <span className="font-mono text-yellow-300">R$ {item.valor.toLocaleString('pt-BR')}</span>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })
+                                )}
                             </div>
                         </div>
                     </div>
